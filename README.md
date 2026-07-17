@@ -9,10 +9,12 @@ Powered by **MPV** (`libmpv`), with an optional discreet **cava** spectrum strip
    ───●────────
    ◂ ⏸ paused ▸  ·  1/12  ·  − 80% +
    space · n/p · ←→ · ?
-   ▁▂▃▄▅▂▁·˙▁▂▃   ← cava under shortcuts (opt-in)
+      ▄ █ ▄
+    ▄ █ █ █ ▄     ← cava bars under shortcuts (opt-in)
+   ▁▅█████▅▁
 ```
 
-Help (`?` / `h`) opens a **right sidebar** and shifts the player left.
+Help (`?` / `h`) opens a **left sidebar** and shifts the player right.
 
 ## Install
 
@@ -112,13 +114,13 @@ msc version
 | `−` / `+` | volume down / up |
 | volume % | mute |
 | `spd` / `ptch` / `eq` | nudge speed / pitch / cycle EQ |
-| cava strip | toggle cava |
+| cava bars | toggle cava |
 | playlist row | jump to track |
 | scroll wheel | seek ±5s |
 
-## Cava strip
+## Cava bars
 
-Off by default. With `--cava` or `v`, and `cava` installed, optMusic draws a **2-row spectrum strip under the shortcut footer** (content width, soft greys). No decorative viz in the status row.
+Off by default. With `--cava` or `v`, and `cava` installed, optMusic draws **classic vertical bars under the shortcut footer** (content width, soft greys). No decorative viz in the status row.
 
 - PipeWire first, Pulse fallback
 - Click the strip or press `v` to toggle
@@ -129,7 +131,7 @@ Off by default. With `--cava` or `v`, and `cava` installed, optMusic draws a **2
 - MPV-backed playback (mp3, flac, ogg, wav, m4a, opus, aac, …)
 - Mute, long seek, EQ presets, crossfade, speed & pitch
 - Default music directory (`~/Music`)
-- Optional cava spectrum strip (opt-in)
+- Optional cava spectrum bars (opt-in)
 - Mouse scrub + clickable controls
 - Centered B&W UI on an **alternate screen** (zero scrollback leak)
 - Instant controls (no Enter)

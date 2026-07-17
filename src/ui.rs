@@ -380,14 +380,14 @@ impl SessionUi {
         let title_in =
             ease_out_cubic((self.track_since.elapsed().as_secs_f64() / 0.4).clamp(0.0, 1.0));
 
-        // Help opens as a right sidebar and shifts the player left.
+        // Help opens as a left sidebar and shifts the player right.
         let sidebar_w = if self.show_help {
             HELP_SIDEBAR_W.min(cols.saturating_sub(24))
         } else {
             0
         };
         let content_cols = cols.saturating_sub(sidebar_w);
-        let content_x0 = 0usize;
+        let content_x0 = sidebar_w;
 
         let block_w = content_cols.saturating_sub(4).clamp(28, 56);
         let max_title = block_w.saturating_sub(2);
@@ -457,15 +457,13 @@ impl SessionUi {
         }
 
         let show_cava_strip = cava_levels.is_some();
-        let cava_rows = if show_cava_strip { 2usize } else { 0 };
+        let cava_rows = if show_cava_strip { CAVA_BAR_ROWS } else { 0 };
 
         let mut block_h = 8usize;
         if !self.show_path {
             block_h = block_h.saturating_sub(1);
         }
-        if toast.is_some() {
-            block_h += 1;
-        }
+        // Toast is a floating overlay — does not reserve layout rows.
         if state.show_list {
             block_h += 1 + list_rows.len() + 1;
         } else {
@@ -473,7 +471,7 @@ impl SessionUi {
         }
         block_h += 1; // footer
         if show_cava_strip {
-            block_h += 1 + cava_rows; // gap + strip height
+            block_h += 1 + cava_rows; // gap + bar height
         }
 
         let settle = ((1.0 - intro) * 1.5).round() as usize;
@@ -683,18 +681,6 @@ impl SessionUi {
         });
         y += 1;
 
-        if let Some(ref msg) = toast {
-            let toast_c = toast_color(&self.toast);
-            paint_in_region(
-                &mut out,
-                y as u16,
-                content_x0,
-                content_cols,
-                &[Span::fg(DARK, "·  "), Span::fg(toast_c, msg)],
-            )?;
-            y += 1;
-        }
-
         if state.show_list {
             y += 1;
             self.hits.list.clear();
@@ -741,19 +727,19 @@ impl SessionUi {
         )?;
         y += 1;
 
-        // Cava sits under the shortcut bar — smooth 2-row strip.
+        // Cava sits under the shortcut bar — classic vertical bars.
         if show_cava_strip {
             y += 1;
             if let Some(ref levels) = cava_levels {
                 let intensity = if playing {
-                    0.72
+                    0.85
                 } else if state.paused {
-                    0.28
+                    0.32
                 } else {
-                    0.12
+                    0.14
                 };
                 let strip_w = block_w.saturating_add(4).min(content_cols.saturating_sub(4));
-                let (strip_x, strip_h) = paint_cava_strip(
+                let (strip_x, strip_h) = paint_cava_bars(
                     &mut out,
                     y as u16,
                     content_x0,
@@ -773,6 +759,11 @@ impl SessionUi {
 
         if self.show_help && sidebar_w > 0 {
             paint_help_sidebar(&mut out, cols, rows, sidebar_w)?;
+        }
+
+        // Floating toast — top-right corner overlay, fades in/out.
+        if let Some(ref msg) = toast {
+            paint_toast_overlay(&mut out, cols, msg, toast_color(&self.toast))?;
         }
 
         out.flush()?;
@@ -819,8 +810,11 @@ const HELP_SECTIONS: &[(&str, &[(&str, &str)])] = &[
     ),
 ];
 
-/// Right sidebar width when help is open.
+/// Left sidebar width when help is open.
 const HELP_SIDEBAR_W: usize = 26;
+
+/// Classic cava bar height (vertical columns).
+const CAVA_BAR_ROWS: usize = 5;
 
 fn help_sidebar_height() -> usize {
     let mut n = 1; // top pad
@@ -839,27 +833,28 @@ fn paint_help_sidebar(
     rows: usize,
     sidebar_w: usize,
 ) -> io::Result<()> {
-    let x0 = cols.saturating_sub(sidebar_w);
-    let inner_w = sidebar_w.saturating_sub(2).max(12);
+    let _ = cols;
+    let x0 = 0usize;
+    let rule_x = sidebar_w.saturating_sub(1);
+    let inner_w = sidebar_w.saturating_sub(3).max(12);
     let h = help_sidebar_height().min(rows.saturating_sub(2));
     let mut y = rows.saturating_sub(h) / 2;
     if y < 1 {
         y = 1;
     }
 
-    // Soft vertical rule separating player from help.
+    // Soft vertical rule separating help from player.
     for row in 1..rows.saturating_sub(1) {
         queue!(
             out,
-            MoveTo(x0 as u16, row as u16),
+            MoveTo(rule_x as u16, row as u16),
             SetForegroundColor(DARK),
             Print("│"),
             ResetColor
         )?;
     }
 
-    let pad = 2usize; // after the rule
-    let text_x = x0 + pad;
+    let text_x = x0 + 1;
 
     for (si, (title, rows_sec)) in HELP_SECTIONS.iter().enumerate() {
         if si > 0 {
@@ -968,9 +963,9 @@ fn paint_in_region(
     Ok(x as u16)
 }
 
-/// Two-row discreet spectrum under the shortcut bar.
+/// Classic vertical cava bars under the shortcut bar (default bar look).
 /// Returns (start_x, rows_painted).
-fn paint_cava_strip(
+fn paint_cava_bars(
     out: &mut impl Write,
     y: u16,
     region_x: usize,
@@ -982,45 +977,97 @@ fn paint_cava_strip(
     if levels.is_empty() || block_w == 0 {
         return Ok(((region_x + region_w / 2) as u16, 0));
     }
-    // Soft ramp — denser mid tones, less “digital stair” look.
-    const LO: &[char] = &[' ', ' ', '·', '˙', '▁', '▂', '▃', '▄'];
-    const HI: &[char] = &[' ', ' ', '·', '▁', '▂', '▃', '▄', '▅'];
+    // Half-block ramp — stock cava “bars” feel.
+    const RAMP: &[char] = &[' ', '▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
     let intensity = intensity.clamp(0.0, 1.0);
+    let rows = CAVA_BAR_ROWS;
     let n = levels.len();
-    let n_f = (n.saturating_sub(1)).max(1) as f64;
 
-    let mut top = String::with_capacity(block_w);
-    let mut bot = String::with_capacity(block_w);
-    for x in 0..block_w {
-        // Continuous sample across bars with neighbor blend.
-        let pos = if block_w <= 1 {
+    // Fit as many bar columns as possible with a 1-col gap (classic look).
+    // Pattern: B _ B _ B …  → each bar needs 2 cols except the last.
+    let bar_cols = ((block_w + 1) / 2).clamp(8, n.min(block_w));
+
+    let mut lines: Vec<String> = (0..rows).map(|_| String::with_capacity(block_w)).collect();
+
+    for b in 0..bar_cols {
+        // Sample across the spectrum into fewer display columns.
+        let pos = if bar_cols <= 1 {
             0.0
         } else {
-            x as f64 / (block_w - 1) as f64 * n_f
+            b as f64 / (bar_cols - 1) as f64 * (n.saturating_sub(1)) as f64
         };
         let i0 = pos.floor() as usize;
         let i1 = (i0 + 1).min(n - 1);
         let frac = (pos - i0 as f64).clamp(0.0, 1.0) as f32;
-        let mid = levels[i0] * (1.0 - frac) + levels[i1] * frac;
+        let raw = levels[i0] * (1.0 - frac) + levels[i1] * frac;
+        // Light neighbor blend so bars don’t flicker independently.
         let left = levels[i0.saturating_sub(1)];
         let right = levels[i1.min(n - 1)];
-        let level = ((left * 0.2 + mid * 0.6 + right * 0.2) as f64).clamp(0.0, 1.0) * intensity;
-        // Mild gamma so quiet audio still reads, peaks don’t clip hard.
-        let level = level.powf(0.72);
+        let level = ((left * 0.15 + raw * 0.7 + right * 0.15) as f64).clamp(0.0, 1.0) * intensity;
+        // Gentle gamma — quiet audio still shows, peaks stay soft.
+        let level = level.powf(0.78);
 
-        // Split into upper / lower half for a slightly taller strip.
-        let lower = (level * 1.15).clamp(0.0, 1.0);
-        let upper = ((level - 0.42).max(0.0) / 0.58).clamp(0.0, 1.0);
-        // Floor (not round) for smoother motion between frames.
-        let ui = (upper * (HI.len() - 1) as f64).floor() as usize;
-        let li = (lower * (LO.len() - 1) as f64).floor() as usize;
-        top.push(HI[ui.min(HI.len() - 1)]);
-        bot.push(LO[li.min(LO.len() - 1)]);
+        // Height in eighths of a cell across all rows.
+        let eighths = (level * (rows * (RAMP.len() - 1)) as f64).round() as usize;
+        let full = RAMP.len() - 1;
+
+        for r in 0..rows {
+            // Row 0 is the top.
+            let from_bottom = rows - 1 - r;
+            let cell_base = from_bottom * full;
+            let ch = if eighths >= cell_base + full {
+                RAMP[full]
+            } else if eighths > cell_base {
+                RAMP[eighths - cell_base]
+            } else {
+                RAMP[0]
+            };
+            lines[r].push(ch);
+            if b + 1 < bar_cols {
+                lines[r].push(' ');
+            }
+        }
     }
-    let color = mix(CAVA_DIM, CAVA_SOFT, intensity * 0.9);
-    let x0 = paint_in_region(out, y, region_x, region_w, &[Span::fg(color, &top)])?;
-    paint_in_region(out, y + 1, region_x, region_w, &[Span::fg(color, &bot)])?;
-    Ok((x0, 2))
+
+    let color = mix(CAVA_DIM, CAVA_SOFT, intensity * 0.95);
+    let mut x0 = (region_x + region_w / 2) as u16;
+    for (i, line) in lines.iter().enumerate() {
+        let x = paint_in_region(out, y + i as u16, region_x, region_w, &[Span::fg(color, line)])?;
+        if i == 0 {
+            x0 = x;
+        }
+    }
+    Ok((x0, rows as u16))
+}
+
+/// Floating toast in the top-right corner (no layout shift).
+fn paint_toast_overlay(
+    out: &mut impl Write,
+    cols: usize,
+    msg: &str,
+    color: Color,
+) -> io::Result<()> {
+    let inner = format!(" {msg} ");
+    let w = inner.chars().count();
+    let box_w = w + 2; // pipes
+    let margin = 1usize;
+    let x = cols.saturating_sub(box_w + margin) as u16;
+    let y = 1u16;
+    let top = format!("┌{}┐", "─".repeat(w));
+    let bot = format!("└{}┘", "─".repeat(w));
+    paint_at(out, x, y, &[Span::fg(DARK, &top)])?;
+    paint_at(
+        out,
+        x,
+        y + 1,
+        &[
+            Span::fg(DARK, "│"),
+            Span::fg(color, &inner),
+            Span::fg(DARK, "│"),
+        ],
+    )?;
+    paint_at(out, x, y + 2, &[Span::fg(DARK, &bot)])?;
+    Ok(())
 }
 
 impl Drop for SessionUi {
@@ -1074,14 +1121,14 @@ fn toast_color(toast: &Option<(String, Instant)>) -> Color {
         return GRAY;
     };
     let elapsed = at.elapsed().as_secs_f64();
-    let fade_in = ease_out_cubic((elapsed / 0.2).clamp(0.0, 1.0));
-    let fade_out = if elapsed > 1.5 {
-        1.0 - ((elapsed - 1.5) / 0.7).clamp(0.0, 1.0)
+    let fade_in = ease_out_cubic((elapsed / 0.15).clamp(0.0, 1.0));
+    let fade_out = if elapsed > 1.4 {
+        1.0 - ((elapsed - 1.4) / 0.8).clamp(0.0, 1.0)
     } else {
         1.0
     };
     let a = fade_in * fade_out;
-    gray(lerp(40.0, 180.0, a))
+    gray(lerp(55.0, 230.0, a))
 }
 
 // ── Shared helpers ──────────────────────────────────────────────

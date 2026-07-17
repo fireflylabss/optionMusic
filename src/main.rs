@@ -284,7 +284,7 @@ fn run_session(
         };
         ui.draw(&frame)?;
 
-        // ~60 fps keeps progress + cava strip smooth.
+        // ~60 fps keeps progress + cava bars smooth.
         if event::poll(Duration::from_millis(16)).unwrap_or(false) {
             loop {
                 match event::read() {

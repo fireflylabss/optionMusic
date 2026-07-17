@@ -133,10 +133,10 @@ frame_delimiter = 10
 channels = mono
 
 [smoothing]
-monstercat = 1
-noise_reduction = 77
-integral = 70
-gravity = 100
+monstercat = 0
+noise_reduction = 70
+integral = 65
+gravity = 90
 ignore = 0
 "#
     );

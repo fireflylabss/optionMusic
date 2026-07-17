@@ -10,6 +10,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 - **`f`** toggles the filename/path line under the track title (session-persistent; toast `filename off/on`).
 
+### Changed
+
+- **Cava** — classic vertical **bar** columns under the footer (default cava look), not the 2-row glyph strip.
+- **Toast** — volume / speed / pitch / eq / etc. feedback is a floating boxed overlay in the **top-right** corner (no layout shift).
+- Help (`?` / `h`): **left sidebar** that shifts the player right.
+
 ### Fixed
 
 - **`n` / `p` and ◂ / ▸** — `loadfile replace` emits `EndFile(Stop)`, which was treated as natural EOF and auto-advanced (undoing prev, double-skipping next). Only `EndFile(Eof)` advances the playlist now.

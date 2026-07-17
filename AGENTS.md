@@ -45,7 +45,7 @@ export CARGO_TARGET_DIR="$(pwd)/target"
 - TUI: `crossterm` alternate screen (zero scrollback leak) + mouse capture
 - Config root: `~/.config/optmusic/`
 - Default music dir: `~/Music` (`-m` / `--music-dir`)
-- Optional **cava** spectrum strip (off by default; `--cava` or `v` to enable)
+- Optional **cava** spectrum bars (off by default; `--cava` or `v` to enable)
 
 ## Don’t
 
