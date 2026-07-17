@@ -53,7 +53,14 @@ impl CliEq {
   binaries   optmusic · msc\n\
   engine     MPV (libmpv)\n\
   optional   cava spectrum bars",
-    after_help = "Playback keys (press ? / h in the player for the full sidebar):\n\
+    after_help = "Shortcuts:\n\
+  msc p song.mp3          same as  msc play song.mp3\n\
+  msc pl ./album          same as  msc play ./album\n\
+  msc song.mp3            bare path also plays\n\
+  msc ls ~/Music -r       same as  msc list ~/Music -r\n\
+  msc i song.flac         same as  msc info song.flac\n\
+\n\
+Playback keys (press ? / h in the player for the full sidebar):\n\
   space        pause / resume          n / p        next / previous\n\
   ← →          seek ±5s                { }          seek ±60s\n\
   + / −        volume                  m            mute\n\
@@ -65,12 +72,11 @@ impl CliEq {
   ? / h        help sidebar            q / Esc      quit\n\
 \n\
 Examples:\n\
-  msc play song.mp3\n\
+  msc p song.mp3\n\
   msc play ./music -s -l -c 2\n\
   msc play -m ~/Music --eq bass --pitch 1.05\n\
   msc play album/ --loop-file --cava\n\
-  msc list ~/Music -r\n\
-  msc info song.flac\n\
+  msc ls ~/Music -r\n\
   msc --help",
     styles = cli_styles(),
     propagate_version = true,
@@ -106,7 +112,7 @@ pub struct Cli {
 #[derive(Debug, Subcommand)]
 pub enum Command {
     /// Play files or directories (interactive TUI in a terminal)
-    #[command(visible_alias = "p")]
+    #[command(visible_aliases = ["p", "pl"])]
     Play {
         /// Files or directories (defaults to --music-dir / ~/Music)
         #[arg(required = false, value_name = "PATH")]
@@ -281,6 +287,22 @@ mod tests {
     #[test]
     fn parses_play_alias() {
         let cli = Cli::parse_from(["msc", "p", "a.mp3"]);
-        assert!(matches!(cli.command, Some(Command::Play { .. })));
+        match cli.command {
+            Some(Command::Play { paths, .. }) => {
+                assert_eq!(paths, vec![PathBuf::from("a.mp3")]);
+            }
+            _ => panic!("expected play via alias p"),
+        }
+    }
+
+    #[test]
+    fn parses_play_alias_pl() {
+        let cli = Cli::parse_from(["msc", "pl", "a.mp3"]);
+        match cli.command {
+            Some(Command::Play { paths, .. }) => {
+                assert_eq!(paths, vec![PathBuf::from("a.mp3")]);
+            }
+            _ => panic!("expected play via alias pl"),
+        }
     }
 }

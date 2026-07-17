@@ -42,8 +42,27 @@ fn main() {
     }
 }
 
+/// Parse CLI, rewriting bare paths to `play` (`msc song.mp3` → `msc play song.mp3`).
+fn parse_cli() -> Cli {
+    let raw: Vec<String> = std::env::args().collect();
+    if raw.len() >= 2 {
+        let first = raw[1].as_str();
+        const CMDS: &[&str] = &[
+            "play", "p", "pl", "info", "i", "list", "ls", "version", "ver", "help",
+        ];
+        if !first.starts_with('-') && !CMDS.iter().any(|c| *c == first) {
+            let mut rewritten = Vec::with_capacity(raw.len() + 1);
+            rewritten.push(raw[0].clone());
+            rewritten.push("play".into());
+            rewritten.extend(raw.into_iter().skip(1));
+            return Cli::parse_from(rewritten);
+        }
+    }
+    Cli::parse()
+}
+
 fn run() -> Result<()> {
-    let cli = Cli::parse();
+    let cli = parse_cli();
     let bin = bin_name();
     let quiet = cli.quiet;
 
@@ -111,10 +130,9 @@ fn run() -> Result<()> {
             );
         }
         None => {
-            // arg_required_else_help usually prevents this; keep a tiny fallback.
             banner();
             let b = bin.as_str();
-            println!("  {} play song.mp3", b.with(BRIGHT));
+            println!("  {} p song.mp3", b.with(BRIGHT));
             println!("  {} play ./music/ -s -l --cava", b.with(BRIGHT));
             println!("  {} --help", b.with(DIM));
             println!();

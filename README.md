@@ -63,13 +63,15 @@ cargo install --git https://github.com/fireflylabss/optMusic --tag v0.2.5
 ## Usage
 
 ```bash
-msc play song.mp3
+msc p song.mp3
+msc song.mp3                          # bare path = play
+msc pl ./album
 optmusic play ./music --shuffle --loop
 msc play song.flac -v 60 -f 1.25 -c 2 --eq bass
 msc play -m ~/Music --pitch 1.05
 msc play album/ --loop-file --cava
-msc list ./music --recursive
-msc info song.mp3
+msc ls ./music --recursive
+msc i song.mp3
 msc --help
 ```
 

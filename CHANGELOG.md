@@ -10,7 +10,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 - In-session **loop cycle** with **`o`**: `off` → `list` (playlist) → `track` (repeat one) → `off`.
 - CLI: `--pitch`, `--eq`, `--quiet` / `-q`, `--loop-file` / `--repeat-one`, `--repeat` alias for `--loop`.
-- CLI aliases: `p`→`play`, `i`→`info`, `ls`→`list`, `ver`→`version`.
+- CLI aliases: `p`/`pl`→`play`, `i`→`info`, `ls`→`list`, `ver`→`version`; bare `msc song.mp3` also plays.
 - `OPTMUSIC_MUSIC_DIR` env for the default library.
 
 ### Changed
