@@ -113,7 +113,7 @@ msc --help
 | `o` | cycle loop (`off` → `list` → `track`) |
 | `l` | toggle playlist sidebar |
 | `r` | shuffle |
-| `f` | toggle filename / path line |
+| `f` | toggle filename / path line (off by default) |
 | `v` | toggle cava strip |
 | `s` | stop |
 | `h` / `?` | toggle help sidebar |

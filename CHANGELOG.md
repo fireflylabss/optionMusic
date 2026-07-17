@@ -17,6 +17,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 - **`--help`** restyled (clearer sections, keys + examples in `after_help`).
 - Status row shows current `loop` mode.
+- Filename / path line is **off by default** (`f` still toggles it on).
 
 ## [0.2.4] - 2026-07-17
 

@@ -202,7 +202,7 @@ impl SessionUi {
             toast: None,
             show_list: false,
             show_help: false,
-            show_path: true,
+            show_path: false,
             detached: false,
             t0: now,
             track_key: String::new(),
