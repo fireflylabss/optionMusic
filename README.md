@@ -18,6 +18,14 @@ Help (`?` / `h`) and playlist (`l`) open as **overlays** (player stays centered)
 
 ## Install
 
+### Arch / CachyOS (AUR)
+
+```bash
+yay -S optmusic
+# or
+paru -S optmusic
+```
+
 ### System deps
 
 | Dep | Why |
@@ -26,7 +34,7 @@ Help (`?` / `h`) and playlist (`l`) open as **overlays** (player stays centered)
 | **cava** | spectrum strip (optional) |
 
 ```bash
-# Arch / CachyOS
+# Arch / CachyOS (if building from source)
 sudo pacman -S mpv cava
 
 # Debian / Ubuntu
@@ -38,11 +46,13 @@ sudo dnf install mpv-libs-devel pkgconf-pkg-config cava
 
 PipeWire or PulseAudio should be running if you use cava.
 
-### Build & install
+### Build from source
 
 ```bash
 export CARGO_TARGET_DIR="$(pwd)/target"
 cargo install --path . --force
+# or a tagged release:
+cargo install --git https://github.com/fireflylabss/optMusic --tag v0.2.4
 ```
 
 | Command | Description |
