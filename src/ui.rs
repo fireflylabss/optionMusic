@@ -165,9 +165,6 @@ pub struct SessionUi {
     /// Track identity for title fade-in.
     track_key: String,
     track_since: Instant,
-    /// Sidebar open/close animation clocks.
-    list_anim_since: Instant,
-    help_anim_since: Instant,
     /// First visible playlist row (0-based).
     list_scroll: usize,
     /// Visible row count from last draw (for scroll clamping).
@@ -194,8 +191,6 @@ impl SessionUi {
             Clear(ClearType::All)
         )?;
         let now = Instant::now();
-        // Settled “closed” so panels don’t animate in on first frame.
-        let settled = now - Duration::from_secs(1);
         let cava = if enable_cava {
             CavaBridge::try_start()
         } else {
@@ -210,8 +205,6 @@ impl SessionUi {
             t0: now,
             track_key: String::new(),
             track_since: now,
-            list_anim_since: settled,
-            help_anim_since: settled,
             list_scroll: 0,
             list_visible: 8,
             list_total: 0,
@@ -251,24 +244,16 @@ impl SessionUi {
 
     pub fn toggle_list(&mut self) {
         self.show_list = !self.show_list;
-        self.list_anim_since = Instant::now();
         if self.show_list {
             self.list_follow = 0; // recenter on open
-            if self.show_help {
-                self.show_help = false;
-                self.help_anim_since = Instant::now();
-            }
+            self.show_help = false;
         }
     }
 
     pub fn toggle_help(&mut self) {
         self.show_help = !self.show_help;
-        self.help_anim_since = Instant::now();
         if self.show_help {
-            if self.show_list {
-                self.show_list = false;
-                self.list_anim_since = Instant::now();
-            }
+            self.show_list = false;
         }
     }
 
@@ -308,9 +293,9 @@ impl SessionUi {
         self.show_help
     }
 
-    /// True while list is open or still sliding closed (needs names to paint).
+    /// True while the playlist sidebar is open.
     pub fn list_panel_active(&self) -> bool {
-        self.panel_t(self.show_list, self.list_anim_since) > 0.01
+        self.show_list
     }
 
     pub fn list_scroll_by(&mut self, delta: i32) {
@@ -344,27 +329,6 @@ impl SessionUi {
 
     fn list_scroll_max(&self) -> usize {
         self.list_total.saturating_sub(self.list_visible.max(1))
-    }
-
-    fn panel_t(&self, open: bool, since: Instant) -> f64 {
-        let raw = (since.elapsed().as_secs_f64() / PANEL_ANIM_SECS).clamp(0.0, 1.0);
-        let e = ease_out_cubic(raw);
-        if open {
-            e
-        } else {
-            1.0 - e
-        }
-    }
-
-    fn panel_width(&self, open: bool, since: Instant, full: usize) -> usize {
-        let t = self.panel_t(open, since);
-        if t <= 0.01 {
-            0
-        } else if t >= 0.99 {
-            full
-        } else {
-            ((full as f64) * t).round() as usize
-        }
     }
 
     /// Keep the current track in view; recenter when the track changes.
@@ -505,12 +469,16 @@ impl SessionUi {
         let title_in =
             ease_out_cubic((self.track_since.elapsed().as_secs_f64() / 0.4).clamp(0.0, 1.0));
 
-        let list_full = LIST_SIDEBAR_W.min(cols.saturating_sub(28));
-        let help_full = HELP_SIDEBAR_W.min(cols.saturating_sub(28));
-        let list_w = self.panel_width(self.show_list, self.list_anim_since, list_full);
-        let help_w = self.panel_width(self.show_help, self.help_anim_since, help_full);
-        let list_t = self.panel_t(self.show_list, self.list_anim_since);
-        let help_t = self.panel_t(self.show_help, self.help_anim_since);
+        let list_w = if self.show_list {
+            LIST_SIDEBAR_W.min(cols.saturating_sub(28))
+        } else {
+            0
+        };
+        let help_w = if self.show_help {
+            HELP_SIDEBAR_W.min(cols.saturating_sub(28))
+        } else {
+            0
+        };
 
         let content_cols = cols.saturating_sub(list_w).saturating_sub(help_w);
         let content_x0 = list_w;
@@ -832,7 +800,6 @@ impl SessionUi {
                 &mut self.hits,
                 rows,
                 list_w,
-                list_t,
                 self.list_scroll,
                 self.list_visible,
                 state.index,
@@ -843,7 +810,7 @@ impl SessionUi {
         }
 
         if help_w > 0 {
-            paint_help_sidebar(&mut out, cols, rows, help_w, help_t)?;
+            paint_help_sidebar(&mut out, cols, rows, help_w)?;
         }
 
         // Floating toast — top-right of the player region (left of help when open).
@@ -906,8 +873,6 @@ const HELP_SECTIONS: &[(&str, &[(&str, &str)])] = &[
 const HELP_SIDEBAR_W: usize = 26;
 /// Left playlist sidebar width when fully open.
 const LIST_SIDEBAR_W: usize = 30;
-/// Open/close slide duration for side panels.
-const PANEL_ANIM_SECS: f64 = 0.30;
 
 /// Classic cava bar height (vertical columns).
 const CAVA_BAR_ROWS: usize = 5;
@@ -928,7 +893,6 @@ fn paint_help_sidebar(
     cols: usize,
     rows: usize,
     sidebar_w: usize,
-    anim_t: f64,
 ) -> io::Result<()> {
     let x0 = cols.saturating_sub(sidebar_w);
     let rule_x = x0;
@@ -938,18 +902,13 @@ fn paint_help_sidebar(
     if y < 1 {
         y = 1;
     }
-    let fade = anim_t.clamp(0.0, 1.0);
-    let title_c = mix(Color::Black, DIM, fade);
-    let key_c = mix(Color::Black, BRIGHT, fade);
-    let act_c = mix(Color::Black, GRAY, fade);
-    let rule_c = mix(Color::Black, DARK, fade);
 
     // Soft vertical rule separating player from help.
     for row in 1..rows.saturating_sub(1) {
         queue!(
             out,
             MoveTo(rule_x as u16, row as u16),
-            SetForegroundColor(rule_c),
+            SetForegroundColor(DARK),
             Print("│"),
             ResetColor
         )?;
@@ -964,7 +923,7 @@ fn paint_help_sidebar(
         if y >= rows.saturating_sub(1) {
             break;
         }
-        paint_at(out, text_x as u16, y as u16, &[Span::fg(title_c, title)])?;
+        paint_at(out, text_x as u16, y as u16, &[Span::fg(DIM, title)])?;
         y += 1;
         for (keys, action) in *rows_sec {
             if y >= rows.saturating_sub(1) {
@@ -977,9 +936,9 @@ fn paint_help_sidebar(
                 text_x as u16,
                 y as u16,
                 &[
-                    Span::fg(key_c, &key_col),
-                    Span::fg(rule_c, " "),
-                    Span::fg(act_c, &action_t),
+                    Span::fg(BRIGHT, &key_col),
+                    Span::fg(DARK, " "),
+                    Span::fg(GRAY, &action_t),
                 ],
             )?;
             y += 1;
@@ -987,12 +946,7 @@ fn paint_help_sidebar(
     }
     if y + 1 < rows.saturating_sub(1) {
         y += 1;
-        paint_at(
-            out,
-            text_x as u16,
-            y as u16,
-            &[Span::fg(rule_c, "h  close")],
-        )?;
+        paint_at(out, text_x as u16, y as u16, &[Span::fg(DARK, "h  close")])?;
     }
     Ok(())
 }
@@ -1002,7 +956,6 @@ fn paint_list_sidebar(
     hits: &mut HitMap,
     rows: usize,
     sidebar_w: usize,
-    anim_t: f64,
     scroll: usize,
     visible: usize,
     current_1based: usize,
@@ -1013,12 +966,6 @@ fn paint_list_sidebar(
     if sidebar_w < 8 || names.is_empty() {
         return Ok(());
     }
-    let fade = anim_t.clamp(0.0, 1.0);
-    let rule_c = mix(Color::Black, DARK, fade);
-    let title_c = mix(Color::Black, DIM, fade);
-    let dim_c = mix(Color::Black, DIM, fade);
-    let gray_c = mix(Color::Black, GRAY, fade);
-    let bright_c = mix(Color::Black, BRIGHT, fade);
 
     let rule_x = sidebar_w.saturating_sub(1);
     let bar_x = sidebar_w.saturating_sub(2);
@@ -1030,20 +977,20 @@ fn paint_list_sidebar(
         queue!(
             out,
             MoveTo(rule_x as u16, row as u16),
-            SetForegroundColor(rule_c),
+            SetForegroundColor(DARK),
             Print("│"),
             ResetColor
         )?;
     }
 
     let y0 = 1usize;
-    paint_at(out, text_x as u16, y0 as u16, &[Span::fg(title_c, "playlist")])?;
+    paint_at(out, text_x as u16, y0 as u16, &[Span::fg(DIM, "playlist")])?;
     let hint = format!("{}/{}", current_1based.max(1), names.len());
     paint_at(
         out,
         text_x as u16,
         (y0 + 1) as u16,
-        &[Span::fg(dim_c, &hint)],
+        &[Span::fg(DIM, &hint)],
     )?;
 
     let list_y0 = y0 + 3;
@@ -1076,12 +1023,12 @@ fn paint_list_sidebar(
         );
         let color = if current {
             if playing {
-                mix(Color::Black, gray(lerp(210.0, 245.0, breath(t, 2.6))), fade)
+                gray(lerp(210.0, 245.0, breath(t, 2.6)))
             } else {
-                bright_c
+                BRIGHT
             }
         } else {
-            dim_c
+            DIM
         };
         paint_at(out, text_x as u16, y as u16, &[Span::fg(color, &line)])?;
         hits.list.push((
@@ -1120,9 +1067,9 @@ fn paint_list_sidebar(
                 '│'
             };
             let c = if i >= thumb_y && i < thumb_y + thumb_h {
-                gray_c
+                GRAY
             } else {
-                rule_c
+                DARK
             };
             let glyph = ch.to_string();
             paint_at(
@@ -1142,7 +1089,7 @@ fn paint_list_sidebar(
             out,
             text_x as u16,
             foot_y as u16,
-            &[Span::fg(rule_c, "l  close")],
+            &[Span::fg(DARK, "l  close")],
         )?;
     }
     Ok(())
@@ -1297,7 +1244,7 @@ fn paint_cava_bars(
     Ok((x0, rows as u16))
 }
 
-/// Floating toast in the top-right of the player region (slide + fade).
+/// Floating toast in the top-right of the player region (fade only).
 fn paint_toast_overlay(
     out: &mut impl Write,
     right_edge: usize,
@@ -1308,7 +1255,7 @@ fn paint_toast_overlay(
         return Ok(());
     };
     let elapsed = at.elapsed().as_secs_f64();
-    let (alpha, slide) = toast_motion(elapsed);
+    let alpha = toast_alpha(elapsed);
     if alpha <= 0.02 {
         return Ok(());
     }
@@ -1319,9 +1266,7 @@ fn paint_toast_overlay(
     let w = inner.chars().count();
     let box_w = w + 2;
     let margin = 1usize;
-    let base_x = right_edge.saturating_sub(box_w + margin);
-    // Slide in from the right, ease out on exit.
-    let x = (base_x as f64 + slide).round().max(0.0) as u16;
+    let x = right_edge.saturating_sub(box_w + margin) as u16;
     let y = 1u16;
     let top = format!("┌{}┐", "─".repeat(w));
     let bot = format!("└{}┘", "─".repeat(w));
@@ -1386,18 +1331,14 @@ fn mix(a: Color, b: Color, t: f64) -> Color {
     gray(lerp(color_level(a) as f64, color_level(b) as f64, t))
 }
 
-fn toast_motion(elapsed: f64) -> (f64, f64) {
-    let fade_in = ease_out_cubic((elapsed / 0.22).clamp(0.0, 1.0));
+fn toast_alpha(elapsed: f64) -> f64 {
+    let fade_in = ease_out_cubic((elapsed / 0.18).clamp(0.0, 1.0));
     let fade_out = if elapsed > 1.55 {
         1.0 - ease_out_cubic(((elapsed - 1.55) / 0.65).clamp(0.0, 1.0))
     } else {
         1.0
     };
-    let alpha = fade_in * fade_out;
-    // Positive slide = further right (off-screen direction).
-    let slide_in = (1.0 - fade_in) * 14.0;
-    let slide_out = (1.0 - fade_out) * 10.0;
-    (alpha, slide_in + slide_out)
+    fade_in * fade_out
 }
 
 // ── Shared helpers ──────────────────────────────────────────────
