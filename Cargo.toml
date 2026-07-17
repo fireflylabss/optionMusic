@@ -1,6 +1,6 @@
 [package]
 name = "optmusic"
-version = "0.2.4"
+version = "0.2.5"
 edition = "2024"
 rust-version = "1.85"
 description = "optMusic — minimal black & white CLI music player (option music)"
@@ -21,7 +21,7 @@ name = "msc"
 path = "src/main.rs"
 
 [dependencies]
-clap = { version = "4", features = ["derive", "color"] }
+clap = { version = "4", features = ["derive", "color", "env"] }
 libmpv2 = "5.0"
 anyhow = "1"
 walkdir = "2"

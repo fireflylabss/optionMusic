@@ -145,6 +145,8 @@ pub struct FrameState<'a> {
     pub eq_label: &'a str,
     pub paused: bool,
     pub stopped: bool,
+    /// Loop mode label: `off` · `list` · `track`
+    pub loop_label: &'a str,
     pub list_names: &'a [String],
     pub toast: Option<&'a str>,
 }
@@ -522,6 +524,7 @@ impl SessionUi {
         let spd = format!("{:.1}x", state.speed);
         let ptch = format!("{:.2}", state.pitch);
         let eq = state.eq_label;
+        let loop_l = state.loop_label;
         let toast = state.toast.map(|m| truncate(m, max_title));
         let cava_levels = self.cava.as_ref().map(|c| c.snapshot());
 
@@ -719,6 +722,9 @@ impl SessionUi {
             Span::fg(DARK, "  ·  "),
             Span::fg(DIM, "eq "),
             Span::fg(GRAY, eq),
+            Span::fg(DARK, "  ·  "),
+            Span::fg(DIM, "loop "),
+            Span::fg(GRAY, loop_l),
         ];
         let meta_x = paint_in_region(
             &mut out,
@@ -836,6 +842,7 @@ const HELP_SECTIONS: &[(&str, &[(&str, &str)])] = &[
             ("s", "stop"),
             ("l", "list"),
             ("r", "shuffle"),
+            ("o", "loop cycle"),
         ],
     ),
     (

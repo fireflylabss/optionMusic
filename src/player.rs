@@ -29,6 +29,8 @@ pub struct Player {
     stopped: bool,
     /// Track finished naturally (eof) — cleared on next load.
     finished: bool,
+    /// MPV loop-file (repeat current track).
+    loop_track: bool,
 }
 
 impl Player {
@@ -47,6 +49,7 @@ impl Player {
             eq: EqPreset::Off,
             stopped: true,
             finished: false,
+            loop_track: false,
         })
     }
 
@@ -142,6 +145,23 @@ impl Player {
         self.eq
     }
 
+    pub fn set_eq(&mut self, eq: EqPreset) {
+        self.eq = eq;
+        let _ = self.mpv.set_property("af", self.eq.af_filter());
+    }
+
+    /// Repeat the current file (`loop-file=inf`).
+    pub fn set_loop_track(&mut self, on: bool) {
+        self.loop_track = on;
+        let _ = self
+            .mpv
+            .set_property("loop-file", if on { "inf" } else { "no" });
+    }
+
+    pub fn loop_track(&self) -> bool {
+        self.loop_track
+    }
+
     /// Stop current playback and start playing `path`.
     pub fn play_file(&mut self, path: &Path) -> Result<()> {
         let path_str = path
@@ -161,6 +181,10 @@ impl Player {
         let _ = self.mpv.set_property("speed", self.speed);
         let _ = self.mpv.set_property("pitch", self.pitch);
         let _ = self.mpv.set_property("af", self.eq.af_filter());
+        let _ = self.mpv.set_property(
+            "loop-file",
+            if self.loop_track { "inf" } else { "no" },
+        );
 
         self.stopped = false;
         self.finished = false;

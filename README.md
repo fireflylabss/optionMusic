@@ -52,7 +52,7 @@ PipeWire or PulseAudio should be running if you use cava.
 export CARGO_TARGET_DIR="$(pwd)/target"
 cargo install --path . --force
 # or a tagged release:
-cargo install --git https://github.com/fireflylabss/optMusic --tag v0.2.4
+cargo install --git https://github.com/fireflylabss/optMusic --tag v0.2.5
 ```
 
 | Command | Description |
@@ -65,20 +65,21 @@ cargo install --git https://github.com/fireflylabss/optMusic --tag v0.2.4
 ```bash
 msc play song.mp3
 optmusic play ./music --shuffle --loop
-msc play song.flac -v 60 -f 1.25 -c 2
-msc play -m ~/Music
-msc play song.mp3 --cava             # enable spectrum strip
+msc play song.flac -v 60 -f 1.25 -c 2 --eq bass
+msc play -m ~/Music --pitch 1.05
+msc play album/ --loop-file --cava
 msc list ./music --recursive
 msc info song.mp3
-msc version
+msc --help
 ```
 
 ### Global options
 
 | Flag | Meaning |
 |------|---------|
-| `-m` / `--music-dir DIR` | Library root (default `~/Music` when `play` has no paths) |
+| `-m` / `--music-dir DIR` | Library root (default `~/Music`; env `OPTMUSIC_MUSIC_DIR`) |
 | `--cava` | Enable cava spectrum strip (off by default) |
+| `-q` / `--quiet` | Less stdout noise outside the TUI |
 
 ### Play options
 
@@ -86,9 +87,12 @@ msc version
 |------|---------|
 | `-v` / `--volume` | 0–100 (default 80) |
 | `-f` / `--speed` | playback speed factor |
+| `--pitch` | pitch factor (default 1.0) |
+| `--eq` | starting EQ (`off` `bass` `treble` `rock` `vocal` `lofi`) |
 | `-c` / `--crossfade` | audio-fade seconds between loads |
 | `-s` / `--shuffle` | shuffle playlist |
-| `-l` / `--loop` | loop playlist |
+| `-l` / `--loop` / `--repeat` | loop playlist |
+| `--loop-file` / `--repeat-one` | repeat current track |
 
 ### Keyboard
 
@@ -106,6 +110,7 @@ msc version
 | `,` / `.` | pitch down / up |
 | `0` | reset speed & pitch |
 | `1`–`9` | jump to track N |
+| `o` | cycle loop (`off` → `list` → `track`) |
 | `l` | toggle playlist sidebar |
 | `r` | shuffle |
 | `f` | toggle filename / path line |

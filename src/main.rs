@@ -45,34 +45,52 @@ fn main() {
 fn run() -> Result<()> {
     let cli = Cli::parse();
     let bin = bin_name();
+    let quiet = cli.quiet;
 
     match cli.command {
         Some(Command::Play {
             paths,
             volume,
             speed,
+            pitch,
+            eq,
             crossfade,
             shuffle,
             loop_playlist,
+            loop_file,
             interactive: _,
         }) => {
             let paths = resolve_play_paths(paths, &cli.music_dir)?;
+            let loop_mode = if loop_file {
+                LoopMode::Track
+            } else if loop_playlist {
+                LoopMode::Playlist
+            } else {
+                LoopMode::Off
+            };
             cmd_play(
                 paths,
                 volume,
                 speed,
+                pitch,
+                eq.to_preset(),
                 crossfade,
                 shuffle,
-                loop_playlist,
+                loop_mode,
                 cli.cava,
+                quiet,
             )?;
         }
         Some(Command::Info { path }) => {
-            banner();
+            if !quiet {
+                banner();
+            }
             cmd_info(&path)?
         }
         Some(Command::List { path, recursive }) => {
-            banner();
+            if !quiet {
+                banner();
+            }
             let path = if path.as_os_str() == "." && !cli.music_dir.is_empty() {
                 resolve_music_dir(&cli.music_dir)?
             } else {
@@ -93,12 +111,11 @@ fn run() -> Result<()> {
             );
         }
         None => {
+            // arg_required_else_help usually prevents this; keep a tiny fallback.
             banner();
             let b = bin.as_str();
             println!("  {} play song.mp3", b.with(BRIGHT));
-            println!("  {} play ./music/ -s -l -c 2", b.with(BRIGHT));
-            println!("  {} play -m ~/Music", b.with(BRIGHT));
-            println!("  {} list ./music -r", b.with(BRIGHT));
+            println!("  {} play ./music/ -s -l --cava", b.with(BRIGHT));
             println!("  {} --help", b.with(DIM));
             println!();
         }
@@ -126,10 +143,13 @@ fn cmd_play(
     paths: Vec<PathBuf>,
     volume: u8,
     speed: f64,
+    pitch: f64,
+    eq: eq::EqPreset,
     crossfade: f64,
     shuffle: bool,
-    loop_playlist: bool,
+    loop_mode: LoopMode,
     enable_cava: bool,
+    quiet: bool,
 ) -> Result<()> {
     if paths.is_empty() {
         anyhow::bail!("pass at least one file or directory to play");
@@ -145,23 +165,32 @@ fn cmd_play(
     }
 
     let mut player = Player::new(volume, speed, crossfade)?;
+    player.set_pitch(pitch);
+    player.set_eq(eq);
+    player.set_loop_track(loop_mode == LoopMode::Track);
 
     if io::stdin().is_terminal() && io::stdout().is_terminal() {
         run_session(
             &mut player,
             &mut playlist,
-            loop_playlist,
+            loop_mode,
             shuffle,
             enable_cava,
         )?;
     } else {
-        banner();
-        print_success(&format!(
-            "Loaded {} track{}",
-            playlist.len(),
-            if playlist.len() == 1 { "" } else { "s" }
-        ));
-        run_plain(&mut player, &mut playlist, loop_playlist)?;
+        if !quiet {
+            banner();
+            print_success(&format!(
+                "Loaded {} track{}",
+                playlist.len(),
+                if playlist.len() == 1 { "" } else { "s" }
+            ));
+        }
+        run_plain(
+            &mut player,
+            &mut playlist,
+            loop_mode == LoopMode::Playlist,
+        )?;
     }
 
     Ok(())
@@ -192,12 +221,12 @@ fn run_plain(player: &mut Player, playlist: &mut Playlist, loop_playlist: bool) 
 fn run_session(
     player: &mut Player,
     playlist: &mut Playlist,
-    loop_playlist: bool,
+    mut loop_mode: LoopMode,
     shuffled: bool,
     enable_cava: bool,
 ) -> Result<()> {
     let mut ui = SessionUi::enter(enable_cava).context("failed to open player UI")?;
-    let start_toast = if shuffled {
+    let mut start_toast = if shuffled {
         format!(
             "{} track{} · shuffled{}",
             playlist.len(),
@@ -212,6 +241,9 @@ fn run_session(
             if ui.cava_active() { " · cava" } else { "" }
         )
     };
+    if loop_mode != LoopMode::Off {
+        start_toast.push_str(&format!(" · loop {}", loop_mode.label()));
+    }
     ui.toast(start_toast);
 
     let mut index: usize = 0;
@@ -226,15 +258,15 @@ fn run_session(
     }
 
     loop {
-        if !held && player.is_idle() {
+        if !held && player.is_idle() && !player.loop_track() {
             if index + 1 < playlist.len() {
                 index += 1;
                 if let Some(t) = playlist.get(index) {
                     player.play_file(&t.path)?;
                 }
-            } else if loop_playlist {
+            } else if loop_mode == LoopMode::Playlist {
                 index = 0;
-                ui.toast("looping…");
+                ui.toast("looping list…");
                 if let Some(t) = playlist.get(index) {
                     player.play_file(&t.path)?;
                 }
@@ -279,6 +311,7 @@ fn run_session(
             eq_label,
             paused: held || player.is_paused(),
             stopped: held,
+            loop_label: loop_mode.label(),
             list_names: &list_names,
             toast: toast_owned.as_deref(),
         };
@@ -348,7 +381,7 @@ fn run_session(
                                         if let Some(t) = playlist.get(index) {
                                             player.play_file(&t.path)?;
                                         }
-                                    } else if loop_playlist {
+                                    } else if loop_mode == LoopMode::Playlist {
                                         index = 0;
                                         if let Some(t) = playlist.get(index) {
                                             player.play_file(&t.path)?;
@@ -437,6 +470,11 @@ fn run_session(
                                     let msg = ui.toggle_cava();
                                     ui.toast(msg);
                                 }
+                                Action::LoopCycle => {
+                                    loop_mode = loop_mode.next();
+                                    player.set_loop_track(loop_mode == LoopMode::Track);
+                                    ui.toast(format!("loop {}", loop_mode.label()));
+                                }
                                 Action::Seeked => {}
                             }
                         }
@@ -493,7 +531,7 @@ fn run_session(
                                     if let Some(t) = playlist.get(index) {
                                         player.play_file(&t.path)?;
                                     }
-                                } else if loop_playlist {
+                                } else if loop_mode == LoopMode::Playlist {
                                     index = 0;
                                     if let Some(t) = playlist.get(index) {
                                         player.play_file(&t.path)?;
@@ -615,6 +653,31 @@ fn run_session(
     Ok(())
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum LoopMode {
+    Off,
+    Playlist,
+    Track,
+}
+
+impl LoopMode {
+    fn next(self) -> Self {
+        match self {
+            Self::Off => Self::Playlist,
+            Self::Playlist => Self::Track,
+            Self::Track => Self::Off,
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::Off => "off",
+            Self::Playlist => "list",
+            Self::Track => "track",
+        }
+    }
+}
+
 enum Action {
     None,
     Quit,
@@ -634,6 +697,7 @@ enum Action {
     EqChanged(&'static str),
     ResetTempo,
     CavaToggle,
+    LoopCycle,
     Seeked,
 }
 
@@ -701,6 +765,7 @@ fn handle_key(key: KeyEvent, player: &mut Player) -> Action {
         }
         KeyCode::Char('l') => Action::List,
         KeyCode::Char('r') => Action::Shuffle,
+        KeyCode::Char('o') => Action::LoopCycle,
         KeyCode::Char('f') => Action::TogglePath,
         KeyCode::Char('v') => Action::CavaToggle,
         KeyCode::Char('q') | KeyCode::Esc => Action::Quit,

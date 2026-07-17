@@ -4,6 +4,20 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.5] - 2026-07-17
+
+### Added
+
+- In-session **loop cycle** with **`o`**: `off` → `list` (playlist) → `track` (repeat one) → `off`.
+- CLI: `--pitch`, `--eq`, `--quiet` / `-q`, `--loop-file` / `--repeat-one`, `--repeat` alias for `--loop`.
+- CLI aliases: `p`→`play`, `i`→`info`, `ls`→`list`, `ver`→`version`.
+- `OPTMUSIC_MUSIC_DIR` env for the default library.
+
+### Changed
+
+- **`--help`** restyled (clearer sections, keys + examples in `after_help`).
+- Status row shows current `loop` mode.
+
 ## [0.2.4] - 2026-07-17
 
 ### Changed
