@@ -10,23 +10,47 @@ yay -S optmusic
 paru -S optmusic
 ```
 
-## Maintain (you)
+## Automatic publish (recommended)
 
-Local working copy: `~/aur/optmusic` (tracks `ssh://aur@aur.archlinux.org/optmusic.git`).
+Every **GitHub Release** runs [`.github/workflows/publish-aur.yml`](../../.github/workflows/publish-aur.yml):
 
-SSH key used: `~/.ssh/aur_synara` (override with `AUR_SSH_KEY=`).
+1. Bumps `packaging/aur/PKGBUILD` + `.SRCINFO` for the release tag
+2. Commits that bump back to `master`
+3. Pushes the package to the AUR
 
-### After a new GitHub tag/release
+### One-time setup
+
+Add the AUR SSH **private** key as a repo secret:
+
+1. GitHub → **Settings → Secrets and variables → Actions**
+2. New secret name: `AUR_SSH_PRIVATE_KEY`
+3. Value: contents of `~/.ssh/aur_synara` (the private key, not `.pub`)
+
+Or from the CLI:
 
 ```bash
-# from the optMusic repo root
-./packaging/aur/publish.sh 0.2.5
+gh secret set AUR_SSH_PRIVATE_KEY < ~/.ssh/aur_synara
 ```
 
-That script bumps `pkgver` + `sha256sums`, regenerates `.SRCINFO`, commits, and pushes to the AUR.
+The public key must already be on your AUR account (it is, if you published 0.2.4).
 
-### Same version (PKGBUILD-only tweak)
+### Day-to-day
 
 ```bash
-./packaging/aur/publish.sh
+# bump code, commit, then:
+git tag -a v0.2.5 -m "optMusic 0.2.5"
+git push origin v0.2.5
+gh release create v0.2.5 --title "optMusic 0.2.5" --generate-notes
+# → Actions publishes AUR automatically
 ```
+
+Manual re-run: **Actions → Publish AUR → Run workflow**.
+
+## Local publish (fallback)
+
+```bash
+./packaging/aur/publish.sh           # push current packaging/
+./packaging/aur/publish.sh 0.2.5     # bump + push
+```
+
+Uses `~/aur/optmusic` and `~/.ssh/aur_synara` (override with `AUR_SSH_KEY=` / `AUR_DIR=`).

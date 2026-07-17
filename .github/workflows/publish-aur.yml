@@ -1,0 +1,76 @@
+name: Publish AUR
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to publish (e.g. v0.2.5). Empty = latest release tag."
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+jobs:
+  aur:
+    name: Update AUR package
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: master
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Resolve version tag
+        id: ver
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          set -euo pipefail
+          TAG="${INPUT_TAG:-}"
+          if [[ -z "$TAG" ]]; then
+            TAG="${RELEASE_TAG:-}"
+          fi
+          if [[ -z "$TAG" ]]; then
+            TAG="$(gh release view --json tagName -q .tagName)"
+          fi
+          if [[ -z "$TAG" ]]; then
+            echo "No tag to publish" >&2
+            exit 1
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Bump PKGBUILD + .SRCINFO
+        run: |
+          chmod +x packaging/aur/bump.sh
+          ./packaging/aur/bump.sh "${{ steps.ver.outputs.tag }}"
+
+      - name: Commit packaging bump on master
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add packaging/aur/PKGBUILD packaging/aur/.SRCINFO
+          if git diff --cached --quiet; then
+            echo "packaging already up to date"
+          else
+            git commit -m "chore(aur): bump to ${{ steps.ver.outputs.version }}"
+            git push origin HEAD:master
+          fi
+
+      - name: Publish to AUR
+        uses: KSXGitHub/github-actions-deploy-aur@v3.0.1
+        with:
+          pkgname: optmusic
+          pkgbuild: ./packaging/aur/PKGBUILD
+          commit_username: horizzon3507
+          commit_email: horizzon3507@users.noreply.github.com
+          ssh_private_key: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+          commit_message: Update to ${{ steps.ver.outputs.version }}
