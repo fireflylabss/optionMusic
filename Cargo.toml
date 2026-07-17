@@ -1,0 +1,33 @@
+[package]
+name = "optmusic"
+version = "0.2.0"
+edition = "2021"
+description = "optMusic — minimal black & white CLI music player (option music)"
+authors = ["AEFireflyLabs"]
+license = "MIT"
+readme = "README.md"
+keywords = ["music", "audio", "player", "cli", "mp3", "mpv"]
+categories = ["command-line-utilities", "multimedia::audio"]
+
+# Full name
+[[bin]]
+name = "optmusic"
+path = "src/main.rs"
+
+# Short alias
+[[bin]]
+name = "msc"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4", features = ["derive", "color"] }
+libmpv2 = "5.0"
+anyhow = "1"
+walkdir = "2"
+crossterm = "0.28"
+dirs = "6.0"
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true
