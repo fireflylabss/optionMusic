@@ -10,7 +10,7 @@ SRCINFO="$ROOT/packaging/aur/.SRCINFO"
 
 TAG="${1:?usage: bump.sh <version|vVersion>}"
 VER="${TAG#v}"
-TARBALL_URL="https://github.com/fireflylabss/optMusic/archive/refs/tags/v${VER}.tar.gz"
+TARBALL_URL="https://github.com/fireflylabss/optionMusic/archive/refs/tags/v${VER}.tar.gz"
 
 echo "==> waiting for $TARBALL_URL"
 for _ in $(seq 1 12); do
@@ -31,11 +31,11 @@ sed -i "s/^sha256sums=.*/sha256sums=('${SHA}')/" "$PKGBUILD"
 
 echo "==> writing .SRCINFO"
 cat > "$SRCINFO" <<EOF
-pkgbase = optmusic
+pkgbase = optionmusic
 	pkgdesc = Minimal black and white CLI music player powered by MPV
 	pkgver = ${VER}
 	pkgrel = 1
-	url = https://github.com/fireflylabss/optMusic
+	url = https://github.com/fireflylabss/optionMusic
 	arch = x86_64
 	license = Apache-2.0
 	makedepends = cargo
@@ -43,11 +43,14 @@ pkgbase = optmusic
 	depends = gcc-libs
 	depends = glibc
 	optdepends = cava: optional spectrum bars
+	provides = optmusic
+	conflicts = optmusic
+	replaces = optmusic
 	options = !lto
-	source = optmusic-${VER}.tar.gz::https://github.com/fireflylabss/optMusic/archive/refs/tags/v${VER}.tar.gz
+	source = optionmusic-${VER}.tar.gz::https://github.com/fireflylabss/optionMusic/archive/refs/tags/v${VER}.tar.gz
 	sha256sums = ${SHA}
 
-pkgname = optmusic
+pkgname = optionmusic
 EOF
 
 echo "==> done (packaging/aur ready for AUR push)"
