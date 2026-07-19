@@ -43,7 +43,7 @@ export CARGO_TARGET_DIR="$(pwd)/target"
 
 - Engine: `libmpv2` (system **libmpv** required)
 - TUI: `crossterm` alternate screen (zero scrollback leak) + mouse capture
-- Config root: `~/.config/optmusic/`
+- Config: `~/option/music/config.toml` (settings popup: `c`)
 - Default music dir: `~/Music` (`-m` / `--music-dir`)
 - Optional **cava** spectrum bars (off by default; `--cava` or `v` to enable)
 

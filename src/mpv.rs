@@ -28,7 +28,8 @@ impl MpvConfig {
     }
 
     pub fn volume(mut self, volume: f64) -> Self {
-        self.volume = volume.clamp(0.0, 100.0);
+        // MPV allows soft gain above 100; player enforces the session ceiling.
+        self.volume = volume.clamp(0.0, 200.0);
         self
     }
 
@@ -88,7 +89,8 @@ mod tests {
 
     #[test]
     fn config_clamps_volume() {
-        assert_eq!(MpvConfig::new().volume(150.0).volume, 100.0);
+        assert_eq!(MpvConfig::new().volume(250.0).volume, 200.0);
+        assert_eq!(MpvConfig::new().volume(150.0).volume, 150.0);
         assert_eq!(MpvConfig::new().volume(-10.0).volume, 0.0);
     }
 

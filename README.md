@@ -14,7 +14,7 @@ Powered by **MPV** (`libmpv`), with an optional discreet **cava** spectrum strip
    ▁▅█████▅▁
 ```
 
-Help (`?` / `h`) and playlist (`l`) open as **overlays** (player stays centered). Both can be open at once.
+Help (`?` / `h`) is a **right sidebar**, while settings (`c`) and playlist (`l`) are **left sidebars**. The playlist makes layout space so it remains easy to use.
 
 ## Install
 
@@ -52,7 +52,7 @@ PipeWire or PulseAudio should be running if you use cava.
 export CARGO_TARGET_DIR="$(pwd)/target"
 cargo install --path . --force
 # or a tagged release:
-cargo install --git https://github.com/fireflylabss/optMusic --tag v0.2.5
+cargo install --git https://github.com/fireflylabss/optMusic --tag v0.2.6
 ```
 
 | Command | Description |
@@ -117,10 +117,28 @@ msc --help
 | `r` | shuffle |
 | `f` | toggle filename / path line (off by default) |
 | `v` | toggle cava strip |
+| `c` | settings sidebar |
 | `s` | stop |
 | `h` / `?` | toggle help sidebar |
-| `↑` `↓` / `j` `k` | scroll playlist (when open) |
-| `q` / Esc | quit (or close help / playlist) |
+| `←` `→` / `↑` `↓` / `j` `k` | scroll playlist (when open) |
+| `q` / Esc | quit (or close settings / help / playlist) |
+
+### Settings (`c`)
+
+Left sidebar. Persisted in `~/option/music/config.toml`:
+
+| Option | Meaning |
+|--------|---------|
+| Excess volume | Allow volume up to 200% |
+| Cava styles | Style (`bars` / `dense` / `mirror` / `dots`) and height |
+| LDM | Fewer animations, lighter redraw |
+| Accent | Color accent (presets or `#RRGGBB` in the file) |
+
+In the sidebar: `↑↓` move · `enter` / click toggle · `←→` cycle · `d` reset · `c` / Esc close.
+
+### Playlist (`l`)
+
+Left sidebar. Mouse wheel and navigation keys scroll · click a row to jump · click or drag the vertical scrollbar.
 
 ### Mouse
 
@@ -140,7 +158,7 @@ msc --help
 
 ## Cava bars
 
-Off by default. With `--cava` or `v`, and `cava` installed, optMusic draws **classic vertical bars under the shortcut footer** (content width, soft greys). No decorative viz in the status row.
+Off by default. With `--cava` or `v`, and `cava` installed, optMusic draws a spectrum under the shortcut footer. Style and height are configurable in settings (`c` → Cava styles).
 
 - PipeWire first, Pulse fallback
 - Click the strip or press `v` to toggle

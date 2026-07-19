@@ -1,6 +1,6 @@
 [package]
 name = "optmusic"
-version = "0.2.5"
+version = "0.2.6"
 edition = "2024"
 rust-version = "1.85"
 description = "optMusic — minimal black & white CLI music player (option music)"
@@ -27,6 +27,8 @@ anyhow = "1"
 walkdir = "2"
 crossterm = "0.28"
 dirs = "6.0"
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
 
 [profile.release]
 lto = true

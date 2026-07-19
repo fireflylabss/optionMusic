@@ -10,6 +10,7 @@ mod eq;
 mod mpv;
 mod player;
 mod playlist;
+mod settings;
 mod ui;
 
 use std::io::{self, IsTerminal};
@@ -27,6 +28,7 @@ use cli::{Cli, Command};
 use config::resolve_music_dir;
 use player::Player;
 use playlist::Playlist;
+use settings::SettingsAction;
 use ui::{
     banner, bin_name, print_info, print_success, print_warn, FrameState, HitTarget, SessionUi,
     APP_NAME, BRIGHT, DIM, GRAY, WHITE,
@@ -244,6 +246,7 @@ fn run_session(
     enable_cava: bool,
 ) -> Result<()> {
     let mut ui = SessionUi::enter(enable_cava).context("failed to open player UI")?;
+    player.set_volume_max(ui.volume_max());
     let mut start_toast = if shuffled {
         format!(
             "{} track{} · shuffled{}",
@@ -335,29 +338,66 @@ fn run_session(
         };
         ui.draw(&frame)?;
 
-        // ~60 fps keeps progress + cava bars smooth.
-        if event::poll(Duration::from_millis(16)).unwrap_or(false) {
+        // ~60 fps normally; LDM drops to ~30 fps.
+        let poll_ms = if ui.ldm() { 33 } else { 16 };
+        if event::poll(Duration::from_millis(poll_ms)).unwrap_or(false) {
             loop {
                 match event::read() {
                     Ok(Event::Key(key)) => {
                         if key.kind == KeyEventKind::Press {
-                            // Playlist sidebar scrolls with arrows / j k / page keys.
+                            // Settings popup captures navigation first.
+                            if ui.settings_open() {
+                                if key.modifiers.contains(KeyModifiers::CONTROL)
+                                    && key.code == KeyCode::Char('c')
+                                {
+                                    player.stop();
+                                    done_msg = "bye — thanks for listening ♪";
+                                    dragging_progress = false;
+                                    dragging_list_scroll = false;
+                                    quitting = true;
+                                    continue;
+                                }
+                                match ui.handle_settings_key(key.code) {
+                                    SettingsAction::None | SettingsAction::Closed => {}
+                                    SettingsAction::Applied {
+                                        message,
+                                        sync_volume,
+                                        refresh_cava,
+                                    } => {
+                                        if sync_volume {
+                                            player.set_volume_max(ui.volume_max());
+                                        }
+                                        if refresh_cava {
+                                            ui.refresh_cava_if_active();
+                                        }
+                                        ui.toast(message);
+                                    }
+                                }
+                                break;
+                            }
+                            // The open playlist owns navigation keys so the sidebar can
+                            // be scrolled without triggering player shortcuts.
                             if ui.show_list() {
                                 match key.code {
-                                    KeyCode::Up | KeyCode::Char('k') => {
+                                    KeyCode::Left
+                                    | KeyCode::Up
+                                    | KeyCode::Char('h')
+                                    | KeyCode::Char('k') => {
                                         ui.list_scroll_by(-1);
                                         continue;
                                     }
-                                    KeyCode::Down | KeyCode::Char('j') => {
+                                    KeyCode::Right
+                                    | KeyCode::Down
+                                    | KeyCode::Char('j') => {
                                         ui.list_scroll_by(1);
                                         continue;
                                     }
                                     KeyCode::PageUp => {
-                                        ui.list_scroll_by(-8);
+                                        ui.list_scroll_by(-4);
                                         continue;
                                     }
                                     KeyCode::PageDown => {
-                                        ui.list_scroll_by(8);
+                                        ui.list_scroll_by(4);
                                         continue;
                                     }
                                     KeyCode::Home => {
@@ -375,12 +415,17 @@ fn run_session(
                                 Action::None => {}
                                 Action::List => ui.toggle_list(),
                                 Action::Help => ui.toggle_help(),
+                                Action::Settings => {
+                                    ui.toggle_settings();
+                                }
                                 Action::TogglePath => {
                                     let on = ui.toggle_path();
                                     ui.toast(if on { "filename on" } else { "filename off" });
                                 }
                                 Action::Quit => {
-                                    if ui.show_help() {
+                                    if ui.settings_open() {
+                                        ui.close_settings();
+                                    } else if ui.show_help() {
                                         ui.toggle_help();
                                     } else if ui.show_list() {
                                         ui.toggle_list();
@@ -497,7 +542,32 @@ fn run_session(
                             }
                         }
                     }
-                    Ok(Event::Mouse(m)) => match m.kind {
+                    Ok(Event::Mouse(m)) => {
+                        if ui.settings_open() {
+                            match m.kind {
+                                MouseEventKind::Down(MouseButton::Left) => {
+                                    match ui.handle_settings_click(m.column, m.row) {
+                                        SettingsAction::None | SettingsAction::Closed => {}
+                                        SettingsAction::Applied {
+                                            message,
+                                            sync_volume,
+                                            refresh_cava,
+                                        } => {
+                                            if sync_volume {
+                                                player.set_volume_max(ui.volume_max());
+                                            }
+                                            if refresh_cava {
+                                                ui.refresh_cava_if_active();
+                                            }
+                                            ui.toast(message);
+                                        }
+                                    }
+                                }
+                                _ => {}
+                            }
+                            break;
+                        }
+                        match m.kind {
                         MouseEventKind::Down(MouseButton::Left) => match ui.hit_target(m.column, m.row)
                         {
                             HitTarget::Progress(ratio) => {
@@ -646,7 +716,8 @@ fn run_session(
                             }
                         }
                         _ => {}
-                    },
+                        }
+                    }
                     Ok(_) => {}
                     Err(_) => break,
                 }
@@ -706,6 +777,7 @@ enum Action {
     Stop,
     PlayPause,
     Help,
+    Settings,
     TogglePath,
     Jump(usize),
     VolChanged(u8),
@@ -786,6 +858,7 @@ fn handle_key(key: KeyEvent, player: &mut Player) -> Action {
         KeyCode::Char('o') => Action::LoopCycle,
         KeyCode::Char('f') => Action::TogglePath,
         KeyCode::Char('v') => Action::CavaToggle,
+        KeyCode::Char('c') => Action::Settings,
         KeyCode::Char('q') | KeyCode::Esc => Action::Quit,
         KeyCode::Char('h') | KeyCode::Char('?') => Action::Help,
         KeyCode::Char(c) if c.is_ascii_digit() && c != '0' => {

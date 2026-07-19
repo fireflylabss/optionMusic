@@ -69,7 +69,8 @@ Playback keys (press ? / h in the player for the full sidebar):\n\
   o            cycle loop (off→list→track)\n\
   l            playlist sidebar        r            shuffle\n\
   f            filename line           v            cava on/off\n\
-  ? / h        help sidebar            q / Esc      quit\n\
+  c            settings sidebar        ? / h        help\n\
+  q / Esc      quit\n\
 \n\
 Examples:\n\
   msc p song.mp3\n\

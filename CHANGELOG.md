@@ -4,6 +4,27 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.6] - 2026-07-17
+
+### Added
+
+- Settings **left sidebar** with **`c`** — ↑↓ move, enter / click to toggle; cava submenu inside.
+- Playlist as a **left sidebar** (`l`) — mouse-wheel / navigation keys scroll, click rows, and click / drag the scrollbar.
+  - **Excess volume** — allow gain up to **200%**
+  - **Cava styles** — style (`bars` / `dense` / `mirror` / `dots`) and height (`3` / `5` / `7`)
+  - **LDM** — low-detail mode (fewer animations, ~30 fps redraw)
+  - **Accent** — cycle presets (`default` · `cyan` · `green` · `amber` · `rose` · `blue` · `violet`) or set `#RRGGBB` in the config file
+- Persistent config at **`~/option/music/config.toml`** (each option + “reset all” can revert to defaults; `d` resets the selected row).
+
+### Changed
+
+- Help / footer list the new `c` shortcut.
+- Added a blank line between the speed / pitch / EQ status bar and the footer.
+
+### Fixed
+
+- Settings popup (`c`) redraws immediately when navigating or toggling by keyboard / mouse.
+
 ## [0.2.5] - 2026-07-17
 
 ### Added

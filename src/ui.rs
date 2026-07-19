@@ -15,6 +15,8 @@ use crossterm::{
 };
 
 use crate::cava::CavaBridge;
+use crate::config::{Accent, AppConfig, CavaStyle};
+use crate::settings::{self, SettingsAction, SettingsUi};
 
 // ── Palette ─────────────────────────────────────────────────────
 pub const WHITE: Color = Color::White;
@@ -70,7 +72,7 @@ pub enum HitTarget {
     CavaToggle,
     /// 1-based playlist jump.
     Jump(usize),
-    /// Vertical scroll ratio on the playlist scrollbar (0.0 ..= 1.0).
+    /// Scroll ratio on the playlist sidebar scrollbar (0.0 ..= 1.0).
     ListScroll(f64),
     None,
 }
@@ -179,6 +181,9 @@ pub struct SessionUi {
     hits: HitMap,
     /// Optional cava spectrum background.
     cava: Option<CavaBridge>,
+    /// Persistent settings (`~/option/music/config.toml`).
+    config: AppConfig,
+    settings: SettingsUi,
 }
 
 impl SessionUi {
@@ -193,6 +198,7 @@ impl SessionUi {
             Clear(ClearType::All)
         )?;
         let now = Instant::now();
+        let config = AppConfig::load();
         let cava = if enable_cava {
             CavaBridge::try_start()
         } else {
@@ -213,7 +219,47 @@ impl SessionUi {
             list_follow: 0,
             hits: HitMap::default(),
             cava,
+            config,
+            settings: SettingsUi::default(),
         })
+    }
+
+    pub fn config(&self) -> &AppConfig {
+        &self.config
+    }
+
+    pub fn ldm(&self) -> bool {
+        self.config.ldm
+    }
+
+    pub fn volume_max(&self) -> u8 {
+        self.config.volume_max()
+    }
+
+    pub fn settings_open(&self) -> bool {
+        self.settings.is_open()
+    }
+
+    pub fn toggle_settings(&mut self) {
+        self.settings.toggle();
+    }
+
+    pub fn close_settings(&mut self) {
+        self.settings.close();
+    }
+
+    /// Handle a key while the settings bar is open.
+    pub fn handle_settings_key(&mut self, code: crossterm::event::KeyCode) -> SettingsAction {
+        self.settings.handle_key(code, &mut self.config)
+    }
+
+    /// Click while the settings bar is open.
+    pub fn handle_settings_click(&mut self, col: u16, row: u16) -> SettingsAction {
+        self.settings.handle_click(col, row, &mut self.config)
+    }
+
+    pub fn pointer_over_settings(&self, col: u16, row: u16) -> bool {
+        self.settings.pointer_over_pane(col, row)
     }
 
     /// Restore the real terminal and detach Drop cleanup.
@@ -279,6 +325,16 @@ impl SessionUi {
         }
     }
 
+    /// Restart cava if it's running (style/height changed live).
+    pub fn refresh_cava_if_active(&mut self) {
+        if self.cava.is_some() {
+            if let Some(mut c) = self.cava.take() {
+                c.stop();
+            }
+            self.cava = CavaBridge::try_start();
+        }
+    }
+
     pub fn cava_active(&self) -> bool {
         self.cava.is_some()
     }
@@ -314,6 +370,7 @@ impl SessionUi {
         self.list_scroll = ((ratio.clamp(0.0, 1.0) * max as f64).round() as usize).min(max);
     }
 
+    /// Scrollbar position while dragging the vertical playlist thumb.
     pub fn list_scroll_ratio_at_row(&self, row: u16) -> Option<f64> {
         self.hits.list_bar.map(|r| r.v_ratio_at(row))
     }
@@ -350,7 +407,7 @@ impl SessionUi {
 
     /// Resolve a mouse position against the last drawn frame.
     pub fn hit_target(&self, col: u16, row: u16) -> HitTarget {
-        // Playlist overlay absorbs hits on the left before center controls.
+        // Playlist scrollbar absorbs hits before track rows.
         if let Some(r) = self.hits.list_bar {
             if r.contains(col, row) {
                 return HitTarget::ListScroll(r.v_ratio_at(row));
@@ -466,25 +523,38 @@ impl SessionUi {
 
         let t = self.t0.elapsed().as_secs_f64();
         let playing = !state.paused && !state.stopped;
+        let ldm = self.config.ldm;
+        let accent = accent_color(&self.config.accent);
+        let accent_dim = dim_accent(accent);
 
-        let intro = ease_out_cubic((self.t0.elapsed().as_secs_f64() / 0.55).clamp(0.0, 1.0));
-        let title_in =
-            ease_out_cubic((self.track_since.elapsed().as_secs_f64() / 0.4).clamp(0.0, 1.0));
-
-        // Sidebars are overlays — center player stays put (like cava).
-        let list_w = if self.show_list {
-            LIST_SIDEBAR_W.min(cols.saturating_sub(8))
+        let intro = if ldm {
+            1.0
         } else {
-            0
+            ease_out_cubic((self.t0.elapsed().as_secs_f64() / 0.55).clamp(0.0, 1.0))
         };
+        let title_in = if ldm {
+            1.0
+        } else {
+            ease_out_cubic((self.track_since.elapsed().as_secs_f64() / 0.4).clamp(0.0, 1.0))
+        };
+
+        // Overlays — center player stays put (like cava).
         let help_w = if self.show_help {
             HELP_SIDEBAR_W.min(cols.saturating_sub(8))
         } else {
             0
         };
+        let settings_open = self.settings.is_open();
 
-        let content_cols = cols;
-        let content_x0 = 0usize;
+        // The list takes real layout space instead of floating over the player.
+        // Keep enough room for the compact player on narrow terminals.
+        let list_w = if self.show_list {
+            LIST_SIDEBAR_W.min(cols.saturating_sub(help_w).saturating_sub(28))
+        } else {
+            0
+        };
+        let content_x0 = list_w;
+        let content_cols = cols.saturating_sub(list_w + help_w);
 
         let block_w = content_cols.saturating_sub(4).clamp(28, 56);
         let max_title = block_w.saturating_sub(2);
@@ -528,10 +598,9 @@ impl SessionUi {
         let toast = state.toast.map(|m| truncate(m, max_title));
         let cava_levels = self.cava.as_ref().map(|c| c.snapshot());
 
-        // Playlist lives in the left sidebar — prepare scroll window.
-        if list_w > 0 {
-            let visible = rows.saturating_sub(4).max(3);
-            self.list_visible = visible;
+        // Playlist sidebar — visible row count comes from the terminal height.
+        if self.show_list {
+            self.list_visible = rows.saturating_sub(LIST_SIDEBAR_HEADER + LIST_SIDEBAR_FOOTER).max(1);
             self.list_total = state.list_names.len();
             self.follow_list_track(state.index);
             let max = self.list_scroll_max();
@@ -548,19 +617,23 @@ impl SessionUi {
         block_h += 1; // meta gap / spacer
         block_h += 1; // footer
 
-        let settle = ((1.0 - intro) * 1.5).round() as usize;
+        let settle = if ldm {
+            0
+        } else {
+            ((1.0 - intro) * 1.5).round() as usize
+        };
         let mut y = rows.saturating_sub(block_h) / 2 + settle;
         if y < 1 {
             y = 1;
         }
 
-        // Brand breathes only while playing — frozen when paused.
-        let note_c = if playing {
-            gray(lerp(170.0, 245.0, breath(t, 2.8)))
+        // Brand breathes only while playing — frozen when paused / LDM.
+        let note_c = if playing && !ldm {
+            mix_rgb(accent_dim, accent, breath(t, 2.8))
         } else {
-            mix(BRIGHT, DARK, 1.0 - intro)
+            mix_rgb(accent, DARK, 1.0 - intro)
         };
-        let brand_c = mix(BRIGHT, DARK, 1.0 - intro);
+        let brand_c = mix_rgb(accent, DARK, 1.0 - intro);
         paint_in_region(
             &mut out,
             y as u16,
@@ -570,7 +643,11 @@ impl SessionUi {
         )?;
         y += 2;
 
-        let title_c = gray(lerp(70.0, 245.0, title_in * intro));
+        let title_c = if self.config.accent == Accent::Default {
+            gray(lerp(70.0, 245.0, title_in * intro))
+        } else {
+            mix_rgb(DARK, accent, title_in * intro)
+        };
         paint_in_region(
             &mut out,
             y as u16,
@@ -581,7 +658,7 @@ impl SessionUi {
         y += 1;
 
         if self.show_path {
-            let path_c = mix(DIM, DARK, 1.0 - intro * 0.85);
+            let path_c = mix_rgb(DIM, DARK, 1.0 - intro * 0.85);
             paint_in_region(
                 &mut out,
                 y as u16,
@@ -594,14 +671,14 @@ impl SessionUi {
             y += 1; // compact gap when path hidden
         }
 
-        let knob_c = if playing {
-            gray(lerp(190.0, 255.0, breath(t, 2.0)))
+        let knob_c = if playing && !ldm {
+            mix_rgb(accent_dim, accent, breath(t, 2.0))
         } else if state.paused {
             GRAY
         } else {
             DIM
         };
-        let fill_c = mix(WHITE, DARK, 1.0 - intro);
+        let fill_c = mix_rgb(accent, DARK, 1.0 - intro);
         let progress_spans = [
             Span::fg(DIM, &pos_s),
             Span::fg(DIM, "  "),
@@ -628,11 +705,13 @@ impl SessionUi {
         y += 1;
 
         let st_color = if state.stopped {
-            mix(GRAY, DARK, 1.0 - intro)
+            mix_rgb(GRAY, DARK, 1.0 - intro)
         } else if state.paused || state.muted {
             GRAY
+        } else if ldm {
+            accent
         } else {
-            gray(lerp(210.0, 245.0, breath(t, 3.2)))
+            mix_rgb(accent_dim, accent, breath(t, 3.2))
         };
         // ◂  icon status  ▸  ·  idx  ·  −  vol  +
         let prev_g = "◂";
@@ -757,10 +836,9 @@ impl SessionUi {
             h: 1,
         });
         y += 1;
-
-        y += 1;
-        let footer_dim = mix(DARK, Color::Black, 1.0 - intro);
-        let footer_key = mix(GRAY, DARK, 1.0 - intro * 0.7);
+        y += 1; // one empty breathing row before the footer bar
+        let footer_dim = mix_rgb(DARK, Color::Black, 1.0 - intro);
+        let footer_key = mix_rgb(GRAY, DARK, 1.0 - intro * 0.7);
         paint_key_footer(
             &mut out,
             y as u16,
@@ -772,8 +850,9 @@ impl SessionUi {
         y += 1;
 
         // Cava overlays below the player — fixed offset, does not shift the block.
+        let cava_rows = self.config.cava.rows as usize;
         if show_cava_strip {
-            let cava_y = (y + 2).min(rows.saturating_sub(CAVA_BAR_ROWS + 1));
+            let cava_y = (y + 2).min(rows.saturating_sub(cava_rows + 1));
             if let Some(ref levels) = cava_levels {
                 let intensity = if playing {
                     0.85
@@ -783,6 +862,11 @@ impl SessionUi {
                     0.14
                 };
                 let strip_w = block_w.saturating_add(4).min(content_cols.saturating_sub(4));
+                let cava_color = if self.config.accent == Accent::Default {
+                    mix(CAVA_DIM, CAVA_SOFT, intensity * 0.95)
+                } else {
+                    mix_rgb(DARK, accent_dim, intensity.clamp(0.2, 1.0))
+                };
                 let (strip_x, strip_h) = paint_cava_bars(
                     &mut out,
                     cava_y as u16,
@@ -791,6 +875,9 @@ impl SessionUi {
                     strip_w,
                     levels,
                     intensity,
+                    self.config.cava.style,
+                    cava_rows,
+                    cava_color,
                 )?;
                 self.hits.cava = Some(HitRect {
                     x: strip_x,
@@ -801,10 +888,11 @@ impl SessionUi {
             }
         }
 
-        if list_w > 0 {
+        if self.show_list {
             paint_list_sidebar(
                 &mut out,
                 &mut self.hits,
+                cols,
                 rows,
                 list_w,
                 self.list_scroll,
@@ -813,17 +901,30 @@ impl SessionUi {
                 state.list_names,
                 playing,
                 t,
+                ldm,
+                accent,
+            )?;
+        }
+
+        if settings_open {
+            settings::paint_settings_sidebar(
+                &mut out,
+                cols,
+                rows,
+                &mut self.settings,
+                &self.config,
+                accent,
             )?;
         }
 
         if help_w > 0 {
-            paint_help_sidebar(&mut out, cols, rows, help_w)?;
+            paint_help_sidebar(&mut out, cols, rows, help_w, accent)?;
         }
 
         // Floating toast — top-right, tucked left of help overlay when open.
         if let Some(ref msg) = toast {
             let right = cols.saturating_sub(help_w);
-            paint_toast_overlay(&mut out, right, msg, &self.toast)?;
+            paint_toast_overlay(&mut out, right, msg, &self.toast, ldm)?;
         }
 
         queue!(out, EndSynchronizedUpdate)?;
@@ -865,8 +966,8 @@ const HELP_SECTIONS: &[(&str, &[(&str, &str)])] = &[
         &[
             ("f", "filename"),
             ("v", "cava"),
-            ("↑↓", "list scroll"),
-            ("click", "ui"),
+            ("c", "settings"),
+            ("←→", "list scroll"),
             ("?", "help"),
             ("q", "quit"),
         ],
@@ -875,11 +976,10 @@ const HELP_SECTIONS: &[(&str, &[(&str, &str)])] = &[
 
 /// Right help sidebar width when fully open.
 const HELP_SIDEBAR_W: usize = 26;
-/// Left playlist sidebar width when fully open.
+/// Width of the compact playlist sidebar.
 const LIST_SIDEBAR_W: usize = 30;
-
-/// Classic cava bar height (vertical columns).
-const CAVA_BAR_ROWS: usize = 5;
+const LIST_SIDEBAR_HEADER: usize = 3;
+const LIST_SIDEBAR_FOOTER: usize = 2;
 
 fn help_sidebar_height() -> usize {
     let mut n = 1; // top pad
@@ -897,6 +997,7 @@ fn paint_help_sidebar(
     cols: usize,
     rows: usize,
     sidebar_w: usize,
+    accent: Color,
 ) -> io::Result<()> {
     let x0 = cols.saturating_sub(sidebar_w);
     let rule_x = x0;
@@ -940,7 +1041,7 @@ fn paint_help_sidebar(
                 text_x as u16,
                 y as u16,
                 &[
-                    Span::fg(BRIGHT, &key_col),
+                    Span::fg(accent, &key_col),
                     Span::fg(DARK, " "),
                     Span::fg(GRAY, &action_t),
                 ],
@@ -955,9 +1056,11 @@ fn paint_help_sidebar(
     Ok(())
 }
 
+/// Compact left playlist sidebar with a full-height, mouse-friendly scrollbar.
 fn paint_list_sidebar(
     out: &mut impl Write,
     hits: &mut HitMap,
+    cols: usize,
     rows: usize,
     sidebar_w: usize,
     scroll: usize,
@@ -966,149 +1069,100 @@ fn paint_list_sidebar(
     names: &[String],
     playing: bool,
     t: f64,
+    ldm: bool,
+    accent: Color,
 ) -> io::Result<()> {
-    if sidebar_w < 8 {
-        return Ok(());
-    }
+    let sidebar_w = sidebar_w.max(1).min(cols);
+    let list_h = rows.saturating_sub(1);
+    let track_x = sidebar_w.saturating_sub(2) as u16;
+    let track_y = LIST_SIDEBAR_HEADER as u16;
+    let track_h = list_h.saturating_sub(LIST_SIDEBAR_HEADER + LIST_SIDEBAR_FOOTER).max(1) as u16;
 
-    let rule_x = sidebar_w.saturating_sub(1);
-    let bar_x = sidebar_w.saturating_sub(2);
-    let text_x = 1usize;
-    let name_w = sidebar_w.saturating_sub(8).max(4);
-
-    // Whole sidebar is a wheel-scroll target (even when empty).
-    hits.list_pane = Some(HitRect {
-        x: 0,
-        y: 1,
-        w: sidebar_w as u16,
-        h: rows.saturating_sub(2).max(1) as u16,
-    });
     hits.list.clear();
     hits.list_bar = None;
+    hits.list_pane = Some(HitRect {
+        x: 0,
+        y: 0,
+        w: sidebar_w as u16,
+        h: list_h as u16,
+    });
 
-    // Divider
-    for row in 1..rows.saturating_sub(1) {
-        queue!(
-            out,
-            MoveTo(rule_x as u16, row as u16),
-            SetForegroundColor(DARK),
-            Print("│"),
-            ResetColor
-        )?;
+    let head = format!("playlist {}/{}", current_1based.max(1), names.len().max(1));
+    paint_at(out, 1, 1, &[Span::fg(DIM, &head)])?;
+    paint_at(out, 1, 2, &[Span::fg(DARK, "────────────────────────")])?;
+
+    // A quiet divider keeps the sidebar distinct without making it a panel.
+    for row in 0..list_h {
+        paint_at(out, track_x.saturating_sub(1), row as u16, &[Span::fg(DARK, "│")])?;
     }
 
-    let y0 = 1usize;
-    paint_at(out, text_x as u16, y0 as u16, &[Span::fg(DIM, "playlist")])?;
-    let hint = format!("{}/{}", current_1based.max(1), names.len().max(1));
-    paint_at(
-        out,
-        text_x as u16,
-        (y0 + 1) as u16,
-        &[Span::fg(DIM, &hint)],
-    )?;
-
-    if names.is_empty() {
-        paint_at(
-            out,
-            text_x as u16,
-            (y0 + 3) as u16,
-            &[Span::fg(DARK, "(empty)")],
-        )?;
-        return Ok(());
-    }
-
-    let list_y0 = y0 + 3;
-    let foot_reserve = 2usize;
-    let vis = visible
-        .min(rows.saturating_sub(list_y0 + foot_reserve))
-        .max(1);
     let total = names.len();
+    let vis = visible.max(1);
     let max_scroll = total.saturating_sub(vis);
     let scroll = scroll.min(max_scroll);
 
-    for row_i in 0..vis {
-        let idx = scroll + row_i;
-        if idx >= total {
-            break;
-        }
-        let y = list_y0 + row_i;
-        let track_n = idx + 1;
-        let current = track_n == current_1based;
-        let marker = if current { "▸" } else { " " };
-        let line = format!(
-            "{marker}{:>3} {}",
-            track_n,
-            truncate(&names[idx], name_w)
-        );
-        let color = if current {
-            if playing {
-                gray(lerp(210.0, 245.0, breath(t, 2.6)))
-            } else {
-                BRIGHT
-            }
-        } else {
-            DIM
-        };
-        paint_at(out, text_x as u16, y as u16, &[Span::fg(color, &line)])?;
-        hits.list.push((
-            HitRect {
-                x: text_x as u16,
-                y: y as u16,
-                w: line.chars().count() as u16,
-                h: 1,
-            },
-            track_n,
-        ));
-    }
-
-    // Scrollbar track + thumb (always drawn; drag/click when scrollable).
-    if sidebar_w >= 10 {
-        let track_h = vis.max(1);
-        let thumb_h = if total <= vis {
-            track_h
-        } else {
-            ((vis as f64 / total as f64) * track_h as f64)
-                .round()
-                .clamp(1.0, track_h as f64) as usize
-        };
-        let thumb_max = track_h.saturating_sub(thumb_h);
-        let thumb_y = if max_scroll == 0 {
-            0
-        } else {
-            ((scroll as f64 / max_scroll as f64) * thumb_max as f64).round() as usize
-        };
-        // 2-col hit area so the bar is easy to grab.
-        hits.list_bar = Some(HitRect {
-            x: bar_x.saturating_sub(1) as u16,
-            y: list_y0 as u16,
-            w: 2,
-            h: track_h as u16,
-        });
-        for i in 0..track_h {
-            let on_thumb = i >= thumb_y && i < thumb_y + thumb_h;
-            let ch = if on_thumb { '┃' } else { '│' };
-            let c = if on_thumb { GRAY } else { DARK };
-            let glyph = ch.to_string();
-            paint_at(
-                out,
-                bar_x as u16,
-                (list_y0 + i) as u16,
-                &[Span::fg(c, &glyph)],
-            )?;
-        }
+    if names.is_empty() {
+        paint_at(out, 1, track_y, &[Span::fg(DARK, "(empty)")])?;
     } else {
-        hits.list_bar = None;
+        let name_w = sidebar_w.saturating_sub(8).max(8);
+        for i in 0..vis {
+            let idx = scroll + i;
+            if idx >= total {
+                break;
+            }
+            let track_n = idx + 1;
+            let current = track_n == current_1based;
+            let marker = if current { "›" } else { " " };
+            let chip = format!("{marker}{track_n} {}", truncate(&names[idx], name_w));
+            let y = track_y.saturating_add(i as u16);
+            let color = if current {
+                if playing && !ldm {
+                    mix_rgb(dim_accent(accent), accent, breath(t, 2.6))
+                } else {
+                    accent
+                }
+            } else {
+                GRAY
+            };
+            paint_at(out, 1, y, &[Span::fg(color, &chip)])?;
+            hits.list.push((
+                HitRect {
+                    x: 0,
+                    y,
+                    w: track_x.saturating_sub(1),
+                    h: 1,
+                },
+                track_n,
+            ));
+        }
     }
 
-    let foot_y = list_y0 + vis + 1;
-    if foot_y < rows.saturating_sub(1) {
-        paint_at(
-            out,
-            text_x as u16,
-            foot_y as u16,
-            &[Span::fg(DARK, "l  close")],
-        )?;
+    paint_at(out, 1, rows.saturating_sub(1) as u16, &[Span::fg(DARK, "l  close")])?;
+
+    // Vertical scrollbar. Its entire two-column hit area is intentionally generous.
+    hits.list_bar = Some(HitRect {
+        x: track_x,
+        y: track_y,
+        w: 2,
+        h: track_h,
+    });
+
+    let thumb_h = if total <= vis || total == 0 {
+        track_h
+    } else {
+        ((vis as f64 / total as f64) * track_h as f64).round().clamp(1.0, track_h as f64) as u16
+    };
+    let thumb_max = track_h.saturating_sub(thumb_h);
+    let thumb_y = if max_scroll == 0 {
+        0
+    } else {
+        ((scroll as f64 / max_scroll as f64) * thumb_max as f64).round() as u16
+    };
+    for i in 0..track_h {
+        let c = if i >= thumb_y && i < thumb_y + thumb_h { GRAY } else { DARK };
+        paint_at(out, track_x, track_y + i, &[Span::fg(c, "┃")])?;
     }
+
     Ok(())
 }
 
@@ -1121,7 +1175,7 @@ fn paint_key_footer(
     key_c: Color,
     gap_c: Color,
 ) -> io::Result<()> {
-    let chips: &[&str] = &["space", "n/p", "←→", "+/−", "v", "?"];
+    let chips: &[&str] = &["space", "n/p", "←→", "+/−", "v", "c", "?"];
     let mut spans: Vec<Span<'_>> = Vec::with_capacity(chips.len() * 2);
     for (i, key) in chips.iter().enumerate() {
         if i > 0 {
@@ -1132,13 +1186,13 @@ fn paint_key_footer(
     paint_in_region(out, y, region_x, region_w, &spans).map(|_| ())
 }
 
-struct Span<'a> {
+pub(crate) struct Span<'a> {
     color: Option<Color>,
     text: &'a str,
 }
 
 impl<'a> Span<'a> {
-    fn fg(color: Color, text: &'a str) -> Self {
+    pub(crate) fn fg(color: Color, text: &'a str) -> Self {
         Self {
             color: Some(color),
             text,
@@ -1164,7 +1218,7 @@ fn paint_spans(out: &mut impl Write, spans: &[Span<'_>]) -> io::Result<()> {
 }
 
 /// Paint left-aligned at an absolute column.
-fn paint_at(out: &mut impl Write, x: u16, y: u16, spans: &[Span<'_>]) -> io::Result<()> {
+pub(crate) fn paint_at(out: &mut impl Write, x: u16, y: u16, spans: &[Span<'_>]) -> io::Result<()> {
     queue!(out, MoveTo(x, y))?;
     paint_spans(out, spans)
 }
@@ -1194,24 +1248,29 @@ fn paint_cava_bars(
     block_w: usize,
     levels: &[f32],
     intensity: f64,
+    style: CavaStyle,
+    rows: usize,
+    color: Color,
 ) -> io::Result<(u16, u16)> {
     if levels.is_empty() || block_w == 0 {
         return Ok(((region_x + region_w / 2) as u16, 0));
     }
     // Half-block ramp — stock cava “bars” feel.
     const RAMP: &[char] = &[' ', '▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
+    const DOTS: &[char] = &[' ', '·', '•', '●'];
     let intensity = intensity.clamp(0.0, 1.0);
-    let rows = CAVA_BAR_ROWS;
+    let rows = rows.clamp(3, 7);
     let n = levels.len();
 
-    // Fit as many bar columns as possible with a 1-col gap (classic look).
-    // Pattern: B _ B _ B …  → each bar needs 2 cols except the last.
-    let bar_cols = ((block_w + 1) / 2).clamp(8, n.min(block_w));
+    let gap = matches!(style, CavaStyle::Bars | CavaStyle::Mirror);
+    let bar_cols = if gap {
+        ((block_w + 1) / 2).clamp(8, n.min(block_w))
+    } else {
+        block_w.clamp(8, n.min(block_w))
+    };
 
-    let mut lines: Vec<String> = (0..rows).map(|_| String::with_capacity(block_w)).collect();
-
+    let mut sampled = Vec::with_capacity(bar_cols);
     for b in 0..bar_cols {
-        // Sample across the spectrum into fewer display columns.
         let pos = if bar_cols <= 1 {
             0.0
         } else {
@@ -1221,19 +1280,40 @@ fn paint_cava_bars(
         let i1 = (i0 + 1).min(n - 1);
         let frac = (pos - i0 as f64).clamp(0.0, 1.0) as f32;
         let raw = levels[i0] * (1.0 - frac) + levels[i1] * frac;
-        // Light neighbor blend so bars don’t flicker independently.
         let left = levels[i0.saturating_sub(1)];
         let right = levels[i1.min(n - 1)];
         let level = ((left * 0.15 + raw * 0.7 + right * 0.15) as f64).clamp(0.0, 1.0) * intensity;
-        // Gentle gamma — quiet audio still shows, peaks stay soft.
-        let level = level.powf(0.78);
+        sampled.push(level.powf(0.78));
+    }
 
-        // Height in eighths of a cell across all rows.
+    if style == CavaStyle::Mirror && bar_cols > 1 {
+        let mid = bar_cols / 2;
+        for i in 0..mid {
+            let mirror = sampled[bar_cols - 1 - i];
+            let v = sampled[i].max(mirror);
+            sampled[i] = v;
+            sampled[bar_cols - 1 - i] = v;
+        }
+    }
+
+    let paint_rows = if style == CavaStyle::Dots { 1 } else { rows };
+    let mut lines: Vec<String> = (0..paint_rows)
+        .map(|_| String::with_capacity(block_w))
+        .collect();
+
+    for (b, &level) in sampled.iter().enumerate() {
+        if style == CavaStyle::Dots {
+            let idx = (level * (DOTS.len() - 1) as f64).round() as usize;
+            lines[0].push(DOTS[idx.min(DOTS.len() - 1)]);
+            if gap && b + 1 < bar_cols {
+                lines[0].push(' ');
+            }
+            continue;
+        }
+
         let eighths = (level * (rows * (RAMP.len() - 1)) as f64).round() as usize;
         let full = RAMP.len() - 1;
-
         for r in 0..rows {
-            // Row 0 is the top.
             let from_bottom = rows - 1 - r;
             let cell_base = from_bottom * full;
             let ch = if eighths >= cell_base + full {
@@ -1244,13 +1324,12 @@ fn paint_cava_bars(
                 RAMP[0]
             };
             lines[r].push(ch);
-            if b + 1 < bar_cols {
+            if gap && b + 1 < bar_cols {
                 lines[r].push(' ');
             }
         }
     }
 
-    let color = mix(CAVA_DIM, CAVA_SOFT, intensity * 0.95);
     let mut x0 = (region_x + region_w / 2) as u16;
     for (i, line) in lines.iter().enumerate() {
         let x = paint_in_region(out, y + i as u16, region_x, region_w, &[Span::fg(color, line)])?;
@@ -1258,7 +1337,7 @@ fn paint_cava_bars(
             x0 = x;
         }
     }
-    Ok((x0, rows as u16))
+    Ok((x0, paint_rows as u16))
 }
 
 /// Floating toast in the top-right of the player region (fade only).
@@ -1267,12 +1346,13 @@ fn paint_toast_overlay(
     right_edge: usize,
     msg: &str,
     toast: &Option<(String, Instant)>,
+    ldm: bool,
 ) -> io::Result<()> {
     let Some((_, at)) = toast else {
         return Ok(());
     };
     let elapsed = at.elapsed().as_secs_f64();
-    let alpha = toast_alpha(elapsed);
+    let alpha = if ldm { 1.0 } else { toast_alpha(elapsed) };
     if alpha <= 0.02 {
         return Ok(());
     }
@@ -1346,6 +1426,37 @@ fn color_level(c: Color) -> u8 {
 
 fn mix(a: Color, b: Color, t: f64) -> Color {
     gray(lerp(color_level(a) as f64, color_level(b) as f64, t))
+}
+
+fn rgb_components(c: Color) -> (u8, u8, u8) {
+    match c {
+        Color::Rgb { r, g, b } => (r, g, b),
+        Color::White => (255, 255, 255),
+        Color::Black => (0, 0, 0),
+        _ => (128, 128, 128),
+    }
+}
+
+fn mix_rgb(a: Color, b: Color, t: f64) -> Color {
+    let (ar, ag, ab) = rgb_components(a);
+    let (br, bg, bb) = rgb_components(b);
+    let t = t.clamp(0.0, 1.0);
+    Color::Rgb {
+        r: lerp(ar as f64, br as f64, t).round().clamp(0.0, 255.0) as u8,
+        g: lerp(ag as f64, bg as f64, t).round().clamp(0.0, 255.0) as u8,
+        b: lerp(ab as f64, bb as f64, t).round().clamp(0.0, 255.0) as u8,
+    }
+}
+
+fn accent_color(accent: &Accent) -> Color {
+    match accent.rgb() {
+        Some((r, g, b)) => Color::Rgb { r, g, b },
+        None => BRIGHT,
+    }
+}
+
+fn dim_accent(accent: Color) -> Color {
+    mix_rgb(accent, DARK, 0.45)
 }
 
 fn toast_alpha(elapsed: f64) -> f64 {

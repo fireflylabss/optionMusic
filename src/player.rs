@@ -8,6 +8,7 @@ use libmpv2::events::Event as MpvEvent;
 use libmpv2::mpv_end_file_reason;
 use libmpv2::Mpv;
 
+use crate::config::VOLUME_MAX_NORMAL;
 use crate::eq::EqPreset;
 use crate::mpv::{create_player, MpvConfig};
 
@@ -21,6 +22,8 @@ const PITCH_STEP: f64 = 0.05;
 pub struct Player {
     mpv: Mpv,
     volume: u8,
+    /// Soft ceiling — 100 normally, 200 when excess volume is enabled.
+    volume_max: u8,
     muted: bool,
     speed: f64,
     pitch: f64,
@@ -35,7 +38,7 @@ pub struct Player {
 
 impl Player {
     pub fn new(volume: u8, speed: f64, crossfade: f64) -> Result<Self> {
-        let volume = volume.min(100);
+        let volume = volume.min(VOLUME_MAX_NORMAL);
         let config = MpvConfig::for_cli(volume as f64, speed, false, crossfade);
         let mpv = create_player(&config)?;
         let _ = mpv.set_property("pitch", 1.0);
@@ -43,6 +46,7 @@ impl Player {
         Ok(Self {
             mpv,
             volume,
+            volume_max: VOLUME_MAX_NORMAL,
             muted: false,
             speed: config.speed,
             pitch: 1.0,
@@ -73,13 +77,21 @@ impl Player {
         self.eq.label()
     }
 
+    /// Update the soft volume ceiling (100 or 200). Clamps current volume if needed.
+    pub fn set_volume_max(&mut self, max: u8) {
+        self.volume_max = max.clamp(VOLUME_MAX_NORMAL, crate::config::VOLUME_MAX_EXCESS);
+        if self.volume > self.volume_max {
+            self.set_volume(self.volume_max);
+        }
+    }
+
     pub fn set_volume(&mut self, volume: u8) {
-        self.volume = volume.min(100);
+        self.volume = volume.min(self.volume_max);
         let _ = self.mpv.set_property("volume", self.volume as f64);
     }
 
     pub fn volume_up(&mut self, step: u8) -> u8 {
-        let v = (self.volume as u16 + step as u16).min(100) as u8;
+        let v = (self.volume as u16 + step as u16).min(self.volume_max as u16) as u8;
         self.set_volume(v);
         self.volume
     }
