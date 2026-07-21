@@ -14,15 +14,28 @@ const AUDIO_EXTS: &[&str] = &[
 #[derive(Debug, Clone)]
 pub struct Track {
     pub path: PathBuf,
+    /// Cached embedded title (None when missing / unread).
+    pub title: Option<String>,
+    pub artist: Option<String>,
+    pub album: Option<String>,
 }
 
 impl Track {
     pub fn new(path: PathBuf) -> Self {
-        Self { path }
+        let tags = crate::meta::read_tags(&path);
+        Self {
+            path,
+            title: tags.title,
+            artist: tags.artist,
+            album: tags.album,
+        }
     }
 
-    /// Human-friendly name: file stem, falling back to full path.
+    /// Human-friendly name: tagged title, else file stem, else full path.
     pub fn display_name(&self) -> String {
+        if let Some(title) = self.title.as_ref().filter(|s| !s.is_empty()) {
+            return title.clone();
+        }
         self.path
             .file_stem()
             .and_then(|s| s.to_str())

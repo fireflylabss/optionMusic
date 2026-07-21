@@ -299,6 +299,44 @@ impl Default for DlUiMode {
     }
 }
 
+/// How the Artists browser groups tracks (shared CLI + desktop).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ArtistSource {
+    /// Group by embedded artist / album-artist tags (default).
+    #[serde(alias = "tag", alias = "tags", alias = "meta")]
+    Metadata,
+    /// Group by parent folder name.
+    #[serde(alias = "dir", alias = "directory")]
+    Folder,
+}
+
+impl Default for ArtistSource {
+    fn default() -> Self {
+        Self::Metadata
+    }
+}
+
+impl ArtistSource {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Metadata => "metadata",
+            Self::Folder => "folder",
+        }
+    }
+
+    pub fn next(self) -> Self {
+        match self {
+            Self::Metadata => Self::Folder,
+            Self::Folder => Self::Metadata,
+        }
+    }
+
+    pub fn prev(self) -> Self {
+        self.next()
+    }
+}
+
 impl DlUiMode {
     pub fn label(self) -> &'static str {
         match self {
@@ -319,7 +357,7 @@ impl DlUiMode {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct AppConfig {
     /// Allow volume up to 200% (MPV soft gain).
@@ -331,10 +369,22 @@ pub struct AppConfig {
     /// Download wizard UI: `arrows` (default) or `type`.
     #[serde(default)]
     pub dl_ui: DlUiMode,
+    /// Artists browser: metadata tags (default) or folder names.
+    #[serde(default)]
+    pub artist_source: ArtistSource,
     #[serde(default, rename = "folders")]
     pub music_dirs: Vec<PathBuf>,
     #[serde(default)]
     pub favorites: Vec<String>,
+    /// Last played track id (absolute path) for session resume.
+    #[serde(default)]
+    pub resume_track: String,
+    /// Playback position in seconds when the session was saved.
+    #[serde(default)]
+    pub resume_position: f64,
+    /// Queue ids restored with the session.
+    #[serde(default)]
+    pub resume_queue: Vec<String>,
 }
 
 impl Default for AppConfig {
@@ -345,8 +395,12 @@ impl Default for AppConfig {
             accent: Accent::Default,
             cava: CavaConfig::default(),
             dl_ui: DlUiMode::Arrows,
+            artist_source: ArtistSource::Metadata,
             music_dirs: Vec::new(),
             favorites: Vec::new(),
+            resume_track: String::new(),
+            resume_position: 0.0,
+            resume_queue: Vec::new(),
         }
     }
 }

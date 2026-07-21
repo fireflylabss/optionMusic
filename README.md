@@ -21,17 +21,16 @@ Help (`?` / `h`) is a **right sidebar**, while settings (`c`) and playlist (`l`)
 ### Desktop app
 
 The React/Tauri desktop client lives alongside the Rust CLI. Install Bun, then
-run the build from the repository root:
+from the repository root:
 
 ```bash
 bun install
-bun run build
+bun run tauri:dev    # desktop app with libmpv playback
 ```
 
-`bun run build` also runs a locked dependency install automatically, so the
-documented command remains reproducible from a clean checkout. Start the
-frontend during development with `bun run dev`; package the desktop client
-with `bun run tauri build` (Tauri system WebKit dependencies may be required).
+Browser-only `bun run dev` is a UI preview — it cannot play audio. Package with
+`bun run tauri build` (Tauri / WebKit system deps may be required).
+`bun run build` runs a locked `bun install` then Vite for the web assets.
 
 ### Arch / CachyOS (AUR)
 

@@ -4,6 +4,36 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+**Desktop** entries are full releases (not beta), but the desktop shell is still **unstable** — expect bugs while it matures. The CLI track is separate and versioned independently.
+
+## [Desktop 0.1.1] - 2026-07-20
+
+> **Unstable release** — Desktop builds are real releases (not beta), but the shell is still early; bugs and rough edges are expected.
+
+### Added
+
+- Audex-style left sidebar: brand + traffic lights, Library / Artists / Playlists / Favorites, Recent list, Search trigger, Open files, Settings.
+- **⌘K / Ctrl+K** command palette to search and play tracks (↑↓ navigate, Enter play, Esc close) — replaces the old Search tab.
+- Artists browser with two modes: **metadata** (default, tags via lofty) or **folder** names — shared `artist_source` in `~/option/music/config.toml` (CLI settings `c` → Artists, desktop Settings → Library).
+- Track tags: `artist` / `album` / preferred title on the DTO; artist cards load cover art when available.
+- Artist detail view: **Albums** grid + **Tracks** list (drill into an album).
+- Session resume: last track, position, and queue persisted in config (`resume_track`, `resume_position`, `resume_queue`) and restored paused on reopen (desktop + shared config).
+- Now-playing **listening rail** on the right: full-bleed cover, play/pause on art, title/artist/album, in-panel scrubber, Like / Queue actions, Up next list.
+- Settings as a centered **popup** (tabs: Library / Playback / Audio) — folders, artists source, volume, excess volume, LDM, EQ grid; shared with CLI/`config.toml`.
+- Album art in stage, mini-player, and artist/album cards — folder sidecars (`cover.jpg`, `folder.jpg`, …) or embedded tags via `lofty`.
+
+### Changed
+
+- Replaced the top masthead with a persistent navigation sidebar; Search is no longer a primary nav tab.
+- Now-playing moved from left/stage-left to a compact right rail (~300–320px).
+- Bottom player bar polish: larger artwork, clearer typography, thicker scrubber, refined control hierarchy and volume control.
+- Window traffic lights (close / minimize / maximize) sized for easier clicking without dominating the chrome.
+- Transport stays in the footer; stage focuses on cover and listening context.
+
+### Fixed
+
+- Header / stage / list alignment inconsistencies from the 0.1.0 layout pass.
+
 ## [CLI 0.2.7] - 2026-07-19
 
 ### Added
@@ -27,6 +57,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Desktop 0.1.0] - 2026-07-19
 
+> **Unstable release** — Desktop builds are real releases (not beta), but the shell is still early; bugs and rough edges are expected.
+
 ### Added
 
 - First desktop release built with React, TypeScript, Vite, Bun and Tauri 2.
@@ -41,6 +73,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - The desktop app is now started with `bun run tauri:dev`; browser-only preview clearly states that playback and library access require Tauri.
 - Playback, library state, queue and preferences now come from the Rust core; the frontend contains presentation state only.
 - Local paths are validated by the core before revealing them in the file manager.
+- Live ticker emits a lightweight `PlaybackState` (position / pause / current) instead of re-sending the full library on every tick.
+- Frontend keeps the library list stable across ticks and only re-renders the track list when transport state actually changes.
+- Single-click anywhere on a track row starts playback (not only the title button / double-click).
+- Settings EQ options use the core preset labels (`off` · `bass+` · `treble+` · `rock` · `vocal` · `lofi`).
+
+### Fixed
+
+- Playback appeared dead with large libraries: the 250 ms ticker was pushing ~0.5 MB JSON (full library) through the WebView IPC, starving UI clicks.
+- `libmpv` init failed with `Null` under desktop locales such as `pt_BR` — GTK/WebKit resets `LC_NUMERIC`; the core now forces `C` before creating / driving MPV.
+- `play` could mark a track as current even when `loadfile` failed; current is only committed after a successful open.
+- Footer Play called `toggle_pause` as a no-op when the player was idle / stopped; it now resumes or restarts the current track.
+- Play / command errors were silent whenever the library was non-empty; failures now show an dismissible error banner.
 
 ## [CLI 0.2.6] - 2026-07-17
 

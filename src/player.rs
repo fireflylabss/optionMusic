@@ -183,8 +183,23 @@ impl Player {
             .with_context(|| format!("cannot load {}", path.display()))
     }
 
+    /// Load a local file paused at `position` seconds (session resume).
+    pub fn play_file_paused_at(&mut self, path: &Path, position: f64) -> Result<()> {
+        let path_str = path
+            .to_str()
+            .with_context(|| format!("non-UTF8 path: {}", path.display()))?;
+        self.play_uri_at(path_str, true, position.max(0.0))
+            .with_context(|| format!("cannot resume {}", path.display()))
+    }
+
     /// Play a local path or remote URL (YouTube / SoundCloud via mpv+yt-dlp).
     pub fn play_uri(&mut self, uri: &str) -> Result<()> {
+        self.play_uri_at(uri, false, 0.0)
+    }
+
+    fn play_uri_at(&mut self, uri: &str, paused: bool, position: f64) -> Result<()> {
+        // GTK may flip LC_NUMERIC after init; keep C for libmpv property I/O.
+        crate::mpv::ensure_c_numeric_locale();
         self.drain_events();
         self.mpv
             .command("loadfile", &[uri, "replace"])
@@ -192,7 +207,6 @@ impl Player {
         // Drop EndFile(Stop) from the replace so next/prev aren't treated as eof.
         self.drain_events();
 
-        let _ = self.mpv.set_property("pause", false);
         let _ = self.mpv.set_property("volume", self.volume as f64);
         let _ = self.mpv.set_property("mute", self.muted);
         let _ = self.mpv.set_property("speed", self.speed);
@@ -201,10 +215,22 @@ impl Player {
         let _ = self
             .mpv
             .set_property("loop-file", if self.loop_track { "inf" } else { "no" });
+        let _ = self.mpv.set_property("pause", paused);
+        if position > 0.05 {
+            let pos = format!("{position:.3}");
+            let _ = self.mpv.command("seek", &[&pos, "absolute"]);
+        }
 
         self.stopped = false;
         self.finished = false;
         Ok(())
+    }
+
+    pub fn set_paused(&mut self, paused: bool) {
+        if self.stopped {
+            return;
+        }
+        let _ = self.mpv.set_property("pause", paused);
     }
 
     pub fn toggle_pause(&mut self) -> bool {

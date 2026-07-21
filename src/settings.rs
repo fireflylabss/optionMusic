@@ -8,7 +8,7 @@ use crossterm::{
     style::{Color, Print, ResetColor, SetBackgroundColor, SetForegroundColor},
 };
 
-use crate::config::{Accent, AppConfig, DlUiMode};
+use crate::config::{Accent, AppConfig, ArtistSource, DlUiMode};
 use crate::ui::{DARK, DIM, GRAY};
 
 pub const SETTINGS_SIDEBAR_W: usize = 30;
@@ -101,7 +101,7 @@ impl SettingsUi {
 
     fn len(&self) -> usize {
         match self.screen {
-            SettingsScreen::Main => 6,
+            SettingsScreen::Main => 7,
             SettingsScreen::Cava => 3,
         }
     }
@@ -244,6 +244,15 @@ impl SettingsUi {
                     applied(format!("dl ui · {}", cfg.dl_ui.label()), false, false)
                 }
                 5 => {
+                    cfg.artist_source = cfg.artist_source.next();
+                    let _ = cfg.save();
+                    applied(
+                        format!("artists · {}", cfg.artist_source.label()),
+                        false,
+                        false,
+                    )
+                }
+                6 => {
                     cfg.reset_all();
                     let _ = cfg.save();
                     applied("settings · reset defaults", true, true)
@@ -294,6 +303,19 @@ impl SettingsUi {
                 };
                 let _ = cfg.save();
                 applied(format!("dl ui · {}", cfg.dl_ui.label()), false, false)
+            }
+            SettingsScreen::Main if self.cursor == 5 => {
+                cfg.artist_source = if dir < 0 {
+                    cfg.artist_source.prev()
+                } else {
+                    cfg.artist_source.next()
+                };
+                let _ = cfg.save();
+                applied(
+                    format!("artists · {}", cfg.artist_source.label()),
+                    false,
+                    false,
+                )
             }
             SettingsScreen::Main if self.cursor == 0 || self.cursor == 2 => self.activate(cfg),
             SettingsScreen::Main if self.cursor == 1 && dir > 0 => {
@@ -356,6 +378,11 @@ impl SettingsUi {
                     applied("dl ui · arrows", false, false)
                 }
                 5 => {
+                    cfg.artist_source = ArtistSource::Metadata;
+                    let _ = cfg.save();
+                    applied("artists · metadata", false, false)
+                }
+                6 => {
                     cfg.reset_all();
                     let _ = cfg.save();
                     applied("settings · reset defaults", true, true)
@@ -452,7 +479,8 @@ pub fn paint_settings_sidebar(
             (2, "LDM", on_off(cfg.ldm).into()),
             (3, "Accent", cfg.accent.label()),
             (4, "Dl UI", cfg.dl_ui.label().into()),
-            (5, "Reset all", "defaults".into()),
+            (5, "Artists", cfg.artist_source.label().into()),
+            (6, "Reset all", "defaults".into()),
         ],
         SettingsScreen::Cava => vec![
             (0, "Style", cfg.cava.style.label().into()),

@@ -1,9 +1,20 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "optMusic",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "identifier": "com.aefireflylabs.optmusic",
   "build": { "beforeDevCommand": "bun run dev", "beforeBuildCommand": "bun run build", "devUrl": "http://localhost:1420", "frontendDist": "../dist" },
-  "app": { "windows": [{ "title": "optMusic", "width": 1200, "height": 760, "minWidth": 760, "minHeight": 520 }], "security": { "csp": null } },
+  "app": {
+    "windows": [{
+      "title": "optMusic",
+      "width": 1200,
+      "height": 760,
+      "minWidth": 760,
+      "minHeight": 520,
+      "decorations": false,
+      "transparent": false
+    }],
+    "security": { "csp": null }
+  },
   "bundle": { "active": true, "targets": "all", "icon": [] }
 }

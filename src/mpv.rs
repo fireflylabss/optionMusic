@@ -59,8 +59,14 @@ impl MpvConfig {
 
 /// Create an audio-only MPV instance.
 pub fn create_player(config: &MpvConfig) -> Result<Mpv> {
+    // libmpv refuses to start unless LC_NUMERIC is "C". GTK/WebKit (Tauri) and
+    // many desktop sessions flip this to the user locale after process start.
+    ensure_c_numeric_locale();
+
     let mpv = Mpv::new().map_err(|e| {
-        anyhow::anyhow!("failed to initialize libmpv (is libmpv installed?): {e:?}")
+        anyhow::anyhow!(
+            "failed to initialize libmpv (is libmpv installed? LC_NUMERIC must be C): {e:?}"
+        )
     })?;
 
     let _ = mpv.set_property("video", "no");
@@ -83,6 +89,14 @@ pub fn create_player(config: &MpvConfig) -> Result<Mpv> {
     }
 
     Ok(mpv)
+}
+
+/// libmpv requires the C numeric locale for parsing property values.
+pub fn ensure_c_numeric_locale() {
+    #[cfg(unix)]
+    unsafe {
+        libc::setlocale(libc::LC_NUMERIC, b"C\0".as_ptr().cast());
+    }
 }
 
 #[cfg(test)]
