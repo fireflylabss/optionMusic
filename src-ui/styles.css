@@ -503,7 +503,12 @@ input[type=range] { accent-color: var(--white) }
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
   gap: 12px;
-  padding-top: 4px;
+  margin: 0;
+  padding: 4px 0 0;
+  list-style: none;
+}
+.artist-grid-item {
+  display: contents;
 }
 .album-grid { margin-bottom: 8px }
 .artist-detail { display: flex; flex-direction: column; gap: 22px }
@@ -1350,17 +1355,40 @@ input[type=range] { accent-color: var(--white) }
 .secondary.full { width: 100%; justify-content: center; margin-top: 8px }
 
 /* Command palette (⌘K) */
-.cmd-veil {
+.cmd-dialog {
   position: fixed;
   inset: 0;
   z-index: var(--z-veil);
+  width: 100%;
+  max-width: none;
+  height: 100%;
+  max-height: none;
+  margin: 0;
+  padding: 12vh 16px 16px;
+  border: 0;
+  background: transparent;
   display: flex;
   justify-content: center;
-  padding: 12vh 16px 16px;
-  background: rgba(0, 0, 0, 0.62);
+  align-items: flex-start;
   animation: fade var(--t-med) var(--ease);
 }
+.cmd-dialog::backdrop {
+  background: rgba(0, 0, 0, 0.62);
+}
+.cmd-dialog[open] { display: flex; }
+.dialog-dismiss {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  background: transparent;
+  cursor: default;
+}
 .cmd {
+  position: relative;
+  z-index: 1;
   width: min(560px, 100%);
   max-height: min(520px, 70vh);
   display: flex;
@@ -1475,17 +1503,29 @@ input[type=range] { accent-color: var(--white) }
 }
 
 /* Settings popup */
-.popup-veil {
+.popup-dialog {
   position: fixed;
   inset: 0;
   z-index: var(--z-veil);
+  width: 100%;
+  max-width: none;
+  height: 100%;
+  max-height: none;
+  margin: 0;
+  padding: 24px;
+  border: 0;
+  background: transparent;
   display: grid;
   place-items: center;
-  padding: 24px;
-  background: rgba(0, 0, 0, 0.72);
   animation: fade var(--t-med) var(--ease);
 }
+.popup-dialog::backdrop {
+  background: rgba(0, 0, 0, 0.72);
+}
+.popup-dialog[open] { display: grid; }
 .popup {
+  position: relative;
+  z-index: 1;
   width: min(440px, 100%);
   max-height: min(720px, calc(100vh - 48px));
   display: flex;
@@ -1868,10 +1908,10 @@ input[type=range] { accent-color: var(--white) }
   .banner,
   .empty,
   .menu,
-  .popup-veil,
+  .popup-dialog,
   .popup,
   .popup-body,
-  .cmd-veil,
+  .cmd-dialog,
   .cmd,
   .artist-card { animation: none }
   .scrub-fill { transition: none }
@@ -1942,5 +1982,5 @@ input[type=range] { accent-color: var(--white) }
   .control-buttons { gap: 4px }
   .popup { border-radius: 14px }
   .popup-tabs button { font-size: 11px; gap: 4px }
-  .cmd-veil { padding-top: 8vh }
+  .cmd-dialog { padding-top: 8vh }
 }

@@ -1,6 +1,6 @@
 [package]
 name = "optmusic-desktop"
-version = "0.1.1"
+version = "0.1.2"
 description = "Desktop optMusic player"
 authors = ["AEFireflyLabs"]
 edition = "2021"

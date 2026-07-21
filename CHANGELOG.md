@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 **Desktop** entries are full releases (not beta), but the desktop shell is still **unstable** — expect bugs while it matures. The CLI track is separate and versioned independently.
 
+## [Desktop 0.1.2] - 2026-07-21
+
+> **Unstable release** — Desktop builds are real releases (not beta), but the shell is still early; bugs and rough edges are expected.
+
+### Changed
+
+- Split the monolithic desktop UI into focused modules: `Sidebar`, `Catalog`, `Stage`, `PlayerBar`, `SettingsPanel`, `CommandPalette`, `ContextMenu`, plus shared `types` / `lib` and a `useOptMusic` hook — `main.tsx` is now a thin composition shell.
+- Command palette (⌘K) and Settings use the native `<dialog>` API (`showModal` / `::backdrop`) instead of custom veil overlays.
+- Artist and album grids render as semantic lists (`<ul>` / `<li>`) for clearer structure and accessibility.
+
 ## [Desktop 0.1.1] - 2026-07-20
 
 > **Unstable release** — Desktop builds are real releases (not beta), but the shell is still early; bugs and rough edges are expected.
