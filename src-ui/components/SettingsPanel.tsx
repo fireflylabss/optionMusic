@@ -1,12 +1,35 @@
 import { useEffect, useRef, useState } from 'react'
-import { Disc3, FolderOpen, Plus, Settings, SlidersHorizontal, Volume2, X } from 'lucide-react'
-import type { ArtistSource, BackendSettings } from '../types'
-import { eqOptions } from '../lib'
+import { Disc, FolderOpen, GearSix, Plus, Sliders, SpeakerHigh, X } from '@phosphor-icons/react'
+import type { ArtistSource, BackendSettings, ReplayGainMode } from '../types'
+import { eqOptions } from '../lib/music'
+import { Button } from './ui/button'
+import { Switch } from './ui/switch'
 
-export function SettingsPanel({ settings, volume, eq, folders, defaultMusicDir, addFolder, setVolume, setEq, setExcess, setLdm, setArtistSource, close }: {
+export function SettingsPanel({
+  settings,
+  volume,
+  eq,
+  speed,
+  pitch,
+  folders,
+  defaultMusicDir,
+  addFolder,
+  setVolume,
+  setEq,
+  setExcess,
+  setLdm,
+  setArtistSource,
+  setSpeed,
+  setPitch,
+  resetSpeedPitch,
+  setReplaygain,
+  close,
+}: {
   settings: BackendSettings
   volume: number
   eq: string
+  speed: number
+  pitch: number
   folders: string[]
   defaultMusicDir: string
   addFolder: () => void
@@ -15,6 +38,10 @@ export function SettingsPanel({ settings, volume, eq, folders, defaultMusicDir, 
   setExcess: (v: boolean) => void
   setLdm: (v: boolean) => void
   setArtistSource: (s: ArtistSource) => void
+  setSpeed: (v: number) => void
+  setPitch: (v: number) => void
+  resetSpeedPitch: () => void
+  setReplaygain: (mode: ReplayGainMode) => void
   close: () => void
 }) {
   const dialogRef = useRef<HTMLDialogElement>(null)
@@ -23,6 +50,7 @@ export function SettingsPanel({ settings, volume, eq, folders, defaultMusicDir, 
   const defaultShown = !folders.some(f => f.replace(/\/+$/, '') === defaultMusicDir.replace(/\/+$/, ''))
   const artistSource: ArtistSource = settings.artist_source === 'folder' ? 'folder' : 'metadata'
   const folderCount = folders.length + (defaultShown || !folders.length ? 1 : 0)
+  const replaygain: ReplayGainMode = settings.replaygain === 'track' || settings.replaygain === 'album' ? settings.replaygain : 'off'
 
   useEffect(() => {
     const el = dialogRef.current
@@ -46,24 +74,24 @@ export function SettingsPanel({ settings, volume, eq, folders, defaultMusicDir, 
       <div className="popup">
         <header className="popup-head">
           <div className="popup-title">
-            <span className="popup-mark" aria-hidden="true"><Settings size={16} strokeWidth={2} /></span>
+            <span className="popup-mark" aria-hidden="true"><GearSix size={16} weight="bold" /></span>
             <div>
               <h2 id="settings-title">Settings</h2>
-              <p>Shared with CLI · ~/option/music/config.toml</p>
+              <p>Shared with CLI · ~/.option/music/config.toml</p>
             </div>
           </div>
-          <button type="button" className="popup-close" aria-label="Close settings" onClick={() => dialogRef.current?.close()}><X size={18} /></button>
+          <button type="button" className="popup-close" aria-label="Close settings" onClick={() => dialogRef.current?.close()}><X size={18} weight="bold" /></button>
         </header>
 
         <nav className="popup-tabs" aria-label="Settings sections">
           <button type="button" className={tab === 'library' ? 'on' : ''} onClick={() => setTab('library')}>
-            <FolderOpen size={15} /> Library
+            <FolderOpen size={15} weight="regular" /> Library
           </button>
           <button type="button" className={tab === 'playback' ? 'on' : ''} onClick={() => setTab('playback')}>
-            <Volume2 size={15} /> Playback
+            <SpeakerHigh size={15} weight="regular" /> Playback
           </button>
           <button type="button" className={tab === 'audio' ? 'on' : ''} onClick={() => setTab('audio')}>
-            <SlidersHorizontal size={15} /> Audio
+            <Sliders size={15} weight="regular" /> Audio
           </button>
         </nav>
 
@@ -79,21 +107,21 @@ export function SettingsPanel({ settings, volume, eq, folders, defaultMusicDir, 
                 <div className="path-list">
                   {folders.map(f => (
                     <div className="path" key={f}>
-                      <FolderOpen size={15} />
+                      <FolderOpen size={15} weight="regular" />
                       <span title={f}>{f}</span>
                     </div>
                   ))}
                   {defaultShown && (
                     <div className="path">
-                      <FolderOpen size={15} />
+                      <FolderOpen size={15} weight="regular" />
                       <span title={defaultMusicDir || '~/Music'}>{defaultMusicDir || '~/Music'} <em>default</em></span>
                     </div>
                   )}
                   {!folders.length && !defaultShown && <p className="popup-note">No extra folders yet.</p>}
                 </div>
-                <button type="button" className="popup-primary" onClick={addFolder}>
-                  <Plus size={16} /> Add folder
-                </button>
+                <Button type="button" className="w-full" onClick={addFolder}>
+                  <Plus data-icon="inline-start" weight="bold" /> Add folder
+                </Button>
               </div>
 
               <div className="popup-block">
@@ -103,10 +131,10 @@ export function SettingsPanel({ settings, volume, eq, folders, defaultMusicDir, 
                 <p className="popup-note">How the Artists tab groups your library. Same setting as CLI (`c`).</p>
                 <div className="seg" role="group" aria-label="Artists source">
                   <button type="button" className={artistSource === 'metadata' ? 'on' : ''} onClick={() => setArtistSource('metadata')}>
-                    <Disc3 size={15} /> Metadata
+                    <Disc size={15} /> Metadata
                   </button>
                   <button type="button" className={artistSource === 'folder' ? 'on' : ''} onClick={() => setArtistSource('folder')}>
-                    <FolderOpen size={15} /> Folder
+                    <FolderOpen size={15} weight="regular" /> Folder
                   </button>
                 </div>
               </div>
@@ -131,50 +159,115 @@ export function SettingsPanel({ settings, volume, eq, folders, defaultMusicDir, 
                 />
               </div>
 
-              <label className="switch-row">
+              <div className="switch-row">
                 <span>
                   <strong>Excess volume</strong>
                   <small>Allow gain up to 200%</small>
                 </span>
-                <input type="checkbox" checked={Boolean(settings.excess_volume)} onChange={e => setExcess(e.target.checked)} />
-              </label>
+                <Switch
+                  checked={Boolean(settings.excess_volume)}
+                  onCheckedChange={setExcess}
+                  aria-label="Excess volume"
+                />
+              </div>
 
-              <label className="switch-row">
+              <div className="switch-row">
                 <span>
                   <strong>Low detail mode</strong>
                   <small>Reduce motion across desktop + CLI</small>
                 </span>
-                <input type="checkbox" checked={Boolean(settings.ldm)} onChange={e => setLdm(e.target.checked)} />
-              </label>
+                <Switch
+                  checked={Boolean(settings.ldm)}
+                  onCheckedChange={setLdm}
+                  aria-label="Low detail mode"
+                />
+              </div>
             </>
           )}
 
           {tab === 'audio' && (
-            <div className="popup-block">
-              <div className="popup-block-head">
-                <h3>EQ preset</h3>
+            <>
+              <div className="popup-block">
+                <div className="popup-block-head">
+                  <h3>Speed</h3>
+                  <span>{speed.toFixed(2)}×</span>
+                </div>
+                <input
+                  className="popup-range"
+                  type="range"
+                  min="0.5"
+                  max="2"
+                  step="0.05"
+                  value={speed}
+                  onChange={e => setSpeed(Number(e.target.value))}
+                  aria-label="Playback speed"
+                />
               </div>
-              <p className="popup-note">Applied by the MPV desktop core.</p>
-              <div className="eq-grid" role="listbox" aria-label="EQ preset">
-                {eqOptions.map(o => (
-                  <button
-                    type="button"
-                    key={o}
-                    role="option"
-                    aria-selected={selected === o}
-                    className={selected === o ? 'on' : ''}
-                    onClick={() => setEq(o)}
-                  >
-                    {o}
-                  </button>
-                ))}
+
+              <div className="popup-block">
+                <div className="popup-block-head">
+                  <h3>Pitch</h3>
+                  <span>{pitch.toFixed(2)}×</span>
+                </div>
+                <input
+                  className="popup-range"
+                  type="range"
+                  min="0.5"
+                  max="2"
+                  step="0.05"
+                  value={pitch}
+                  onChange={e => setPitch(Number(e.target.value))}
+                  aria-label="Playback pitch"
+                />
               </div>
-            </div>
+
+              <Button type="button" variant="outline" className="w-full" onClick={resetSpeedPitch}>
+                Reset speed & pitch
+              </Button>
+
+              <div className="popup-block">
+                <div className="popup-block-head">
+                  <h3>ReplayGain</h3>
+                </div>
+                <p className="popup-note">Normalize loudness using embedded ReplayGain tags.</p>
+                <select
+                  className="popup-select"
+                  value={replaygain}
+                  onChange={e => setReplaygain(e.target.value as ReplayGainMode)}
+                  aria-label="ReplayGain mode"
+                >
+                  <option value="off">Off</option>
+                  <option value="track">Track</option>
+                  <option value="album">Album</option>
+                </select>
+              </div>
+
+              <div className="popup-block">
+                <div className="popup-block-head">
+                  <h3>EQ preset</h3>
+                </div>
+                <p className="popup-note">Applied by the MPV desktop core.</p>
+                <div className="eq-grid" role="listbox" aria-label="EQ preset">
+                  {eqOptions.map(o => (
+                    <button
+                      type="button"
+                      key={o}
+                      role="option"
+                      aria-selected={selected === o}
+                      className={selected === o ? 'on' : ''}
+                      onClick={() => setEq(o)}
+                    >
+                      {o}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </>
           )}
         </div>
 
         <footer className="popup-foot">
-          <button type="button" className="popup-done" onClick={() => dialogRef.current?.close()}>Done</button>
+          <Button type="button" className="w-full" onClick={() => dialogRef.current?.close()}>Done</Button>
         </footer>
       </div>
     </dialog>

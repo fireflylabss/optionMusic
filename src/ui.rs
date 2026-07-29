@@ -181,7 +181,7 @@ pub struct SessionUi {
     hits: HitMap,
     /// Optional cava spectrum background.
     cava: Option<CavaBridge>,
-    /// Persistent settings (`~/option/music/config.toml`).
+    /// Persistent settings (`~/.option/music/config.toml`).
     config: AppConfig,
     settings: SettingsUi,
     /// Slim download-preview session: no list/settings sidebars.

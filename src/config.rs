@@ -1,25 +1,63 @@
 //! Paths, defaults, and persistent settings for optMusic.
 //!
-//! User config: `~/option/music/config.toml`
+//! User config: `~/.option/music/config.toml`
 
 use std::fmt;
 use std::fs;
-use std::path::{Component, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 
-/// `~/option/music`
-pub fn config_dir() -> PathBuf {
-    dirs::home_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("option")
-        .join("music")
+/// Move `legacy` → `new` once when the new tree is missing.
+fn migrate_dir(legacy: &Path, new: &Path) {
+    if new.exists() || !legacy.exists() {
+        return;
+    }
+    if let Some(parent) = new.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    let _ = fs::rename(legacy, new);
 }
 
-/// `~/option/music/config.toml`
+/// `~/.option/music` (migrates from legacy `~/option/music`)
+pub fn config_dir() -> PathBuf {
+    let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
+    let dir = home.join(".option").join("music");
+    migrate_dir(&home.join("option").join("music"), &dir);
+    dir
+}
+
+/// `~/.option/music/config.toml`
 pub fn config_path() -> PathBuf {
     config_dir().join("config.toml")
+}
+
+/// `~/.option/music/cache`
+pub fn cache_dir() -> PathBuf {
+    config_dir().join("cache")
+}
+
+/// `~/.option/music/cache/tags`
+pub fn tags_cache_dir() -> PathBuf {
+    cache_dir().join("tags")
+}
+
+/// `~/.option/music/cache/covers`
+pub fn covers_cache_dir() -> PathBuf {
+    cache_dir().join("covers")
+}
+
+/// Stable FNV-1a 64-bit digest for on-disk cache filenames.
+pub fn stable_cache_key(parts: &[&[u8]]) -> String {
+    let mut hash: u64 = 0xcbf29ce484222325;
+    for part in parts {
+        for b in *part {
+            hash ^= *b as u64;
+            hash = hash.wrapping_mul(0x100000001b3);
+        }
+    }
+    format!("{hash:016x}")
 }
 
 /// Default local library: `~/Music`
@@ -357,6 +395,43 @@ impl DlUiMode {
     }
 }
 
+/// ReplayGain application mode (MPV `replaygain` property).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum ReplayGainMode {
+    #[default]
+    Off,
+    Track,
+    Album,
+}
+
+impl ReplayGainMode {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Off => "off",
+            Self::Track => "track",
+            Self::Album => "album",
+        }
+    }
+
+    pub fn next(self) -> Self {
+        match self {
+            Self::Off => Self::Track,
+            Self::Track => Self::Album,
+            Self::Album => Self::Off,
+        }
+    }
+
+    /// Value for MPV `replaygain` property.
+    pub fn mpv_value(self) -> &'static str {
+        match self {
+            Self::Off => "no",
+            Self::Track => "track",
+            Self::Album => "album",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct AppConfig {
@@ -372,6 +447,9 @@ pub struct AppConfig {
     /// Artists browser: metadata tags (default) or folder names.
     #[serde(default)]
     pub artist_source: ArtistSource,
+    /// ReplayGain mode applied via MPV.
+    #[serde(default)]
+    pub replaygain: ReplayGainMode,
     #[serde(default, rename = "folders")]
     pub music_dirs: Vec<PathBuf>,
     #[serde(default)]
@@ -396,6 +474,7 @@ impl Default for AppConfig {
             cava: CavaConfig::default(),
             dl_ui: DlUiMode::Arrows,
             artist_source: ArtistSource::Metadata,
+            replaygain: ReplayGainMode::Off,
             music_dirs: Vec::new(),
             favorites: Vec::new(),
             resume_track: String::new(),
@@ -430,7 +509,7 @@ impl AppConfig {
         let path = config_path();
         let body = toml::to_string_pretty(self).context("serialize config")?;
         let header = "# optMusic settings — edit carefully or use `c` in the player\n\
-# path: ~/option/music/config.toml\n\n";
+# path: ~/.option/music/config.toml\n\n";
         fs::write(&path, format!("{header}{body}"))
             .with_context(|| format!("cannot write {}", path.display()))?;
         Ok(())
@@ -456,8 +535,7 @@ mod tests {
     #[test]
     fn config_dir_ends_with_option_music() {
         let dir = config_dir();
-        assert!(dir.ends_with("music"));
-        assert!(dir.to_string_lossy().contains("option"));
+        assert!(dir.ends_with(Path::new(".option").join("music")));
     }
 
     #[test]

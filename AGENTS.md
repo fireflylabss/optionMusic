@@ -43,13 +43,34 @@ export CARGO_TARGET_DIR="$(pwd)/target"
 
 - Engine: `libmpv2` (system **libmpv** required)
 - TUI: `crossterm` alternate screen (zero scrollback leak) + mouse capture
-- Config: `~/option/music/config.toml` (settings popup: `c`)
+- Config: `~/.option/music/config.toml` (settings popup: `c`)
 - Default music dir: `~/Music` (`-m` / `--music-dir`)
 - Optional **cava** spectrum bars (off by default; `--cava` or `v` to enable)
-- Optional **yt-dlp** downloader: `msc dl` wizard (provider → search/URLs → presets/options → cwd); UI `arrows` (default) or `type` via `--ui` / settings `c` / `dl_ui` in config; cache in `~/option/music/cache/dl/`
+- Optional **yt-dlp** downloader: `msc dl` wizard (provider → search/URLs → presets/options → cwd); UI `arrows` (default) or `type` via `--ui` / settings `c` / `dl_ui` in config; cache in `~/.option/music/cache/dl/`
+
+## Release channels
+
+Version tags use SemVer **plus** an explicit channel: `x.y.z-alpha` | `x.y.z-beta` | `x.y.z-stable`.
+
+| Channel | When to use |
+|---------|-------------|
+| **alpha** | Extremely early work. Incomplete features; bugs are guaranteed / expected. |
+| **beta** | Feature set nearly finished, but still buggy and rough (hard edges OK). |
+| **stable** | Ready to ship for that version — finished work, few or no known bugs. |
+
+Rules for agents:
+
+- Desktop and CLI are **independent** version lines (see `CHANGELOG.md`).
+- Changelog headings must include the channel, e.g. `## [Desktop 0.1.2-beta] - YYYY-MM-DD`.
+- Do **not** label something `stable` unless it is actually release-ready.
+- Prefer **beta** for desktop while the Tauri shell is still maturing; use **alpha** only for brand-new / half-built surfaces.
+- Alpha/beta desktop builds are normally changelog + local/dev artifacts — not GitHub Release / AUR — unless the user explicitly promotes a **stable** cut.
+
+When documenting uncommitted desktop work, append or expand the matching `Desktop x.y.z-<channel>` section rather than inventing a parallel scheme.
 
 ## Don’t
 
 - Commit or push unless the user asks
 - Force-push / skip hooks / amend pushed commits
 - Regress the compact B&W minimalist UI without intent
+- Ship or changelog a desktop cut as `stable` while it still belongs in alpha/beta

@@ -121,7 +121,7 @@ Uses system **yt-dlp**. Interactive wizard (`msc dl`):
 
 1. Pick **provider** (YouTube / YouTube Music / SoundCloud)
 2. Enter a **search** or **URL(s)** — multiple URLs with `url1;url2`
-3. Search shows **8 results/page** (n/p pages, multi-select); results cached 3 days in `~/option/music/cache/dl/`
+3. Search shows **8 results/page** (n/p pages, multi-select); results cached 3 days in `~/.option/music/cache/dl/`
 4. After picking **one** item, opt-in **preview** opens the normal optMusic player on a temp audio file (`q` back)
 5. Choose a **preset**, then quality / filetype / embeds (one screen each)
 6. Batch options are the intersection of all selected items
@@ -168,7 +168,7 @@ Uses system **yt-dlp**. Interactive wizard (`msc dl`):
 
 ### Settings (`c`)
 
-Left sidebar. Persisted in `~/option/music/config.toml`:
+Left sidebar. Persisted in `~/.option/music/config.toml`:
 
 | Option | Meaning |
 |--------|---------|
