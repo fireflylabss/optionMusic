@@ -14,6 +14,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 Desktop and CLI are versioned independently. Desktop **0.1.0** / **0.1.1** predate this scheme (shipped as plain versions). From **0.1.2-beta** onward, every desktop entry uses a channel suffix. Beta/alpha desktop builds are development snapshots — not GitHub Releases or AUR packages unless explicitly promoted to **stable**.
 
+## [CLI 0.2.10] / [Desktop 0.1.4-beta] - 2026-07-29
+
+### Changed
+
+- Desktop bundle identifier is now **`io.option.music`** (was `com.aefireflylabs.optmusic`).
+
 ## [CLI 0.2.9] / [Desktop 0.1.3-beta] - 2026-07-29
 
 ### Changed

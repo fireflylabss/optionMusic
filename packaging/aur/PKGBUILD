@@ -1,6 +1,6 @@
 # Maintainer: Gabriel <horizzon3507>
 pkgname=optionmusic
-pkgver=0.2.9
+pkgver=0.2.10
 pkgrel=1
 pkgdesc='Minimal black and white CLI music player powered by MPV'
 arch=('x86_64')
