@@ -1,8 +1,10 @@
 /target
 /node_modules
 /dist
+/.agents
 /.opencode
 /src-tauri/target
 /src-tauri/gen
+/website
 *.log
 skills-lock.json

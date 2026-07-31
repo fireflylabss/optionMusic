@@ -1,7 +1,7 @@
 import type { CSSProperties } from 'react'
-import { Heart, Pause, Play, Repeat, Repeat1, Shuffle, SkipBack, SkipForward, Volume2, VolumeX } from 'lucide-react'
+import { Heart, Pause, Play, Repeat, RepeatOnce, Shuffle, SkipBack, SkipForward, SpeakerHigh, SpeakerSlash } from '@phosphor-icons/react'
 import type { LoopMode, Track } from '../types'
-import { coverGlyph, formatTime, trackMeta } from '../lib'
+import { coverGlyph, formatTime, trackMeta } from '../lib/music'
 
 export function PlayerBar({
   current,
@@ -68,7 +68,7 @@ export function PlayerBar({
               aria-label={favorited ? 'Remove favorite' : 'Add favorite'}
               onClick={() => toggleFavorite(current)}
             >
-              <Heart size={15} fill={favorited ? 'currentColor' : 'none'} />
+              <Heart size={15} weight={favorited ? 'fill' : 'regular'} />
             </button>
           </>
         ) : (
@@ -79,13 +79,13 @@ export function PlayerBar({
       <div className="player-center">
         <div className="control-buttons">
           <button type="button" className={shuffled ? 'on' : ''} aria-label="Shuffle" aria-pressed={shuffled} onClick={shuffle}>
-            <Shuffle size={18} />
+            <Shuffle size={18} weight="regular" />
           </button>
-          <button type="button" aria-label="Previous track" onClick={previous}><SkipBack size={20} fill="currentColor" /></button>
+          <button type="button" aria-label="Previous track" onClick={previous}><SkipBack size={20} weight="fill" /></button>
           <button type="button" className="go" aria-label={playing ? 'Pause' : 'Play'} onClick={toggle}>
-            {playing ? <Pause size={22} fill="currentColor" /> : <Play size={22} fill="currentColor" />}
+            {playing ? <Pause size={22} weight="fill" /> : <Play size={22} weight="fill" />}
           </button>
-          <button type="button" aria-label="Next track" onClick={next}><SkipForward size={20} fill="currentColor" /></button>
+          <button type="button" aria-label="Next track" onClick={next}><SkipForward size={20} weight="fill" /></button>
           <button
             type="button"
             className={loopMode !== 'off' ? 'on' : ''}
@@ -93,7 +93,7 @@ export function PlayerBar({
             aria-pressed={loopMode !== 'off'}
             onClick={cycleLoop}
           >
-            {loopMode === 'track' ? <Repeat1 size={18} /> : <Repeat size={18} />}
+            {loopMode === 'track' ? <RepeatOnce size={18} weight="regular" /> : <Repeat size={18} weight="regular" />}
           </button>
         </div>
         <div className="scrub">
@@ -116,7 +116,7 @@ export function PlayerBar({
 
       <div className="gain">
         <button type="button" aria-label={muted ? 'Unmute' : 'Mute'} onClick={toggleMute}>
-          {muted ? <VolumeX size={15} /> : <Volume2 size={15} />}
+          {muted ? <SpeakerSlash size={15} weight="regular" /> : <SpeakerHigh size={15} weight="regular" />}
         </button>
         <input
           aria-label="Volume"

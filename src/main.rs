@@ -14,7 +14,7 @@ use crossterm::event::{
 };
 use crossterm::style::Stylize;
 
-use optmusic::cli::{Cli, Command};
+use optmusic::cli::{Cli, Command, PlaylistCmd};
 use optmusic::config::resolve_music_dir;
 use optmusic::download::{self, DownloadRequest, MediaKind};
 use optmusic::player::Player;
@@ -137,6 +137,12 @@ fn run() -> Result<()> {
                 ui.map(|u| u.to_mode()),
                 &cli.music_dir,
             )?;
+        }
+        Some(Command::Playlist { action }) => {
+            if !quiet {
+                banner();
+            }
+            cmd_playlist(action)?;
         }
         Some(Command::Version) => {
             println!(
@@ -991,6 +997,52 @@ fn cmd_list(path: &std::path::Path, recursive: bool) -> Result<()> {
             format!("{:>2}", i + 1).with(DIM),
             track.display_name().with(BRIGHT)
         );
+    }
+    Ok(())
+}
+
+fn cmd_playlist(action: PlaylistCmd) -> Result<()> {
+    match action {
+        PlaylistCmd::List => {
+            let list = optmusic::saved_playlists::list()?;
+            if list.is_empty() {
+                print_warn("no playlists yet — try `msc playlist create \"Name\"` or `import`");
+                return Ok(());
+            }
+            for pl in list {
+                println!(
+                    "  {}  {}  {}",
+                    pl.id.with(DIM),
+                    pl.name.with(BRIGHT),
+                    format!("{} tracks", pl.tracks.len()).with(GRAY)
+                );
+            }
+        }
+        PlaylistCmd::Create { name } => {
+            let pl = optmusic::saved_playlists::create(&name)?;
+            print_success(&format!("created {} ({})", pl.name, pl.id));
+        }
+        PlaylistCmd::Import { path, name } => {
+            let pl = optmusic::saved_playlists::import_m3u(&path, name.as_deref())?;
+            print_success(&format!(
+                "imported {} ({} tracks)",
+                pl.name,
+                pl.tracks.len()
+            ));
+        }
+        PlaylistCmd::Export { id, path } => {
+            optmusic::saved_playlists::export_m3u(&id, &path)?;
+            print_success(&format!("exported to {}", path.display()));
+        }
+        PlaylistCmd::Add { id, track } => {
+            let path = track.canonicalize().unwrap_or(track);
+            let pl = optmusic::saved_playlists::add_track(&id, &path.to_string_lossy())?;
+            print_success(&format!("added to {} ({} tracks)", pl.name, pl.tracks.len()));
+        }
+        PlaylistCmd::Delete { id } => {
+            optmusic::saved_playlists::delete(&id)?;
+            print_success("playlist deleted");
+        }
     }
     Ok(())
 }

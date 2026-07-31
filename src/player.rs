@@ -151,6 +151,11 @@ impl Player {
         self.set_pitch(1.0);
     }
 
+    /// Apply ReplayGain mode (`no` / `track` / `album`). Best-effort.
+    pub fn set_replaygain(&mut self, mode: crate::config::ReplayGainMode) {
+        let _ = self.mpv.set_property("replaygain", mode.mpv_value());
+    }
+
     pub fn cycle_eq(&mut self) -> EqPreset {
         self.eq = self.eq.next();
         let _ = self.mpv.set_property("af", self.eq.af_filter());

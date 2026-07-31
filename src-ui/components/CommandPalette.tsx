@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react'
-import { Search } from 'lucide-react'
+import { MagnifyingGlass } from '@phosphor-icons/react'
 import type { Track } from '../types'
-import { coverGlyph, folderLabel, searchChord } from '../lib'
+import { coverGlyph, folderLabel, searchChord } from '../lib/music'
 
 export function CommandPalette({
   search,
@@ -42,17 +42,17 @@ export function CommandPalette({
     <dialog
       ref={dialogRef}
       className="cmd-dialog"
-      aria-label="Search library"
+      aria-label="MagnifyingGlass library"
     >
       <button type="button" className="dialog-dismiss" aria-label="Close search" onClick={() => dialogRef.current?.close()} />
       <div className="cmd">
         <label className="cmd-input">
-          <Search size={18} />
+          <MagnifyingGlass size={18} />
           <input
             ref={searchRef}
             value={search}
             onChange={e => setSearch(e.target.value)}
-            placeholder="Search tracks, artists, albums…"
+            placeholder="MagnifyingGlass tracks, artists, albums…"
             aria-label="Search"
           />
           <kbd>{searchChord}</kbd>

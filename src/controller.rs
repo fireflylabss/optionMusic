@@ -7,7 +7,7 @@ use crate::{
 };
 use anyhow::Result;
 use serde::Serialize;
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -21,18 +21,16 @@ pub struct TrackDto {
     pub artist: String,
     /// Embedded / tagged album (empty when missing).
     pub album: String,
+    /// Track number from tags when known.
+    pub track_number: Option<u32>,
+    /// Whether cover art was found (`None` until enrichment).
+    pub has_cover: Option<bool>,
     /// Unix seconds of file mtime; `0` when metadata is unavailable.
     pub mtime: u64,
 }
 impl From<&Track> for TrackDto {
     fn from(t: &Track) -> Self {
         let path = t.path.to_string_lossy().into_owned();
-        let mtime = std::fs::metadata(&t.path)
-            .and_then(|m| m.modified())
-            .ok()
-            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-            .map(|d| d.as_secs())
-            .unwrap_or(0);
         Self {
             id: path.clone(),
             name: t.display_name(),
@@ -43,8 +41,10 @@ impl From<&Track> for TrackDto {
                 .unwrap_or_default(),
             artist: t.artist.clone().unwrap_or_default(),
             album: t.album.clone().unwrap_or_default(),
+            track_number: t.track_number,
+            has_cover: t.has_cover,
             path,
-            mtime,
+            mtime: t.mtime,
         }
     }
 }
@@ -117,10 +117,18 @@ pub struct Snapshot {
     pub desktop_preferences: String,
 }
 
+/// Partial library update after background tag enrichment.
+#[derive(Debug, Clone, Serialize)]
+pub struct LibraryEnrichUpdate {
+    pub tracks: Vec<TrackDto>,
+    pub done: bool,
+}
+
 /// Sole owner of the known library, playback rules, queue and persistence.
 pub struct CoreController {
     pub config: AppConfig,
     library: Vec<Track>,
+    path_index: HashMap<String, usize>,
     queue: VecDeque<String>,
     current: Option<String>,
     player: Option<Player>,
@@ -144,6 +152,7 @@ impl CoreController {
         Self {
             config,
             library: Vec::new(),
+            path_index: HashMap::new(),
             queue: VecDeque::new(),
             current: None,
             player: None,
@@ -211,26 +220,82 @@ impl CoreController {
             self.save_config()?;
         }
         let mut all = Vec::new();
-        for d in self
-            .config
-            .music_dirs
-            .iter()
-            .chain(std::iter::once(&config::default_music_dir()))
-        {
+        for d in Self::scan_directories(&self.config.music_dirs) {
             if d.exists() {
-                all.extend(playlist::scan_path(d, true)?);
+                all.extend(playlist::scan_path(&d, true)?);
             }
         }
         all.sort_by(|a, b| a.path.cmp(&b.path));
         all.dedup_by(|a, b| a.path == b.path);
         self.library = all;
+        self.rebuild_path_index();
         self.shuffled = false;
         Ok(&self.library)
     }
-    fn track(&self, id: &str) -> Result<&Track> {
-        self.library
+
+    /// Directories to walk: configured folders plus default `~/Music` when not already listed.
+    fn scan_directories(music_dirs: &[PathBuf]) -> Vec<PathBuf> {
+        let default = config::default_music_dir();
+        let default_present = music_dirs
             .iter()
-            .find(|t| t.path.to_string_lossy() == id)
+            .any(|d| paths_equivalent(d, &default));
+        let mut dirs: Vec<PathBuf> = music_dirs.to_vec();
+        if !default_present && default.exists() {
+            dirs.push(default);
+        }
+        dirs
+    }
+
+    fn rebuild_path_index(&mut self) {
+        self.path_index.clear();
+        for (i, track) in self.library.iter().enumerate() {
+            self.path_index
+                .insert(track.path.to_string_lossy().into_owned(), i);
+        }
+    }
+
+    /// Enrich tags for up to `limit` tracks that have not been processed yet.
+    /// Returns DTOs for tracks whose metadata changed.
+    pub fn enrich_tags_batch(&mut self, limit: usize) -> LibraryEnrichUpdate {
+        let mut updated = Vec::new();
+        let mut processed = 0usize;
+        for track in self.library.iter_mut() {
+            if processed >= limit {
+                break;
+            }
+            if track.tags_enriched {
+                continue;
+            }
+            let before = TrackDto::from(&*track);
+            track.enrich_tags();
+            processed += 1;
+            let after = TrackDto::from(&*track);
+            if before.artist != after.artist
+                || before.album != after.album
+                || before.name != after.name
+            {
+                updated.push(after);
+            }
+        }
+        let done = self.library.iter().all(|t| t.tags_enriched);
+        LibraryEnrichUpdate { tracks: updated, done }
+    }
+
+    pub fn tags_enrichment_pending(&self) -> bool {
+        self.library.iter().any(|t| !t.tags_enriched)
+    }
+
+    fn track(&self, id: &str) -> Result<&Track> {
+        self.path_index
+            .get(id)
+            .and_then(|&i| self.library.get(i))
+            .ok_or_else(|| anyhow::anyhow!("track is not known by core: {id}"))
+    }
+
+    fn track_index(&self, id: &str) -> Result<usize> {
+        self.path_index
+            .get(id)
+            .copied()
             .ok_or_else(|| anyhow::anyhow!("track is not known by core: {id}"))
     }
     fn player(&mut self) -> Result<&mut Player> {
@@ -245,12 +310,15 @@ impl CoreController {
         let path = self.track(id)?.path.clone();
         let loop_track = self.loop_mode == LoopMode::Track;
         // Load first so a failed open does not leave "now playing" without audio.
+        let rg = self.config.replaygain;
         let player = self.player()?;
         player.set_loop_track(loop_track);
+        player.set_replaygain(rg);
         player.play_file(&path)?;
         self.current = Some(id.into());
         self.manually_stopped = false;
         self.queue.retain(|x| x != id);
+        let _ = crate::history::record_play(id);
         let _ = self.persist_resume(true);
         Ok(())
     }
@@ -306,11 +374,7 @@ impl CoreController {
         }
         let id = self.current.clone();
         if let Some(id) = id {
-            let i = self
-                .library
-                .iter()
-                .position(|t| t.path.to_string_lossy() == id)
-                .unwrap_or(0);
+            let i = self.track_index(&id).unwrap_or(0);
             let target = if i > 0 {
                 match self.library.get(i - 1) {
                     Some(track) => track.path.to_string_lossy().into_owned(),
@@ -327,11 +391,7 @@ impl CoreController {
         let i = self
             .current
             .as_ref()
-            .and_then(|id| {
-                self.library
-                    .iter()
-                    .position(|t| t.path.to_string_lossy() == *id)
-            })
+            .and_then(|id| self.track_index(id).ok())
             .map(|i| i + 1)
             .unwrap_or(0);
         self.library
@@ -404,7 +464,7 @@ impl CoreController {
         let queue = self.config.resume_queue.clone();
         self.queue = queue
             .into_iter()
-            .filter(|q| self.library.iter().any(|t| t.path.to_string_lossy() == *q))
+            .filter(|q| self.path_index.contains_key(q))
             .collect();
         let path = self.track(&id)?.path.clone();
         let loop_track = self.loop_mode == LoopMode::Track;
@@ -426,6 +486,33 @@ impl CoreController {
             p.set_eq(e);
         }
     }
+
+    pub fn set_speed(&mut self, speed: f64) -> Result<f64> {
+        let p = self.player()?;
+        p.set_speed(speed);
+        Ok(p.speed())
+    }
+
+    pub fn set_pitch(&mut self, pitch: f64) -> Result<f64> {
+        let p = self.player()?;
+        p.set_pitch(pitch);
+        Ok(p.pitch())
+    }
+
+    pub fn reset_speed_pitch(&mut self) -> Result<()> {
+        self.player()?.reset_speed_pitch();
+        Ok(())
+    }
+
+    pub fn set_replaygain(&mut self, mode: crate::config::ReplayGainMode) -> Result<()> {
+        self.config.replaygain = mode;
+        self.config.save()?;
+        if let Some(p) = self.player.as_mut() {
+            p.set_replaygain(mode);
+        }
+        Ok(())
+    }
+
     pub fn cycle_loop(&mut self) -> LoopMode {
         self.loop_mode = self.loop_mode.next();
         let loop_track = self.loop_mode == LoopMode::Track;
@@ -447,6 +534,7 @@ impl CoreController {
             let j = (seed as usize) % (i + 1);
             self.library.swap(i, j);
         }
+        self.rebuild_path_index();
         self.shuffled = true;
     }
     pub fn add_queue(&mut self, id: &str) -> Result<()> {
@@ -480,8 +568,15 @@ impl CoreController {
     }
     /// Album art as a `data:` URL (sidecar image or embedded tag), if any.
     pub fn cover_data_url(&self, id: &str) -> Result<Option<String>> {
-        let path = self.known_path(id)?;
-        crate::cover::resolve_cover_data_url(path)
+        let track = self.track(id)?;
+        crate::cover::resolve_cover_data_url(&track.path, track.mtime, track.size)
+    }
+
+    /// Album art as a local file path for Tauri `convertFileSrc` (preferred over base64 IPC).
+    pub fn cover_file_path(&self, id: &str) -> Result<Option<String>> {
+        let track = self.track(id)?;
+        Ok(crate::cover::resolve_cover_file(&track.path, track.mtime, track.size)?
+            .map(|c| c.path.to_string_lossy().into_owned()))
     }
     pub fn snapshot(&mut self) -> Snapshot {
         let playback = self.playback_state();
@@ -513,11 +608,8 @@ impl CoreController {
         let current = self
             .current
             .as_ref()
-            .and_then(|id| {
-                self.library
-                    .iter()
-                    .find(|t| t.path.to_string_lossy() == *id)
-            })
+            .and_then(|id| self.track_index(id).ok())
+            .and_then(|i| self.library.get(i))
             .map(TrackDto::from);
         let (position, duration, paused, stopped, volume, muted, speed, pitch, eq) =
             if let Some(p) = self.player.as_mut() {
@@ -568,10 +660,186 @@ impl CoreController {
             let _ = self.next();
         }
     }
+
+    // ── Playlists ────────────────────────────────────────────────
+
+    pub fn list_playlists(&self) -> Result<Vec<crate::saved_playlists::SavedPlaylist>> {
+        crate::saved_playlists::list()
+    }
+
+    pub fn create_playlist(&self, name: &str) -> Result<crate::saved_playlists::SavedPlaylist> {
+        crate::saved_playlists::create(name)
+    }
+
+    pub fn rename_playlist(
+        &self,
+        id: &str,
+        name: &str,
+    ) -> Result<crate::saved_playlists::SavedPlaylist> {
+        crate::saved_playlists::rename(id, name)
+    }
+
+    pub fn delete_playlist(&self, id: &str) -> Result<()> {
+        crate::saved_playlists::delete(id)
+    }
+
+    pub fn playlist_add(&self, id: &str, track_id: &str) -> Result<crate::saved_playlists::SavedPlaylist> {
+        let _ = self.track(track_id)?;
+        crate::saved_playlists::add_track(id, track_id)
+    }
+
+    pub fn playlist_remove(
+        &self,
+        id: &str,
+        track_id: &str,
+    ) -> Result<crate::saved_playlists::SavedPlaylist> {
+        crate::saved_playlists::remove_track(id, track_id)
+    }
+
+    pub fn import_m3u(
+        &self,
+        path: &Path,
+        name: Option<&str>,
+    ) -> Result<crate::saved_playlists::SavedPlaylist> {
+        crate::saved_playlists::import_m3u(path, name)
+    }
+
+    pub fn export_m3u(&self, id: &str, path: &Path) -> Result<()> {
+        crate::saved_playlists::export_m3u(id, path)
+    }
+
+    pub fn play_playlist(&mut self, id: &str) -> Result<()> {
+        let pl = crate::saved_playlists::get(id)?;
+        if pl.tracks.is_empty() {
+            anyhow::bail!("playlist is empty");
+        }
+        self.queue.clear();
+        for track_id in pl.tracks.iter().skip(1) {
+            if self.path_index.contains_key(track_id) {
+                self.queue.push_back(track_id.clone());
+            }
+        }
+        let first = pl.tracks[0].clone();
+        self.play(&first)
+    }
+
+    // ── Smart shelves ────────────────────────────────────────────
+
+    pub fn smart_shelf(&self, kind: SmartShelf) -> Vec<TrackDto> {
+        match kind {
+            SmartShelf::PlayedWeek => {
+                let ids = crate::history::played_this_week();
+                ids.into_iter()
+                    .filter_map(|id| self.track(&id).ok().map(TrackDto::from))
+                    .collect()
+            }
+            SmartShelf::NoCover => self
+                .library
+                .iter()
+                .filter(|t| t.has_cover == Some(false))
+                .map(TrackDto::from)
+                .collect(),
+            SmartShelf::IncompleteAlbums => incomplete_album_tracks(&self.library),
+        }
+    }
+
+    // ── Tags / lyrics ────────────────────────────────────────────
+
+    pub fn get_track_tags(&self, id: &str) -> Result<crate::meta::AudioTags> {
+        let track = self.track(id)?;
+        Ok(crate::meta::read_tags_cached(
+            &track.path,
+            track.mtime,
+            track.size,
+        ))
+    }
+
+    pub fn set_track_tags(&mut self, id: &str, tags: crate::meta::AudioTags) -> Result<TrackDto> {
+        let idx = self.track_index(id)?;
+        let path = self.library[idx].path.clone();
+        crate::meta::write_tags(&path, &tags)?;
+        let track = &mut self.library[idx];
+        let (mtime, size) = (
+            std::fs::metadata(&path)
+                .ok()
+                .and_then(|m| m.modified().ok())
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|d| d.as_secs())
+                .unwrap_or(track.mtime),
+            std::fs::metadata(&path).map(|m| m.len()).unwrap_or(track.size),
+        );
+        track.mtime = mtime;
+        track.size = size;
+        track.title = tags.title.clone();
+        track.artist = tags.artist.clone();
+        track.album = tags.album.clone();
+        track.track_number = tags.track_number;
+        track.disc_number = tags.disc_number;
+        track.tags_enriched = true;
+        Ok(TrackDto::from(&*track))
+    }
+
+    pub fn track_lyrics(&self, id: &str) -> Result<crate::meta::Lyrics> {
+        let track = self.track(id)?;
+        Ok(crate::meta::read_lyrics(&track.path))
+    }
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SmartShelf {
+    PlayedWeek,
+    NoCover,
+    IncompleteAlbums,
+}
+
+fn incomplete_album_tracks(library: &[Track]) -> Vec<TrackDto> {
+    use std::collections::HashMap;
+    let mut groups: HashMap<(String, String), Vec<&Track>> = HashMap::new();
+    for track in library {
+        let album = track.album.clone().unwrap_or_default();
+        if album.is_empty() {
+            continue;
+        }
+        let artist = track.artist.clone().unwrap_or_default();
+        groups.entry((artist, album)).or_default().push(track);
+    }
+    let mut out = Vec::new();
+    for tracks in groups.values() {
+        let numbers: Vec<u32> = tracks.iter().filter_map(|t| t.track_number).collect();
+        if numbers.is_empty() {
+            continue;
+        }
+        let max = *numbers.iter().max().unwrap_or(&0);
+        if max <= 1 {
+            continue;
+        }
+        let mut present: std::collections::HashSet<u32> = numbers.into_iter().collect();
+        let incomplete = (1..=max).any(|n| !present.contains(&n)) || tracks.len() < max as usize;
+        if incomplete {
+            out.extend(tracks.iter().map(|t| TrackDto::from(*t)));
+        }
+        let _ = &mut present;
+    }
+    out.sort_by(|a, b| a.album.cmp(&b.album).then(a.name.cmp(&b.name)));
+    out
+}
+
+fn paths_equivalent(a: &Path, b: &Path) -> bool {
+    if a == b {
+        return true;
+    }
+    match (a.canonicalize(), b.canonicalize()) {
+        (Ok(ca), Ok(cb)) => ca == cb,
+        _ => false,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::playlist::Track;
+
     #[test]
     fn no_mpv_needed_for_snapshot() {
         let mut c = CoreController::with_config(AppConfig::default());
@@ -607,5 +875,34 @@ mod tests {
     fn arbitrary_paths_are_rejected() {
         let mut c = CoreController::with_config(AppConfig::default());
         assert!(c.add_queue("/random.mp3").is_err());
+    }
+
+    #[test]
+    fn track_dto_uses_scan_mtime() {
+        let track = Track {
+            path: PathBuf::from("/music/song.mp3"),
+            title: Some("Song".into()),
+            artist: None,
+            album: None,
+            track_number: None,
+            disc_number: None,
+            has_cover: Some(true),
+            mtime: 12_345,
+            size: 999,
+            tags_enriched: true,
+        };
+        let dto = TrackDto::from(&track);
+        assert_eq!(dto.mtime, 12_345);
+        assert_eq!(dto.name, "Song");
+    }
+
+    #[test]
+    fn enrich_tags_batch_marks_done() {
+        let mut c = CoreController::with_config(AppConfig::default());
+        c.library = vec![Track::from_path(PathBuf::from("/nope.mp3"))];
+        c.rebuild_path_index();
+        let update = c.enrich_tags_batch(8);
+        assert!(update.done);
+        assert!(c.library[0].tags_enriched);
     }
 }

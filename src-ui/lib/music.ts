@@ -1,5 +1,5 @@
 import { isTauri } from '@tauri-apps/api/core'
-import type { ArtistSource, Snapshot, Track } from './types'
+import type { ArtistSource, Snapshot, Track } from '../types'
 
 export const emptySnapshot: Snapshot = {
   library: [],
@@ -12,8 +12,8 @@ export const emptySnapshot: Snapshot = {
   volume: 80,
   muted: false,
   speed: 1,
-  pitch: 0,
-  eq: 'Default',
+  pitch: 1,
+  eq: 'off',
   favorites: [],
   loop_mode: 'off',
   shuffled: false,
@@ -22,6 +22,7 @@ export const emptySnapshot: Snapshot = {
     ldm: false,
     accent: 'default',
     artist_source: 'metadata',
+    replaygain: 'off',
     cava: {},
   },
 }

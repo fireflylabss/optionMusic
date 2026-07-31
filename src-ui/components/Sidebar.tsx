@@ -1,6 +1,7 @@
-import { BookMarked, Heart, ListMusic, Mic2, Plus, Search, Settings } from 'lucide-react'
+import { BookBookmark, DownloadSimple, GearSix, Heart, MagnifyingGlass, MicrophoneStage, Playlist, Plus, SquaresFour } from '@phosphor-icons/react'
 import type { Page, Track } from '../types'
-import { coverGlyph, searchChord, trackMeta } from '../lib'
+import { coverGlyph, searchChord, trackMeta } from '../lib/music'
+import { Button } from './ui/button'
 import { WindowControls } from './WindowControls'
 
 export function Sidebar({
@@ -8,6 +9,7 @@ export function Sidebar({
   tracksCount,
   artistsCount,
   favoritesCount,
+  playlistsCount,
   currentId,
   recentTracks,
   goPage,
@@ -15,11 +17,13 @@ export function Sidebar({
   openCommand,
   addFolder,
   openSettings,
+  openDownload,
 }: {
   page: Page
   tracksCount: number
   artistsCount: number
   favoritesCount: number
+  playlistsCount: number
   currentId?: string
   recentTracks: Track[]
   goPage: (p: Page) => void
@@ -27,6 +31,7 @@ export function Sidebar({
   openCommand: () => void
   addFolder: () => void
   openSettings: () => void
+  openDownload: () => void
 }) {
   return (
     <div className="sidebar">
@@ -40,22 +45,26 @@ export function Sidebar({
 
       <nav className="side-nav" aria-label="Library views">
         <button type="button" className={page === 'library' ? 'side-link on' : 'side-link'} onClick={() => goPage('library')}>
-          <BookMarked size={16} strokeWidth={1.75} />
+          <BookBookmark size={16} weight="regular" />
           <span>Library</span>
           <em>{tracksCount}</em>
         </button>
         <button type="button" className={page === 'artists' ? 'side-link on' : 'side-link'} onClick={() => goPage('artists')}>
-          <Mic2 size={16} strokeWidth={1.75} />
+          <MicrophoneStage size={16} weight="regular" />
           <span>Artists</span>
           <em>{artistsCount}</em>
         </button>
         <button type="button" className={page === 'playlists' ? 'side-link on' : 'side-link'} onClick={() => goPage('playlists')}>
-          <ListMusic size={16} strokeWidth={1.75} />
+          <Playlist size={16} weight="regular" />
           <span>Playlists</span>
-          <em>0</em>
+          <em>{playlistsCount}</em>
+        </button>
+        <button type="button" className={page === 'shelves' ? 'side-link on' : 'side-link'} onClick={() => goPage('shelves')}>
+          <SquaresFour size={16} weight="regular" />
+          <span>Shelves</span>
         </button>
         <button type="button" className={page === 'favorites' ? 'side-link on' : 'side-link'} onClick={() => goPage('favorites')}>
-          <Heart size={16} strokeWidth={1.75} />
+          <Heart size={16} weight="regular" />
           <span>Favorites</span>
           <em>{favoritesCount}</em>
         </button>
@@ -84,16 +93,20 @@ export function Sidebar({
 
       <div className="side-actions">
         <button type="button" className="side-search" onClick={openCommand}>
-          <Search size={15} strokeWidth={1.75} />
+          <MagnifyingGlass size={15} weight="regular" />
           <span>Search</span>
           <kbd>{searchChord}</kbd>
         </button>
-        <button type="button" className="open-files" onClick={() => void addFolder()}>
-          <Plus size={15} strokeWidth={2.25} />
+        <Button type="button" className="w-full" onClick={openDownload}>
+          <DownloadSimple data-icon="inline-start" weight="bold" />
+          Download
+        </Button>
+        <Button type="button" className="w-full" onClick={() => void addFolder()}>
+          <Plus data-icon="inline-start" weight="bold" />
           Open files
-        </button>
+        </Button>
         <button type="button" className="side-settings" onClick={openSettings}>
-          <Settings size={15} strokeWidth={1.75} />
+          <GearSix size={15} weight="regular" />
           Settings
         </button>
       </div>

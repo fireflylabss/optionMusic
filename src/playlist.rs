@@ -18,17 +18,61 @@ pub struct Track {
     pub title: Option<String>,
     pub artist: Option<String>,
     pub album: Option<String>,
+    pub track_number: Option<u32>,
+    pub disc_number: Option<u32>,
+    /// Whether a cover was found (sidecar or embedded); None until checked.
+    pub has_cover: Option<bool>,
+    /// Unix seconds of file mtime; `0` when metadata is unavailable.
+    pub mtime: u64,
+    /// File size in bytes; `0` when metadata is unavailable.
+    pub size: u64,
+    /// Whether tag enrichment has been attempted for this track.
+    pub tags_enriched: bool,
 }
 
 impl Track {
-    pub fn new(path: PathBuf) -> Self {
-        let tags = crate::meta::read_tags(&path);
+    /// Fast path-only scan entry (tags deferred).
+    pub fn from_path(path: PathBuf) -> Self {
+        let (mtime, size) = file_stat(&path);
         Self {
             path,
-            title: tags.title,
-            artist: tags.artist,
-            album: tags.album,
+            title: None,
+            artist: None,
+            album: None,
+            track_number: None,
+            disc_number: None,
+            has_cover: None,
+            mtime,
+            size,
+            tags_enriched: false,
         }
+    }
+
+    /// Full scan with tag read (CLI / explicit paths).
+    pub fn new(path: PathBuf) -> Self {
+        let mut track = Self::from_path(path);
+        track.enrich_tags();
+        track
+    }
+
+    /// Load tags from cache or lofty and mark this track enriched.
+    pub fn enrich_tags(&mut self) {
+        if self.tags_enriched {
+            return;
+        }
+        let tags = crate::meta::read_tags_cached(&self.path, self.mtime, self.size);
+        self.title = tags.title;
+        self.artist = tags.artist;
+        self.album = tags.album;
+        self.track_number = tags.track_number;
+        self.disc_number = tags.disc_number;
+        self.has_cover = Some(
+            crate::cover::resolve_cover_file(&self.path, self.mtime, self.size)
+                .ok()
+                .flatten()
+                .is_some(),
+        );
+        self.tags_enriched = true;
     }
 
     /// Human-friendly name: tagged title, else file stem, else full path.
@@ -61,7 +105,11 @@ impl Playlist {
                     tracks.push(Track::new(p.clone()));
                 }
             } else if p.is_dir() {
-                tracks.extend(scan_path(p, true)?);
+                let mut dir_tracks = scan_path(p, true)?;
+                for track in &mut dir_tracks {
+                    track.enrich_tags();
+                }
+                tracks.extend(dir_tracks);
             } else {
                 anyhow::bail!("path not found: {}", p.display());
             }
@@ -116,13 +164,13 @@ impl Playlist {
     }
 }
 
-/// Scan a path for audio files.
+/// Scan a path for audio files (path index only; tags deferred).
 pub fn scan_path(path: &Path, recursive: bool) -> Result<Vec<Track>> {
     let mut tracks = Vec::new();
 
     if path.is_file() {
         if is_audio(path) {
-            tracks.push(Track::new(path.to_path_buf()));
+            tracks.push(Track::from_path(path.to_path_buf()));
         }
         return Ok(tracks);
     }
@@ -133,13 +181,13 @@ pub fn scan_path(path: &Path, recursive: bool) -> Result<Vec<Track>> {
 
     if recursive {
         for entry in WalkDir::new(path)
-            .follow_links(true)
+            .follow_links(false)
             .into_iter()
             .filter_map(|e| e.ok())
         {
             let p = entry.path();
             if p.is_file() && is_audio(p) {
-                tracks.push(Track::new(p.to_path_buf()));
+                tracks.push(Track::from_path(p.to_path_buf()));
             }
         }
     } else {
@@ -148,13 +196,28 @@ pub fn scan_path(path: &Path, recursive: bool) -> Result<Vec<Track>> {
         for entry in rd.filter_map(|e| e.ok()) {
             let p = entry.path();
             if p.is_file() && is_audio(&p) {
-                tracks.push(Track::new(p));
+                tracks.push(Track::from_path(p));
             }
         }
     }
 
     tracks.sort_by(|a, b| a.path.cmp(&b.path));
     Ok(tracks)
+}
+
+fn file_stat(path: &Path) -> (u64, u64) {
+    std::fs::metadata(path)
+        .ok()
+        .map(|m| {
+            let mtime = m
+                .modified()
+                .ok()
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
+            (mtime, m.len())
+        })
+        .unwrap_or((0, 0))
 }
 
 fn is_audio(path: &Path) -> bool {

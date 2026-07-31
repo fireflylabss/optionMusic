@@ -264,9 +264,54 @@ pub enum Command {
         ui: Option<CliDlUi>,
     },
 
+    /// Manage local playlists (save / import M3U)
+    #[command(visible_aliases = ["plists", "pls"])]
+    Playlist {
+        #[command(subcommand)]
+        action: PlaylistCmd,
+    },
+
     /// Print version
     #[command(visible_alias = "ver")]
     Version,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum PlaylistCmd {
+    /// List saved playlists
+    List,
+    /// Create an empty playlist
+    Create {
+        /// Playlist name
+        name: String,
+    },
+    /// Import an M3U / M3U8 file
+    Import {
+        /// Path to the M3U file
+        path: PathBuf,
+        /// Optional display name
+        #[arg(short, long)]
+        name: Option<String>,
+    },
+    /// Export a playlist to M3U
+    Export {
+        /// Playlist id
+        id: String,
+        /// Output .m3u path
+        path: PathBuf,
+    },
+    /// Add a track path to a playlist
+    Add {
+        /// Playlist id
+        id: String,
+        /// Absolute track path
+        track: PathBuf,
+    },
+    /// Delete a playlist
+    Delete {
+        /// Playlist id
+        id: String,
+    },
 }
 
 #[cfg(test)]

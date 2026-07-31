@@ -1,0 +1,38 @@
+name: Discord
+
+on:
+  push:
+    branches: [master]
+  release:
+    types: [published]
+
+jobs:
+  notify:
+    name: Notify Discord
+    runs-on: ubuntu-latest
+    steps:
+      - name: Notify Discord
+        env:
+          WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+          EVENT_NAME: ${{ github.event_name }}
+          ACTOR: ${{ github.actor }}
+          REF_NAME: ${{ github.ref_name }}
+          COMMIT_MSG: ${{ github.event.head_commit.message }}
+          COMMIT_URL: ${{ github.event.head_commit.url }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          RELEASE_URL: ${{ github.event.release.html_url }}
+        run: |
+          set -euo pipefail
+          if [ -z "${WEBHOOK:-}" ]; then
+            echo "DISCORD_WEBHOOK secret is not set"
+            exit 1
+          fi
+          if [ "$EVENT_NAME" = "release" ]; then
+            CONTENT=$(printf '🚀 **Release %s** — %s' "$RELEASE_TAG" "$RELEASE_URL")
+          else
+            # First line of commit message only
+            SHORT_MSG=$(printf '%s' "$COMMIT_MSG" | head -n1)
+            CONTENT=$(printf '📦 **%s** em `%s`: %s\n%s' "$ACTOR" "$REF_NAME" "$SHORT_MSG" "$COMMIT_URL")
+          fi
+          jq -n --arg content "$CONTENT" '{content: $content}' \
+            | curl -sS -f -H "Content-Type: application/json" -d @- "$WEBHOOK"
