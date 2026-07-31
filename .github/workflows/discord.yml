@@ -14,6 +14,7 @@ jobs:
       - name: Notify Discord
         env:
           WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+          THREAD_ID: "1532790020396548237"
           EVENT_NAME: ${{ github.event_name }}
           ACTOR: ${{ github.actor }}
           REF_NAME: ${{ github.ref_name }}
@@ -27,6 +28,10 @@ jobs:
             echo "DISCORD_WEBHOOK secret is not set"
             exit 1
           fi
+          case "$WEBHOOK" in
+            *\?*) WEBHOOK_URL="${WEBHOOK}&thread_id=${THREAD_ID}" ;;
+            *)    WEBHOOK_URL="${WEBHOOK}?thread_id=${THREAD_ID}" ;;
+          esac
           if [ "$EVENT_NAME" = "release" ]; then
             CONTENT=$(printf '🚀 **Release %s** — %s' "$RELEASE_TAG" "$RELEASE_URL")
           else
@@ -35,4 +40,4 @@ jobs:
             CONTENT=$(printf '📦 **%s** em `%s`: %s\n%s' "$ACTOR" "$REF_NAME" "$SHORT_MSG" "$COMMIT_URL")
           fi
           jq -n --arg content "$CONTENT" '{content: $content}' \
-            | curl -sS -f -H "Content-Type: application/json" -d @- "$WEBHOOK"
+            | curl -sS -f -H "Content-Type: application/json" -d @- "$WEBHOOK_URL"
