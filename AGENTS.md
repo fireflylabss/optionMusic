@@ -50,18 +50,10 @@ export CARGO_TARGET_DIR="$(pwd)/target"
 
 ## Release channels
 
-Version tags use SemVer **plus** an explicit channel: `x.y.z-alpha` | `x.y.z-beta` | `x.y.z-stable`.
+See [VERSIONING.md](VERSIONING.md). Short rules for agents:
 
-| Channel | When to use |
-|---------|-------------|
-| **alpha** | Extremely early work. Incomplete features; bugs are guaranteed / expected. |
-| **beta** | Feature set nearly finished, but still buggy and rough (hard edges OK). |
-| **stable** | Ready to ship for that version — finished work, few or no known bugs. |
-
-Rules for agents:
-
-- Desktop and CLI are **independent** version lines (see `CHANGELOG.md`).
-- Changelog headings must include the channel, e.g. `## [Desktop 0.1.2-beta] - YYYY-MM-DD`.
+- Desktop and CLI are **independent** version lines.
+- Changelog headings must include the channel when applicable, e.g. `## [Desktop 0.1.2-beta] - YYYY-MM-DD`.
 - Do **not** label something `stable` unless it is actually release-ready.
 - Prefer **beta** for desktop while the Tauri shell is still maturing; use **alpha** only for brand-new / half-built surfaces.
 - Alpha/beta desktop builds are normally changelog + local/dev artifacts — not GitHub Release / AUR — unless the user explicitly promotes a **stable** cut.

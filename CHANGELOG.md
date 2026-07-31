@@ -2,17 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html) with an explicit **release channel** suffix.
-
-### Release channels (`x.y.z-<channel>`)
-
-| Channel | Tag example | Meaning |
-|---------|-------------|---------|
-| **alpha** | `0.1.0-alpha` | Extremely early. Features incomplete; bugs are expected and common. |
-| **beta** | `0.1.2-beta` | Feature set nearly complete, but still rough — bugs and hard edges remain. |
-| **stable** | `0.2.0-stable` | Production-ready: finished for that version, few or no known bugs. |
-
-Desktop and CLI are versioned independently. Desktop **0.1.0** / **0.1.1** predate this scheme (shipped as plain versions). From **0.1.2-beta** onward, every desktop entry uses a channel suffix. Beta/alpha desktop builds are development snapshots — not GitHub Releases or AUR packages unless explicitly promoted to **stable**.
+Versioning, surfaces, and channels: see [VERSIONING.md](VERSIONING.md).
 
 ## [CLI 0.2.10] / [Desktop 0.1.4-beta] - 2026-07-29
 

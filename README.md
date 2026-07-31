@@ -68,7 +68,7 @@ PipeWire or PulseAudio should be running if you use cava.
 export CARGO_TARGET_DIR="$(pwd)/target"
 cargo install --path . --force
 # or a tagged release:
-cargo install --git https://github.com/fireflylabss/optMusic --tag v0.2.7
+cargo install --git https://github.com/fireflylabss/optionMusic --tag v0.2.7
 ```
 
 | Command | Description |
