@@ -5,6 +5,7 @@ on:
     branches: [master]
   release:
     types: [published]
+  workflow_dispatch:
 
 jobs:
   notify:
@@ -22,22 +23,46 @@ jobs:
           COMMIT_URL: ${{ github.event.head_commit.url }}
           RELEASE_TAG: ${{ github.event.release.tag_name }}
           RELEASE_URL: ${{ github.event.release.html_url }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
           if [ -z "${WEBHOOK:-}" ]; then
             echo "DISCORD_WEBHOOK secret is not set"
             exit 1
           fi
+
+          # Strip accidental /github suffix from Discord webhook URLs
+          WEBHOOK="${WEBHOOK%/github}"
+          WEBHOOK="${WEBHOOK%/}"
+
           case "$WEBHOOK" in
-            *\?*) WEBHOOK_URL="${WEBHOOK}&thread_id=${THREAD_ID}" ;;
-            *)    WEBHOOK_URL="${WEBHOOK}?thread_id=${THREAD_ID}" ;;
+            *\?*) WEBHOOK_URL="${WEBHOOK}&thread_id=${THREAD_ID}&wait=true" ;;
+            *)    WEBHOOK_URL="${WEBHOOK}?thread_id=${THREAD_ID}&wait=true" ;;
           esac
+
           if [ "$EVENT_NAME" = "release" ]; then
             CONTENT=$(printf '🚀 **Release %s** — %s' "$RELEASE_TAG" "$RELEASE_URL")
+          elif [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            CONTENT=$(printf '🔔 teste Discord — `%s` @ `%s`' "$REPO" "${SHA:0:7}")
           else
-            # First line of commit message only
-            SHORT_MSG=$(printf '%s' "$COMMIT_MSG" | head -n1)
+            SHORT_MSG=$(printf '%s' "${COMMIT_MSG:-}" | head -n1)
             CONTENT=$(printf '📦 **%s** em `%s`: %s\n%s' "$ACTOR" "$REF_NAME" "$SHORT_MSG" "$COMMIT_URL")
           fi
-          jq -n --arg content "$CONTENT" '{content: $content}' \
-            | curl -sS -f -H "Content-Type: application/json" -d @- "$WEBHOOK_URL"
+
+          BODY=$(jq -n --arg content "$CONTENT" '{content: $content}')
+          echo "Posting to forum thread ${THREAD_ID}…"
+          HTTP_CODE=$(curl -sS -o /tmp/discord-resp.json -w "%{http_code}" \
+            -H "Content-Type: application/json" \
+            -d "$BODY" \
+            "$WEBHOOK_URL" || true)
+          echo "HTTP ${HTTP_CODE}"
+          cat /tmp/discord-resp.json || true
+          echo
+          case "$HTTP_CODE" in
+            200|204) echo "ok" ;;
+            *)
+              echo "Discord rejected the webhook"
+              exit 1
+              ;;
+          esac
