@@ -14,7 +14,7 @@ conflicts=('optmusic')
 replaces=('optmusic')
 options=('!lto')
 source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
-sha256sums=('9c02940960397218878c52d4d05a4e48dd85e393c3977866d7b8bec794181bbb')
+sha256sums=('e2218022b94625199f3e88a4aeb068d491d4c806535250262eb1451fffbadfbf')
 
 prepare() {
   cd "optionMusic-$pkgver"
