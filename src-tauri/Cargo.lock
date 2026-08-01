@@ -2224,8 +2224,8 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "04744f49eae99ab78e0d5c0b603ab218f515ea8cfe5a456d7629ad883a3b6e7d"
 
 [[package]]
-name = "optmusic"
-version = "0.2.8"
+name = "optionmusic"
+version = "0.2.11"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -2242,11 +2242,11 @@ dependencies = [
 ]
 
 [[package]]
-name = "optmusic-desktop"
-version = "0.1.2"
+name = "optionmusic-desktop"
+version = "0.1.5"
 dependencies = [
  "libc",
- "optmusic",
+ "optionmusic",
  "serde",
  "serde_json",
  "tauri",

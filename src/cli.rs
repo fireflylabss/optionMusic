@@ -1,4 +1,4 @@
-//! Command-line interface for optMusic.
+//! Command-line interface for optionMusic.
 
 use std::path::PathBuf;
 
@@ -63,17 +63,17 @@ impl CliEq {
     }
 }
 
-/// optMusic — minimal black & white CLI music player
+/// optionMusic — minimal black & white CLI music player
 ///
-/// Short for “option music”. Invoke as `optmusic` or `msc`.
+/// Invoke as `optionmusic`, or aliases `optmusic` / `msc`.
 #[derive(Debug, Parser)]
 #[command(
-    name = "optmusic",
+    name = "optionmusic",
     version,
-    about = "♪ optMusic — minimal black & white CLI music player",
-    long_about = "optMusic (option music) — play local audio from the terminal.\n\
+    about = "♪ optionMusic — minimal black & white CLI music player",
+    long_about = "optionMusic — play local audio from the terminal.\n\
 \n\
-  binaries   optmusic · msc\n\
+  binaries   optionmusic · optmusic · msc\n\
   engine     MPV (libmpv)\n\
   optional   cava spectrum bars",
     after_help = "Shortcuts:\n\
@@ -119,11 +119,11 @@ pub struct Cli {
         short = 'm',
         long = "music-dir",
         global = true,
-        env = "OPTMUSIC_MUSIC_DIR",
+        env = "OPTIONMUSIC_MUSIC_DIR",
         default_value = "",
         hide_default_value = true,
         value_name = "DIR",
-        help = "Music library root (default: ~/Music; also OPTMUSIC_MUSIC_DIR)"
+        help = "Music library root (default: ~/Music; also OPTIONMUSIC_MUSIC_DIR)"
     )]
     pub music_dir: String,
 
@@ -321,7 +321,7 @@ mod tests {
 
     #[test]
     fn parses_play_with_path() {
-        let cli = Cli::parse_from(["optmusic", "play", "song.mp3"]);
+        let cli = Cli::parse_from(["optionmusic", "play", "song.mp3"]);
         match cli.command {
             Some(Command::Play { paths, volume, .. }) => {
                 assert_eq!(paths, vec![PathBuf::from("song.mp3")]);
@@ -356,7 +356,7 @@ mod tests {
 
     #[test]
     fn parses_list_recursive() {
-        let cli = Cli::parse_from(["optmusic", "list", "./music", "-r"]);
+        let cli = Cli::parse_from(["optionmusic", "list", "./music", "-r"]);
         match cli.command {
             Some(Command::List { path, recursive }) => {
                 assert_eq!(path, PathBuf::from("./music"));
@@ -485,8 +485,7 @@ mod tests {
     #[test]
     fn parses_download_soundcloud_search() {
         let cli = Cli::parse_from([
-            "optmusic",
-            "download",
+            "optionmusic",            "download",
             "ambient mix",
             "-p",
             "soundcloud",

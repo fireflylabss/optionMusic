@@ -1,21 +1,25 @@
 [package]
-name = "optmusic"
-version = "0.2.10"
+name = "optionmusic"
+version = "0.2.11"
 edition = "2024"
 rust-version = "1.85"
-description = "optMusic — minimal black & white CLI music player (option music)"
+description = "optionMusic — minimal black & white CLI music player"
 authors = ["AEFireflyLabs"]
 license = "Apache-2.0"
 readme = "README.md"
 keywords = ["music", "audio", "player", "cli", "mp3", "mpv"]
 categories = ["command-line-utilities", "multimedia::audio"]
 
-# Full name
+# Canonical name
+[[bin]]
+name = "optionmusic"
+path = "src/main.rs"
+
+# Legacy / short aliases (same entrypoint)
 [[bin]]
 name = "optmusic"
 path = "src/main.rs"
 
-# Short alias
 [[bin]]
 name = "msc"
 path = "src/main.rs"

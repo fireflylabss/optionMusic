@@ -1,13 +1,14 @@
-# AUR packaging (`optmusic`)
+# AUR packaging (`optionmusic`)
 
-Published: https://aur.archlinux.org/packages/optmusic
+Published: https://aur.archlinux.org/packages/optionmusic  
+(legacy name `optmusic` is provided/replaced by this package; `optmusic` remains a binary alias.)
 
 ## Install (users)
 
 ```bash
-yay -S optmusic
+yay -S optionmusic
 # or
-paru -S optmusic
+paru -S optionmusic
 ```
 
 ## Automatic publish (recommended)
@@ -38,9 +39,9 @@ The public key must already be on your AUR account (it is, if you published 0.2.
 
 ```bash
 # bump code, commit, then:
-git tag -a v0.2.5 -m "optMusic 0.2.5"
+git tag -a v0.2.5 -m "optionMusic 0.2.5"
 git push origin v0.2.5
-gh release create v0.2.5 --title "optMusic 0.2.5" --generate-notes
+gh release create v0.2.5 --title "optionMusic 0.2.5" --generate-notes
 # → Actions publishes AUR automatically
 ```
 
@@ -53,4 +54,4 @@ Manual re-run: **Actions → Publish AUR → Run workflow**.
 ./packaging/aur/publish.sh 0.2.5     # bump + push
 ```
 
-Uses `~/aur/optmusic` and `~/.ssh/aur_synara` (override with `AUR_SSH_KEY=` / `AUR_DIR=`).
+Uses `~/aur/optionmusic` (or legacy `~/aur/optmusic`) and `~/.ssh/aur_synara` (override with `AUR_SSH_KEY=` / `AUR_DIR=`).

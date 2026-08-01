@@ -204,7 +204,7 @@ mod tests {
 
     #[test]
     fn finds_sidecar_cover_jpg() {
-        let dir = std::env::temp_dir().join(format!("optmusic-cover-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("optionmusic-cover-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         let audio = dir.join("track.mp3");

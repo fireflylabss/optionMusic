@@ -1,12 +1,12 @@
-# AGENTS.md — optMusic
+# AGENTS.md — optionMusic
 
 Guidance for coding agents working on this repo.
 
 ## Product
 
-**optMusic** (*option music*) — minimal black & white CLI music player powered by **MPV** (`libmpv2`).
+**optionMusic** (*option music*) — minimal black & white CLI music player powered by **MPV** (`libmpv2`).
 
-Binaries: `optmusic` · `msc` (same entrypoint).
+Binaries: `optionmusic` · `optmusic` (alias) · `msc` (same entrypoint).
 
 ## After every change
 
@@ -20,7 +20,7 @@ When you finish a task that touches code (features, fixes, UI, deps):
    cargo build --release
    ```
 
-2. **Install to PATH** — always refresh the local binaries so `msc` / `optmusic` match the working tree:
+2. **Install to PATH** — always refresh the local binaries so `optionmusic` / `optmusic` / `msc` match the working tree:
 
    ```bash
    export CARGO_TARGET_DIR="$(pwd)/target"

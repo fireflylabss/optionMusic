@@ -52,7 +52,7 @@ pub const CAVA_SOFT: Color = Color::Rgb {
     b: 44,
 };
 
-pub const APP_NAME: &str = "optMusic";
+pub const APP_NAME: &str = "optionMusic";
 
 /// Clickable region resolved from the last drawn frame.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -1551,7 +1551,7 @@ fn toast_alpha(elapsed: f64) -> f64 {
 
 // ── Shared helpers ──────────────────────────────────────────────
 
-/// Binary name as invoked (`optmusic` or `msc`).
+/// Binary name as invoked (`optionmusic`, `optmusic`, or `msc`).
 pub fn bin_name() -> String {
     std::env::args()
         .next()
@@ -1560,7 +1560,7 @@ pub fn bin_name() -> String {
                 .file_name()
                 .map(|s| s.to_string_lossy().into_owned())
         })
-        .unwrap_or_else(|| "optmusic".into())
+        .unwrap_or_else(|| "optionmusic".into())
 }
 
 pub fn banner() {

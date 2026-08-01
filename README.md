@@ -1,10 +1,10 @@
-# ♪ optMusic
+# ♪ optionMusic
 
-**optMusic** (*option music*) — minimal black & white CLI music player written in Rust.  
+**optionMusic** (*option music*) — minimal black & white CLI music player written in Rust.  
 Powered by **MPV** (`libmpv`), with an optional discreet **cava** spectrum strip.
 
 ```
-♪  optMusic
+♪  optionMusic
    track title
    ───●────────
    ◂ ⏸ paused ▸  ·  1/12  ·  − 80% +
@@ -35,11 +35,12 @@ Browser-only `bun run dev` is a UI preview — it cannot play audio. Package wit
 ### Arch / CachyOS (AUR)
 
 ```bash
-yay -S optmusic
+yay -S optionmusic
 # or
-paru -S optmusic
+paru -S optionmusic
 ```
 
+(`optmusic` still works as a binary alias after install.)
 ### System deps
 
 | Dep | Why |
@@ -73,7 +74,8 @@ cargo install --git https://github.com/fireflylabss/optionMusic --tag v0.2.7
 
 | Command | Description |
 |---------|-------------|
-| `optmusic` | full name |
+| `optionmusic` | canonical name |
+| `optmusic` | legacy alias |
 | `msc` | short alias |
 
 ## Usage
@@ -82,7 +84,7 @@ cargo install --git https://github.com/fireflylabss/optionMusic --tag v0.2.7
 msc p song.mp3
 msc song.mp3                          # bare path = play
 msc pl ./album
-optmusic play ./music --shuffle --loop
+optionmusic play ./music --shuffle --loop
 msc play song.flac -v 60 -f 1.25 -c 2 --eq bass
 msc play -m ~/Music --pitch 1.05
 msc play album/ --loop-file --cava
@@ -98,7 +100,7 @@ msc --help
 
 | Flag | Meaning |
 |------|---------|
-| `-m` / `--music-dir DIR` | Library root (default `~/Music`; env `OPTMUSIC_MUSIC_DIR`) |
+| `-m` / `--music-dir DIR` | Library root (default `~/Music`; env `OPTIONMUSIC_MUSIC_DIR`) |
 | `--cava` | Enable cava spectrum strip (off by default) |
 | `-q` / `--quiet` | Less stdout noise outside the TUI |
 
@@ -122,7 +124,7 @@ Uses system **yt-dlp**. Interactive wizard (`msc dl`):
 1. Pick **provider** (YouTube / YouTube Music / SoundCloud)
 2. Enter a **search** or **URL(s)** — multiple URLs with `url1;url2`
 3. Search shows **8 results/page** (n/p pages, multi-select); results cached 3 days in `~/.option/music/cache/dl/`
-4. After picking **one** item, opt-in **preview** opens the normal optMusic player on a temp audio file (`q` back)
+4. After picking **one** item, opt-in **preview** opens the normal optionMusic player on a temp audio file (`q` back)
 5. Choose a **preset**, then quality / filetype / embeds (one screen each)
 6. Batch options are the intersection of all selected items
 7. Saves to the **current directory** by default (opt-in other dir)
@@ -202,7 +204,7 @@ Left sidebar. Mouse wheel and navigation keys scroll · click a row to jump · c
 
 ## Cava bars
 
-Off by default. With `--cava` or `v`, and `cava` installed, optMusic draws a spectrum under the shortcut footer. Style and height are configurable in settings (`c` → Cava styles).
+Off by default. With `--cava` or `v`, and `cava` installed, optionMusic draws a spectrum under the shortcut footer. Style and height are configurable in settings (`c` → Cava styles).
 
 - PipeWire first, Pulse fallback
 - Click the strip or press `v` to toggle

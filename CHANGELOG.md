@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 
 Versioning, surfaces, and channels: see [VERSIONING.md](VERSIONING.md).
 
+## [CLI 0.2.11] / [Desktop 0.1.5-beta] - 2026-08-01
+
+### Changed
+
+- Product and crate branding is **optionMusic** / `optionmusic` everywhere. **`optmusic`** remains only as a binary alias (with `msc`).
+- Desktop package / lib renamed to `optionmusic-desktop` / `optionmusic_desktop_lib`.
+- Tauri events: `optionmusic://state`, `optionmusic://library-enriched`.
+- Env: `OPTIONMUSIC_MUSIC_DIR` (was `OPTMUSIC_MUSIC_DIR`).
+- UI hook: `useOptionMusic`.
+
 ## [CLI 0.2.10] / [Desktop 0.1.4-beta] - 2026-07-29
 
 ### Changed
@@ -36,7 +46,7 @@ Versioning, surfaces, and channels: see [VERSIONING.md](VERSIONING.md).
 **Library performance**
 
 - Two-phase library scan: path index first (fast UI), then background lofty tag enrichment in batches (`enrich_tags_batch`, ~32 tracks) after `scan_music_directories`.
-- Partial library updates over `optmusic://library-enriched` (`LibraryEnrichUpdate { tracks, done }`) so artists/albums fill in without a full snapshot; UI merges via `useOptMusic`.
+- Partial library updates over `optionmusic://library-enriched` (`LibraryEnrichUpdate { tracks, done }`) so artists/albums fill in without a full snapshot; UI merges via `useOptionMusic`.
 - Disk tag cache under `~/.option/music/cache/tags/` (`read_tags_cached` / `write_tag_cache`, keyed by path + mtime + size via `stable_cache_key`).
 - Shared cache helpers: `cache_dir`, `tags_cache_dir`, `covers_cache_dir`, `stable_cache_key` in `config.rs`.
 - Track scan metadata: `mtime`, `size`, `tags_enriched`; lazy `Track::from_path` + `enrich_tags` (no lofty on the hot path).
@@ -67,8 +77,8 @@ Versioning, surfaces, and channels: see [VERSIONING.md](VERSIONING.md).
 
 **Architecture / IPC**
 
-- Split the monolithic desktop UI into focused modules: `Sidebar`, `Catalog`, `Stage`, `PlayerBar`, `SettingsPanel`, `CommandPalette`, `ContextMenu`, plus shared `types` / `lib` and a `useOptMusic` hook — `main.tsx` is now a thin composition shell.
-- Playback ticker and playback-only commands (`pause`, `seek`, `volume`, `next`, …) refresh via `playback_state` / `optmusic://state` instead of re-serializing the full library snapshot.
+- Split the monolithic desktop UI into focused modules: `Sidebar`, `Catalog`, `Stage`, `PlayerBar`, `SettingsPanel`, `CommandPalette`, `ContextMenu`, plus shared `types` / `lib` and a `useOptionMusic` hook — `main.tsx` is now a thin composition shell.
+- Playback ticker and playback-only commands (`pause`, `seek`, `volume`, `next`, …) refresh via `playback_state` / `optionmusic://state` instead of re-serializing the full library snapshot.
 - Playback ticker uses `try_lock` and skips a tick when the controller mutex is busy (avoids blocking the UI during enrichment).
 - `TrackDto` uses mtime captured at scan time (no per-track `fs::metadata` on every snapshot).
 - Library walk no longer follows symlinks; default `~/Music` is not scanned twice when already listed in `music_dirs` (`paths_equivalent`).
@@ -157,7 +167,7 @@ Versioning, surfaces, and channels: see [VERSIONING.md](VERSIONING.md).
 
 - First desktop release built with React, TypeScript, Vite, Bun and Tauri 2.
 - A shared Rust `CoreController` drives the desktop and uses the existing `libmpv` player rather than WebView audio.
-- Tauri commands and live `optmusic://state` snapshots for scanning, playback, seeking, queue operations, favorites, volume and EQ.
+- Tauri commands and live `optionmusic://state` snapshots for scanning, playback, seeking, queue operations, favorites, volume and EQ.
 - Automatic scan of `~/Music`, plus picker-based additional library folders persisted in `~/.option/music/config.toml`.
 - Library search, favorites, queue add/remove/play-next actions, contextual file-manager reveal and desktop settings.
 - Desktop playback controls for play/pause, previous/next, seek, volume and EQ presets.

@@ -1,4 +1,4 @@
-//! Audio playback engine for optMusic (libmpv / MPV).
+//! Audio playback engine for optionMusic (libmpv / MPV).
 
 use std::path::Path;
 use std::time::Duration;

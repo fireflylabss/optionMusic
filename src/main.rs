@@ -1,6 +1,6 @@
-//! optMusic — minimal black & white CLI music player (option music).
+//! optionMusic — minimal black & white CLI music player (option music).
 //!
-//! Binaries: `optmusic` and short alias `msc`.
+//! Binaries: `optionmusic`, alias `optmusic`, short `msc`.
 //! Engine: MPV via libmpv2.
 
 use std::io::{self, IsTerminal};
@@ -14,13 +14,13 @@ use crossterm::event::{
 };
 use crossterm::style::Stylize;
 
-use optmusic::cli::{Cli, Command, PlaylistCmd};
-use optmusic::config::resolve_music_dir;
-use optmusic::download::{self, DownloadRequest, MediaKind};
-use optmusic::player::Player;
-use optmusic::playlist::Playlist;
-use optmusic::settings::SettingsAction;
-use optmusic::ui::{
+use optionmusic::cli::{Cli, Command, PlaylistCmd};
+use optionmusic::config::resolve_music_dir;
+use optionmusic::download::{self, DownloadRequest, MediaKind};
+use optionmusic::player::Player;
+use optionmusic::playlist::Playlist;
+use optionmusic::settings::SettingsAction;
+use optionmusic::ui::{
     APP_NAME, BRIGHT, DIM, FrameState, GRAY, HitTarget, SessionUi, WHITE, banner, bin_name,
     print_info, print_success, print_warn,
 };
@@ -153,7 +153,7 @@ fn run() -> Result<()> {
             );
             println!(
                 "  {}",
-                format!("optmusic · msc  ({bin})  ·  mpv").with(GRAY)
+                format!("optionmusic · optmusic · msc  ({bin})  ·  mpv").with(GRAY)
             );
         }
         None => {
@@ -190,7 +190,7 @@ fn cmd_play(
     volume: u8,
     speed: f64,
     pitch: f64,
-    eq: optmusic::eq::EqPreset,
+    eq: optionmusic::eq::EqPreset,
     crossfade: f64,
     shuffle: bool,
     loop_mode: LoopMode,
@@ -890,7 +890,7 @@ fn cmd_download(
     output: Option<&std::path::Path>,
     audio_format: &str,
     interactive: bool,
-    ui_override: Option<optmusic::config::DlUiMode>,
+    ui_override: Option<optionmusic::config::DlUiMode>,
     music_dir_flag: &str,
 ) -> Result<()> {
     let kind_flag = if both {
@@ -905,7 +905,7 @@ fn cmd_download(
 
     let use_wizard = interactive || query.is_none_or(|q| q.trim().is_empty());
     if use_wizard {
-        let ui_mode = ui_override.unwrap_or_else(|| optmusic::config::AppConfig::load().dl_ui);
+        let ui_mode = ui_override.unwrap_or_else(|| optionmusic::config::AppConfig::load().dl_ui);
         return download::run_interactive(
             music_dir_flag,
             query,
@@ -958,12 +958,12 @@ fn cmd_info(path: &std::path::Path) -> Result<()> {
     println!("  {}  {}", "size".with(DIM), size_h.with(GRAY));
     println!("  {}  {}", "format".with(DIM), fmt.with(GRAY));
 
-    match optmusic::player::probe_duration(path) {
+    match optionmusic::player::probe_duration(path) {
         Some(d) => {
             println!(
                 "  {}  {}",
                 "duration".with(DIM),
-                optmusic::ui::fmt_time(d).with(BRIGHT)
+                optionmusic::ui::fmt_time(d).with(BRIGHT)
             );
         }
         None => {
@@ -975,7 +975,7 @@ fn cmd_info(path: &std::path::Path) -> Result<()> {
 }
 
 fn cmd_list(path: &std::path::Path, recursive: bool) -> Result<()> {
-    let tracks = optmusic::playlist::scan_path(path, recursive)?;
+    let tracks = optionmusic::playlist::scan_path(path, recursive)?;
     if tracks.is_empty() {
         print_warn("no audio files found");
         return Ok(());
@@ -1004,7 +1004,7 @@ fn cmd_list(path: &std::path::Path, recursive: bool) -> Result<()> {
 fn cmd_playlist(action: PlaylistCmd) -> Result<()> {
     match action {
         PlaylistCmd::List => {
-            let list = optmusic::saved_playlists::list()?;
+            let list = optionmusic::saved_playlists::list()?;
             if list.is_empty() {
                 print_warn("no playlists yet — try `msc playlist create \"Name\"` or `import`");
                 return Ok(());
@@ -1019,11 +1019,11 @@ fn cmd_playlist(action: PlaylistCmd) -> Result<()> {
             }
         }
         PlaylistCmd::Create { name } => {
-            let pl = optmusic::saved_playlists::create(&name)?;
+            let pl = optionmusic::saved_playlists::create(&name)?;
             print_success(&format!("created {} ({})", pl.name, pl.id));
         }
         PlaylistCmd::Import { path, name } => {
-            let pl = optmusic::saved_playlists::import_m3u(&path, name.as_deref())?;
+            let pl = optionmusic::saved_playlists::import_m3u(&path, name.as_deref())?;
             print_success(&format!(
                 "imported {} ({} tracks)",
                 pl.name,
@@ -1031,16 +1031,16 @@ fn cmd_playlist(action: PlaylistCmd) -> Result<()> {
             ));
         }
         PlaylistCmd::Export { id, path } => {
-            optmusic::saved_playlists::export_m3u(&id, &path)?;
+            optionmusic::saved_playlists::export_m3u(&id, &path)?;
             print_success(&format!("exported to {}", path.display()));
         }
         PlaylistCmd::Add { id, track } => {
             let path = track.canonicalize().unwrap_or(track);
-            let pl = optmusic::saved_playlists::add_track(&id, &path.to_string_lossy())?;
+            let pl = optionmusic::saved_playlists::add_track(&id, &path.to_string_lossy())?;
             print_success(&format!("added to {} ({} tracks)", pl.name, pl.tracks.len()));
         }
         PlaylistCmd::Delete { id } => {
-            optmusic::saved_playlists::delete(&id)?;
+            optionmusic::saved_playlists::delete(&id)?;
             print_success("playlist deleted");
         }
     }

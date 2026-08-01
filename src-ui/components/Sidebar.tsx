@@ -39,7 +39,7 @@ export function Sidebar({
         <WindowControls />
         <div className="identity">
           <span className="mark">o</span>
-          <strong>optMusic</strong>
+          <strong>optionMusic</strong>
         </div>
       </div>
 

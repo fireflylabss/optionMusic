@@ -48,7 +48,7 @@ type DesktopPrefs = {
   [key: string]: unknown
 }
 
-export function useOptMusic() {
+export function useOptionMusic() {
   const domain = useRef<Snapshot>(emptySnapshot)
   const [, repaint] = useState(0)
   const [clock, setClock] = useState({ position: 0, duration: null as number | null })
@@ -377,8 +377,8 @@ export function useOptMusic() {
     }
     let unlistenState: (() => void) | undefined
     let unlistenLibrary: (() => void) | undefined
-    listen<PlaybackState>('optmusic://state', event => { if (active) applyPlayback(event.payload) }).then(fn => { unlistenState = fn })
-    listen<LibraryEnrichUpdate>('optmusic://library-enriched', event => {
+    listen<PlaybackState>('optionmusic://state', event => { if (active) applyPlayback(event.payload) }).then(fn => { unlistenState = fn })
+    listen<LibraryEnrichUpdate>('optionmusic://library-enriched', event => {
       if (!active) return
       const { tracks: updates, done } = event.payload
       mergeLibraryTracks(updates)

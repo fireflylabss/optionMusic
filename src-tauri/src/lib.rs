@@ -1,5 +1,5 @@
-use optmusic::controller::{CoreController, PlaybackState, Snapshot, TrackDto};
-use optmusic::eq::EqPreset;
+use optionmusic::controller::{CoreController, PlaybackState, Snapshot, TrackDto};
+use optionmusic::eq::EqPreset;
 use serde_json::{json, Value};
 use std::path::PathBuf;
 use std::sync::Mutex;
@@ -27,7 +27,7 @@ fn spawn_tag_enrichment(handle: AppHandle) {
             }
             let update = core.enrich_tags_batch(ENRICH_BATCH);
             drop(core);
-            let _ = handle.emit("optmusic://library-enriched", &update);
+            let _ = handle.emit("optionmusic://library-enriched", &update);
             if update.done {
                 break;
             }
@@ -60,7 +60,7 @@ fn scan_music_directories(
 }
 #[tauri::command]
 fn default_music_directory() -> String {
-    optmusic::config::default_music_dir()
+    optionmusic::config::default_music_dir()
         .to_string_lossy()
         .into_owned()
 }
@@ -109,8 +109,8 @@ fn set_ldm(enabled: bool, state: tauri::State<'_, State>) -> Result<(), String> 
 #[tauri::command]
 fn set_artist_source(source: String, state: tauri::State<'_, State>) -> Result<(), String> {
     let parsed = match source.to_ascii_lowercase().as_str() {
-        "metadata" | "tag" | "tags" | "meta" => optmusic::config::ArtistSource::Metadata,
-        "folder" | "dir" | "directory" => optmusic::config::ArtistSource::Folder,
+        "metadata" | "tag" | "tags" | "meta" => optionmusic::config::ArtistSource::Metadata,
+        "folder" | "dir" | "directory" => optionmusic::config::ArtistSource::Folder,
         _ => return Err(format!("unknown artist_source: {source}")),
     };
     state
@@ -216,7 +216,7 @@ fn save_settings(settings: Value, state: tauri::State<'_, State>) -> Result<(), 
         c.config.music_dirs = folders
             .iter()
             .filter_map(Value::as_str)
-            .map(|path| optmusic::config::resolve_music_dir(path))
+            .map(|path| optionmusic::config::resolve_music_dir(path))
             .collect::<Result<_, _>>()
             .map_err(error)?;
     }
@@ -287,9 +287,9 @@ fn reset_speed_pitch(state: tauri::State<'_, State>) -> Result<(), String> {
 #[tauri::command]
 fn set_replaygain(mode: String, state: tauri::State<'_, State>) -> Result<(), String> {
     let parsed = match mode.to_ascii_lowercase().as_str() {
-        "off" | "no" | "none" => optmusic::config::ReplayGainMode::Off,
-        "track" => optmusic::config::ReplayGainMode::Track,
-        "album" => optmusic::config::ReplayGainMode::Album,
+        "off" | "no" | "none" => optionmusic::config::ReplayGainMode::Off,
+        "track" => optionmusic::config::ReplayGainMode::Track,
+        "album" => optionmusic::config::ReplayGainMode::Album,
         _ => return Err(format!("unknown replaygain mode: {mode}")),
     };
     state
@@ -302,7 +302,7 @@ fn set_replaygain(mode: String, state: tauri::State<'_, State>) -> Result<(), St
 #[tauri::command]
 fn list_playlists(
     state: tauri::State<'_, State>,
-) -> Result<Vec<optmusic::saved_playlists::SavedPlaylist>, String> {
+) -> Result<Vec<optionmusic::saved_playlists::SavedPlaylist>, String> {
     state.lock().map_err(error)?.list_playlists().map_err(error)
 }
 
@@ -310,7 +310,7 @@ fn list_playlists(
 fn create_playlist(
     name: String,
     state: tauri::State<'_, State>,
-) -> Result<optmusic::saved_playlists::SavedPlaylist, String> {
+) -> Result<optionmusic::saved_playlists::SavedPlaylist, String> {
     state
         .lock()
         .map_err(error)?
@@ -323,7 +323,7 @@ fn rename_playlist(
     id: String,
     name: String,
     state: tauri::State<'_, State>,
-) -> Result<optmusic::saved_playlists::SavedPlaylist, String> {
+) -> Result<optionmusic::saved_playlists::SavedPlaylist, String> {
     state
         .lock()
         .map_err(error)?
@@ -345,7 +345,7 @@ fn playlist_add(
     id: String,
     track_id: String,
     state: tauri::State<'_, State>,
-) -> Result<optmusic::saved_playlists::SavedPlaylist, String> {
+) -> Result<optionmusic::saved_playlists::SavedPlaylist, String> {
     state
         .lock()
         .map_err(error)?
@@ -358,7 +358,7 @@ fn playlist_remove(
     id: String,
     track_id: String,
     state: tauri::State<'_, State>,
-) -> Result<optmusic::saved_playlists::SavedPlaylist, String> {
+) -> Result<optionmusic::saved_playlists::SavedPlaylist, String> {
     state
         .lock()
         .map_err(error)?
@@ -371,7 +371,7 @@ fn import_m3u(
     path: String,
     name: Option<String>,
     state: tauri::State<'_, State>,
-) -> Result<optmusic::saved_playlists::SavedPlaylist, String> {
+) -> Result<optionmusic::saved_playlists::SavedPlaylist, String> {
     state
         .lock()
         .map_err(error)?
@@ -400,9 +400,9 @@ fn play_playlist(id: String, state: tauri::State<'_, State>) -> Result<(), Strin
 #[tauri::command]
 fn smart_shelf(kind: String, state: tauri::State<'_, State>) -> Result<Vec<TrackDto>, String> {
     let shelf = match kind.as_str() {
-        "played_week" | "played" | "week" => optmusic::controller::SmartShelf::PlayedWeek,
-        "no_cover" | "nocover" => optmusic::controller::SmartShelf::NoCover,
-        "incomplete_albums" | "incomplete" => optmusic::controller::SmartShelf::IncompleteAlbums,
+        "played_week" | "played" | "week" => optionmusic::controller::SmartShelf::PlayedWeek,
+        "no_cover" | "nocover" => optionmusic::controller::SmartShelf::NoCover,
+        "incomplete_albums" | "incomplete" => optionmusic::controller::SmartShelf::IncompleteAlbums,
         _ => return Err(format!("unknown shelf: {kind}")),
     };
     Ok(state.lock().map_err(error)?.smart_shelf(shelf))
@@ -412,7 +412,7 @@ fn smart_shelf(kind: String, state: tauri::State<'_, State>) -> Result<Vec<Track
 fn get_track_tags(
     id: String,
     state: tauri::State<'_, State>,
-) -> Result<optmusic::meta::AudioTags, String> {
+) -> Result<optionmusic::meta::AudioTags, String> {
     state
         .lock()
         .map_err(error)?
@@ -423,7 +423,7 @@ fn get_track_tags(
 #[tauri::command]
 fn set_track_tags(
     id: String,
-    tags: optmusic::meta::AudioTags,
+    tags: optionmusic::meta::AudioTags,
     state: tauri::State<'_, State>,
 ) -> Result<TrackDto, String> {
     state
@@ -437,7 +437,7 @@ fn set_track_tags(
 fn track_lyrics(
     id: String,
     state: tauri::State<'_, State>,
-) -> Result<optmusic::meta::Lyrics, String> {
+) -> Result<optionmusic::meta::Lyrics, String> {
     state
         .lock()
         .map_err(error)?
@@ -447,21 +447,21 @@ fn track_lyrics(
 
 #[tauri::command]
 fn dl_ensure_yt_dlp() -> Result<String, String> {
-    optmusic::download::ensure_yt_dlp().map_err(error)
+    optionmusic::download::ensure_yt_dlp().map_err(error)
 }
 
 #[tauri::command]
 fn dl_search(
     provider: String,
     query: String,
-) -> Result<Vec<optmusic::download::SearchHit>, String> {
+) -> Result<Vec<optionmusic::download::SearchHit>, String> {
     let provider = match provider.to_ascii_lowercase().as_str() {
-        "youtube" | "yt" => optmusic::download::Provider::Youtube,
-        "youtubemusic" | "ytm" | "youtube_music" => optmusic::download::Provider::YoutubeMusic,
-        "soundcloud" | "sc" => optmusic::download::Provider::Soundcloud,
+        "youtube" | "yt" => optionmusic::download::Provider::Youtube,
+        "youtubemusic" | "ytm" | "youtube_music" => optionmusic::download::Provider::YoutubeMusic,
+        "soundcloud" | "sc" => optionmusic::download::Provider::Soundcloud,
         _ => return Err(format!("unknown provider: {provider}")),
     };
-    optmusic::download::search(provider, &query).map_err(error)
+    optionmusic::download::search(provider, &query).map_err(error)
 }
 
 #[tauri::command]
@@ -475,21 +475,21 @@ fn dl_run(
         .map(PathBuf::from)
         .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
     let kind = if audio {
-        optmusic::download::MediaKind::Audio
+        optionmusic::download::MediaKind::Audio
     } else {
-        optmusic::download::MediaKind::Video
+        optionmusic::download::MediaKind::Video
     };
     let query = urls.join(";");
-    let provider = optmusic::download::detect_provider(&query)
-        .unwrap_or(optmusic::download::Provider::Youtube);
-    let req = optmusic::download::DownloadRequest {
+    let provider = optionmusic::download::detect_provider(&query)
+        .unwrap_or(optionmusic::download::Provider::Youtube);
+    let req = optionmusic::download::DownloadRequest {
         query,
         provider,
         kind,
         output_dir: out,
         audio_format: audio_format.unwrap_or_else(|| "mp3".into()),
     };
-    optmusic::download::run_download(&req).map_err(error)
+    optionmusic::download::run_download(&req).map_err(error)
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -514,7 +514,7 @@ pub fn run() {
                 if let Some(state) = handle.try_state::<State>() {
                     if let Ok(mut core) = state.try_lock() {
                         // Playback-only payload — never re-send the full library on the ticker.
-                        let _ = handle.emit("optmusic://state", core.playback_state());
+                        let _ = handle.emit("optionmusic://state", core.playback_state());
                     }
                 }
             });
@@ -573,5 +573,5 @@ pub fn run() {
             dl_run
         ])
         .run(tauri::generate_context!())
-        .expect("error while running optMusic");
+        .expect("error while running optionMusic");
 }

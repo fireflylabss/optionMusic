@@ -1,1 +1,1 @@
-fn main() { optmusic_desktop_lib::run() }
+fn main() { optionmusic_desktop_lib::run() }

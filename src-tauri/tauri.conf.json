@@ -1,12 +1,12 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "optMusic",
-  "version": "0.1.4",
+  "productName": "optionMusic",
+  "version": "0.1.5",
   "identifier": "io.option.music",
   "build": { "beforeDevCommand": "bun run dev", "beforeBuildCommand": "bun run build", "devUrl": "http://localhost:1420", "frontendDist": "../dist" },
   "app": {
     "windows": [{
-      "title": "optMusic",
+      "title": "optionMusic",
       "width": 1200,
       "height": 760,
       "minWidth": 760,

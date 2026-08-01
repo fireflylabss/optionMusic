@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use walkdir::WalkDir;
 
-/// Known audio extensions optMusic prefers (MPV handles many more).
+/// Known audio extensions optionMusic prefers (MPV handles many more).
 const AUDIO_EXTS: &[&str] = &[
     "mp3", "flac", "ogg", "oga", "wav", "wave", "aac", "m4a", "mp4", "opus", "wma", "aiff", "aif",
     "alac", "webm", "mkv",

@@ -226,14 +226,14 @@ pub fn run_interactive_arrows(
         bail!("nothing selected");
     }
 
-    // Single selection → offer optMusic audio preview (local file + real player UI).
+    // Single selection → offer optionMusic audio preview (local file + real player UI).
     if items.len() == 1 {
         let title_line = format!("“{}”", download::truncate(&items[0].title, 52));
         let want = {
             let ui = TermUi::enter()?;
             pick_yes_no(
                 &ui,
-                "Preview this track in optMusic?",
+                "Preview this track in optionMusic?",
                 &[
                     title_line.as_str(),
                     "Quick audio listen · q returns here to continue downloading.",

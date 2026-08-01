@@ -1,4 +1,4 @@
-//! Paths, defaults, and persistent settings for optMusic.
+//! Paths, defaults, and persistent settings for optionMusic.
 //!
 //! User config: `~/.option/music/config.toml`
 
@@ -508,7 +508,7 @@ impl AppConfig {
             .with_context(|| format!("cannot create config dir {}", dir.display()))?;
         let path = config_path();
         let body = toml::to_string_pretty(self).context("serialize config")?;
-        let header = "# optMusic settings — edit carefully or use `c` in the player\n\
+        let header = "# optionMusic settings — edit carefully or use `c` in the player\n\
 # path: ~/.option/music/config.toml\n\n";
         fs::write(&path, format!("{header}{body}"))
             .with_context(|| format!("cannot write {}", path.display()))?;
@@ -555,7 +555,7 @@ mod tests {
 
     #[test]
     fn resolve_rejects_missing() {
-        assert!(resolve_music_dir("/tmp/optmusic_no_such_dir_xyz").is_err());
+        assert!(resolve_music_dir("/tmp/optionmusic_no_such_dir_xyz").is_err());
     }
 
     #[test]

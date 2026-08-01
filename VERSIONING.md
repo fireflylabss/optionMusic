@@ -6,7 +6,7 @@ This project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html) wit
 
 | Surface | What it is |
 |---------|------------|
-| **CLI** | `optmusic` / `msc` (Rust) |
+| **CLI** | `optionmusic` / aliases `optmusic` · `msc` (Rust) |
 | **Desktop** | Tauri / visual shell |
 
 Desktop and CLI are versioned **independently**. Changelog headings name the surface, e.g. `## [CLI 0.2.10]` / `## [Desktop 0.1.4-beta]`.

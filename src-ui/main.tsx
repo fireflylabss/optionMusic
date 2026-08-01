@@ -10,11 +10,11 @@ import { Stage } from './components/Stage'
 import { TagEditor } from './components/TagEditor'
 import { DirectionProvider } from './components/ui/direction'
 import { TooltipProvider } from './components/ui/tooltip'
-import { useOptMusic } from './hooks/useOptMusic'
+import { useOptionMusic } from './hooks/useOptionMusic'
 import './styles.css'
 
 function App() {
-  const m = useOptMusic()
+  const m = useOptionMusic()
   const ldm = Boolean(m.view.settings.ldm)
 
   return (

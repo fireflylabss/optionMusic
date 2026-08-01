@@ -1,4 +1,4 @@
-//! Local audio preview — slim optMusic player for `msc dl`.
+//! Local audio preview — slim optionMusic player for `msc dl`.
 //!
 //! Fetches audio quietly (spinner only), then opens SessionUi without list/settings.
 //! `q` / Esc returns to the download wizard.
