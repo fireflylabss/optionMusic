@@ -471,9 +471,11 @@ fn dl_run(
     output: Option<String>,
     audio_format: Option<String>,
 ) -> Result<(), String> {
-    let out = output
-        .map(PathBuf::from)
-        .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+    let out = optionmusic::download::resolve_output_dir(
+        output.as_deref().map(std::path::Path::new),
+        "",
+    )
+    .map_err(error)?;
     let kind = if audio {
         optionmusic::download::MediaKind::Audio
     } else {

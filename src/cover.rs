@@ -1,7 +1,7 @@
 //! Resolve album cover art from sidecar images or embedded tags.
 
 use anyhow::Result;
-use base64::{engine::general_purpose::STANDARD, Engine as _};
+use base64::{Engine as _, engine::general_purpose::STANDARD};
 use lofty::file::TaggedFileExt;
 use lofty::picture::PictureType;
 use lofty::probe::Probe;

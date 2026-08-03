@@ -4,28 +4,15 @@
 
 use std::fmt;
 use std::fs;
-use std::path::{Component, Path, PathBuf};
+use std::path::{Component, PathBuf};
 
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 
-/// Move `legacy` → `new` once when the new tree is missing.
-fn migrate_dir(legacy: &Path, new: &Path) {
-    if new.exists() || !legacy.exists() {
-        return;
-    }
-    if let Some(parent) = new.parent() {
-        let _ = fs::create_dir_all(parent);
-    }
-    let _ = fs::rename(legacy, new);
-}
-
 /// `~/.option/music` (migrates from legacy `~/option/music`)
 pub fn config_dir() -> PathBuf {
-    let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
-    let dir = home.join(".option").join("music");
-    migrate_dir(&home.join("option").join("music"), &dir);
-    dir
+    let _ = option_sdk::App::MUSIC.ensure();
+    option_sdk::App::MUSIC.dir()
 }
 
 /// `~/.option/music/config.toml`
@@ -62,9 +49,7 @@ pub fn stable_cache_key(parts: &[&[u8]]) -> String {
 
 /// Default local library: `~/Music`
 pub fn default_music_dir() -> PathBuf {
-    dirs::home_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("Music")
+    option_sdk::home_dir().join("Music")
 }
 
 /// Resolve a music-dir flag. Empty → `~/Music`. Rejects `..` and non-dirs.
@@ -92,15 +77,7 @@ pub fn resolve_music_dir(dir: &str) -> Result<PathBuf> {
 }
 
 fn expand_tilde(dir: &str) -> PathBuf {
-    if let Some(rest) = dir.strip_prefix("~/") {
-        return dirs::home_dir()
-            .unwrap_or_else(|| PathBuf::from("."))
-            .join(rest);
-    }
-    if dir == "~" {
-        return dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
-    }
-    PathBuf::from(dir)
+    option_sdk::expand_tilde(dir)
 }
 
 // ── Persistent settings ──────────────────────────────────────────
@@ -510,7 +487,7 @@ impl AppConfig {
         let body = toml::to_string_pretty(self).context("serialize config")?;
         let header = "# optionMusic settings — edit carefully or use `c` in the player\n\
 # path: ~/.option/music/config.toml\n\n";
-        fs::write(&path, format!("{header}{body}"))
+        option_sdk::atomic_write(&path, format!("{header}{body}").as_bytes())
             .with_context(|| format!("cannot write {}", path.display()))?;
         Ok(())
     }
@@ -535,7 +512,7 @@ mod tests {
     #[test]
     fn config_dir_ends_with_option_music() {
         let dir = config_dir();
-        assert!(dir.ends_with(Path::new(".option").join("music")));
+        assert!(dir.ends_with(std::path::Path::new(".option").join("music")));
     }
 
     #[test]

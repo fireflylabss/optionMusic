@@ -881,16 +881,7 @@ fn validate_out_dir(path: PathBuf) -> Result<PathBuf> {
 }
 
 fn expand_tilde_path(p: &Path) -> PathBuf {
-    let s = p.to_string_lossy();
-    if let Some(rest) = s.strip_prefix("~/") {
-        return dirs::home_dir()
-            .unwrap_or_else(|| PathBuf::from("."))
-            .join(rest);
-    }
-    if s == "~" {
-        return dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
-    }
-    p.to_path_buf()
+    option_sdk::expand_tilde(p)
 }
 
 // ── Interactive wizard ──────────────────────────────────────────
@@ -1184,10 +1175,7 @@ fn refine_options(
             _ => "best",
         })
         .into();
-        let c = prompt(
-            "video container  [mp4 · webm · mkv]",
-            Some(&opts.container),
-        )?;
+        let c = prompt("video container  [mp4 · webm · mkv]", Some(&opts.container))?;
         let c = c.trim().to_ascii_lowercase();
         if matches!(c.as_str(), "mp4" | "webm" | "mkv") {
             opts.container = c;
@@ -1535,6 +1523,12 @@ mod tests {
             resolve_input("ambient", Provider::Soundcloud),
             "scsearch1:ambient"
         );
+    }
+
+    #[test]
+    fn resolve_output_rejects_parent_components() {
+        let result = resolve_output_dir(Some(Path::new("downloads/../outside")), "");
+        assert!(result.is_err());
     }
 
     #[test]

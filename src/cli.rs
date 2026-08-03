@@ -457,9 +457,7 @@ mod tests {
         let cli = Cli::parse_from(["msc", "dl", "--ui", "type", "-i"]);
         match cli.command {
             Some(Command::Download {
-                ui,
-                interactive,
-                ..
+                ui, interactive, ..
             }) => {
                 assert!(interactive);
                 assert!(matches!(ui, Some(CliDlUi::Type)));
@@ -485,7 +483,8 @@ mod tests {
     #[test]
     fn parses_download_soundcloud_search() {
         let cli = Cli::parse_from([
-            "optionmusic",            "download",
+            "optionmusic",
+            "download",
             "ambient mix",
             "-p",
             "soundcloud",

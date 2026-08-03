@@ -79,7 +79,11 @@ fn parse_u32_item(tag: &lofty::tag::Tag, key: ItemKey) -> Option<u32> {
 }
 
 fn parse_gain(raw: &str) -> Option<f64> {
-    let s = raw.trim().trim_end_matches("dB").trim_end_matches("db").trim();
+    let s = raw
+        .trim()
+        .trim_end_matches("dB")
+        .trim_end_matches("db")
+        .trim();
     s.parse().ok()
 }
 
@@ -113,8 +117,12 @@ pub fn read_tags(audio: &Path) -> AudioTags {
                 .filter(|s| !s.is_empty())
                 .map(str::to_owned)
         });
-    let track_number = tag.track().or_else(|| parse_u32_item(tag, ItemKey::TrackNumber));
-    let disc_number = tag.disk().or_else(|| parse_u32_item(tag, ItemKey::DiscNumber));
+    let track_number = tag
+        .track()
+        .or_else(|| parse_u32_item(tag, ItemKey::TrackNumber));
+    let disc_number = tag
+        .disk()
+        .or_else(|| parse_u32_item(tag, ItemKey::DiscNumber));
     let replaygain_track_gain = tag
         .get_string(ItemKey::ReplayGainTrackGain)
         .and_then(parse_gain);

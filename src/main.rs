@@ -1037,7 +1037,11 @@ fn cmd_playlist(action: PlaylistCmd) -> Result<()> {
         PlaylistCmd::Add { id, track } => {
             let path = track.canonicalize().unwrap_or(track);
             let pl = optionmusic::saved_playlists::add_track(&id, &path.to_string_lossy())?;
-            print_success(&format!("added to {} ({} tracks)", pl.name, pl.tracks.len()));
+            print_success(&format!(
+                "added to {} ({} tracks)",
+                pl.name,
+                pl.tracks.len()
+            ));
         }
         PlaylistCmd::Delete { id } => {
             optionmusic::saved_playlists::delete(&id)?;

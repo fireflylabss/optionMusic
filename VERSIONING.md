@@ -1,24 +1,24 @@
 # Versioning
 
-This project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html) with an explicit **release channel** suffix, and [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
+We follow [Semantic Versioning](https://semver.org/) and [Keep a Changelog](https://keepachangelog.com/). CLI and Desktop version separately.
+
+The public changelog is the source of truth for headings, mixed releases, and channel language — see the expandable blurb at the top of [CHANGELOG.md](CHANGELOG.md).
 
 ## Surfaces
 
-| Surface | What it is |
-|---------|------------|
-| **CLI** | `optionmusic` / aliases `optmusic` · `msc` (Rust) |
-| **Desktop** | Tauri / visual shell |
+| Surface | What you install | Artifact version today |
+| --- | --- | --- |
+| **CLI** | `optionmusic` / aliases `optmusic` · `msc` | `0.2.12` (`Cargo.toml`) |
+| **Desktop** | Tauri visual app | `0.1.6` (`package.json` / `tauri.conf.json`) |
 
-Desktop and CLI are versioned **independently**. Changelog headings name the surface, e.g. `## [CLI 0.2.10]` / `## [Desktop 0.1.4-beta]`.
+Changelog tags always include the leading `v`. Mixed cuts that change both surfaces use an `m` before the channel (e.g. `v0.2.12m-beta`).
 
-Desktop **0.1.0** / **0.1.1** predate channel suffixes (shipped as plain versions). From **0.1.2-beta** onward, every desktop entry uses a channel suffix. Beta/alpha desktop builds are development snapshots — not GitHub Releases or AUR packages unless explicitly promoted to **stable**.
+## Channels
 
-## Release channels (`x.y.z-<channel>`)
+| Suffix | Meaning |
+| --- | --- |
+| **-alpha** | Very early. Missing pieces and lots of bugs. |
+| **-beta** | Mostly there, but still rough. Not the official install. |
+| **-stable** | Ready for daily use — GitHub Releases / AUR. |
 
-| Channel | Tag example | Meaning |
-|---------|-------------|---------|
-| **alpha** | `0.1.0-alpha` | Extremely early. Features incomplete; bugs are expected and common. |
-| **beta** | `0.1.2-beta` | Feature set nearly complete, but still rough — bugs and hard edges remain. |
-| **stable** | `0.2.0-stable` | Production-ready: finished for that version, few or no known bugs. |
-
-Do **not** label something `stable` unless it is actually release-ready. Prefer **beta** for desktop while the Tauri shell is still maturing; use **alpha** only for brand-new / half-built surfaces.
+Do **not** label something `stable` unless it is release-ready. Prefer **beta** for Desktop while the Tauri shell is maturing. Older Desktop builds (`v0.1.0`, `v0.1.1`) had no channel suffix; from `v0.1.2-beta` on, every Desktop (and mixed) version includes one.

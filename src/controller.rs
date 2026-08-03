@@ -236,9 +236,7 @@ impl CoreController {
     /// Directories to walk: configured folders plus default `~/Music` when not already listed.
     fn scan_directories(music_dirs: &[PathBuf]) -> Vec<PathBuf> {
         let default = config::default_music_dir();
-        let default_present = music_dirs
-            .iter()
-            .any(|d| paths_equivalent(d, &default));
+        let default_present = music_dirs.iter().any(|d| paths_equivalent(d, &default));
         let mut dirs: Vec<PathBuf> = music_dirs.to_vec();
         if !default_present && default.exists() {
             dirs.push(default);
@@ -278,7 +276,10 @@ impl CoreController {
             }
         }
         let done = self.library.iter().all(|t| t.tags_enriched);
-        LibraryEnrichUpdate { tracks: updated, done }
+        LibraryEnrichUpdate {
+            tracks: updated,
+            done,
+        }
     }
 
     pub fn tags_enrichment_pending(&self) -> bool {
@@ -350,15 +351,19 @@ impl CoreController {
         let _ = self.persist_resume(true);
     }
     pub fn next(&mut self) -> Result<()> {
-        let id = self.queue.pop_front().or_else(|| self.next_id()).or_else(|| {
-            if self.loop_mode == LoopMode::List {
-                self.library
-                    .first()
-                    .map(|t| t.path.to_string_lossy().into_owned())
-            } else {
-                None
-            }
-        });
+        let id = self
+            .queue
+            .pop_front()
+            .or_else(|| self.next_id())
+            .or_else(|| {
+                if self.loop_mode == LoopMode::List {
+                    self.library
+                        .first()
+                        .map(|t| t.path.to_string_lossy().into_owned())
+                } else {
+                    None
+                }
+            });
         if let Some(id) = id {
             self.play(&id)
         } else {
@@ -528,9 +533,7 @@ impl CoreController {
             .map(|d| d.as_nanos() as u64)
             .unwrap_or(0x9e3779b97f4a7c15);
         for i in (1..self.library.len()).rev() {
-            seed = seed
-                .wrapping_mul(6364136223846793005)
-                .wrapping_add(1);
+            seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1);
             let j = (seed as usize) % (i + 1);
             self.library.swap(i, j);
         }
@@ -575,8 +578,10 @@ impl CoreController {
     /// Album art as a local file path for Tauri `convertFileSrc` (preferred over base64 IPC).
     pub fn cover_file_path(&self, id: &str) -> Result<Option<String>> {
         let track = self.track(id)?;
-        Ok(crate::cover::resolve_cover_file(&track.path, track.mtime, track.size)?
-            .map(|c| c.path.to_string_lossy().into_owned()))
+        Ok(
+            crate::cover::resolve_cover_file(&track.path, track.mtime, track.size)?
+                .map(|c| c.path.to_string_lossy().into_owned()),
+        )
     }
     pub fn snapshot(&mut self) -> Snapshot {
         let playback = self.playback_state();
@@ -683,7 +688,11 @@ impl CoreController {
         crate::saved_playlists::delete(id)
     }
 
-    pub fn playlist_add(&self, id: &str, track_id: &str) -> Result<crate::saved_playlists::SavedPlaylist> {
+    pub fn playlist_add(
+        &self,
+        id: &str,
+        track_id: &str,
+    ) -> Result<crate::saved_playlists::SavedPlaylist> {
         let _ = self.track(track_id)?;
         crate::saved_playlists::add_track(id, track_id)
     }
@@ -766,7 +775,9 @@ impl CoreController {
                 .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
                 .map(|d| d.as_secs())
                 .unwrap_or(track.mtime),
-            std::fs::metadata(&path).map(|m| m.len()).unwrap_or(track.size),
+            std::fs::metadata(&path)
+                .map(|m| m.len())
+                .unwrap_or(track.size),
         );
         track.mtime = mtime;
         track.size = size;

@@ -73,10 +73,7 @@ pub fn load_entries() -> Vec<HistoryEntry> {
 
 fn rewrite_trimmed(entries: &[HistoryEntry]) -> Result<()> {
     let path = history_path();
-    let tmp = path.with_extension(format!(
-        "tmp-{}",
-        stable_cache_key(&[b"history-rewrite"])
-    ));
+    let tmp = path.with_extension(format!("tmp-{}", stable_cache_key(&[b"history-rewrite"])));
     {
         let mut file = fs::File::create(&tmp)?;
         for entry in entries {

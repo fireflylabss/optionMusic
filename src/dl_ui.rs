@@ -33,7 +33,11 @@ const BG_FOCUS: Color = Color::Rgb {
     g: 210,
     b: 210,
 };
-const FG_ON_FOCUS: Color = Color::Rgb { r: 12, g: 12, b: 12 };
+const FG_ON_FOCUS: Color = Color::Rgb {
+    r: 12,
+    g: 12,
+    b: 12,
+};
 const FG_TITLE: Color = Color::Rgb {
     r: 235,
     g: 235,
@@ -216,7 +220,11 @@ pub fn run_interactive_arrows(
     let mut items = if download::input_is_urls(&raw) {
         download::items_from_urls(&raw, provider)?
     } else {
-        print_info(&format!("searching {} for “{}”…", provider.label(), raw.trim()));
+        print_info(&format!(
+            "searching {} for “{}”…",
+            provider.label(),
+            raw.trim()
+        ));
         let results = download::search(provider, &raw)?;
         let ui = TermUi::enter()?;
         browse_search_arrows(&ui, &results)?
@@ -249,7 +257,10 @@ pub fn run_interactive_arrows(
         }
     }
 
-    print_info(&format!("scanning {} item(s) for formats / subs / thumbs…", items.len()));
+    print_info(&format!(
+        "scanning {} item(s) for formats / subs / thumbs…",
+        items.len()
+    ));
     download::probe_items(&mut items)?;
     let caps = download::intersect_caps(&items);
     print_info(&format!(
@@ -763,7 +774,9 @@ fn browse_search_arrows(ui: &TermUi, results: &[SearchHit]) -> Result<Vec<MediaI
         match read_key()? {
             KeyCode::Esc | KeyCode::Char('q') => bail!("cancelled"),
             KeyCode::Up | KeyCode::Char('k') => {
-                cursor = cursor.checked_sub(1).unwrap_or(slice.len().saturating_sub(1));
+                cursor = cursor
+                    .checked_sub(1)
+                    .unwrap_or(slice.len().saturating_sub(1));
             }
             KeyCode::Down | KeyCode::Char('j') => {
                 if !slice.is_empty() {

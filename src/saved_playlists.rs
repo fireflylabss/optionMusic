@@ -2,11 +2,14 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 
 use crate::config::{self, stable_cache_key};
+
+static ID_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SavedPlaylist {
@@ -23,8 +26,17 @@ fn playlists_dir() -> PathBuf {
     config::config_dir().join("playlists")
 }
 
-fn playlist_path(id: &str) -> PathBuf {
-    playlists_dir().join(format!("{id}.toml"))
+fn playlist_path(id: &str) -> Result<PathBuf> {
+    if id.is_empty()
+        || id == "."
+        || id == ".."
+        || !id
+            .bytes()
+            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
+    {
+        bail!("invalid playlist id: {id}");
+    }
+    Ok(playlists_dir().join(format!("{id}.toml")))
 }
 
 fn ensure_dir() -> Result<()> {
@@ -45,15 +57,17 @@ fn new_id(name: &str) -> String {
         .collect();
     let slug = slug.trim_matches('-');
     let slug = if slug.is_empty() { "playlist" } else { slug };
-    let key = stable_cache_key(&[slug.as_bytes(), &now_bytes()]);
-    format!("{slug}-{}", &key[..8])
+    let pid = std::process::id().to_le_bytes();
+    let counter = ID_COUNTER.fetch_add(1, Ordering::Relaxed).to_le_bytes();
+    let key = stable_cache_key(&[slug.as_bytes(), &now_bytes(), &pid, &counter]);
+    format!("{slug}-{key}")
 }
 
-fn now_bytes() -> [u8; 8] {
+fn now_bytes() -> [u8; 16] {
     use std::time::{SystemTime, UNIX_EPOCH};
     let n = SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs())
+        .map(|d| d.as_nanos())
         .unwrap_or(0);
     n.to_le_bytes()
 }
@@ -80,17 +94,17 @@ pub fn list() -> Result<Vec<SavedPlaylist>> {
 }
 
 pub fn get(id: &str) -> Result<SavedPlaylist> {
-    let path = playlist_path(id);
-    let raw = fs::read_to_string(&path)
-        .with_context(|| format!("playlist not found: {id}"))?;
+    let path = playlist_path(id)?;
+    let raw = fs::read_to_string(&path).with_context(|| format!("playlist not found: {id}"))?;
     Ok(toml::from_str(&raw)?)
 }
 
 fn write_playlist(pl: &SavedPlaylist) -> Result<()> {
     ensure_dir()?;
-    let path = playlist_path(&pl.id);
+    let path = playlist_path(&pl.id)?;
     let body = toml::to_string_pretty(pl)?;
-    fs::write(&path, body).with_context(|| format!("write {}", path.display()))?;
+    option_sdk::atomic_write(&path, body.as_bytes())
+        .with_context(|| format!("write {}", path.display()))?;
     Ok(())
 }
 
@@ -99,12 +113,15 @@ pub fn create(name: &str) -> Result<SavedPlaylist> {
     if name.is_empty() {
         bail!("playlist name is empty");
     }
-    let pl = SavedPlaylist {
+    let mut pl = SavedPlaylist {
         id: new_id(name),
         name: name.to_owned(),
         tracks: Vec::new(),
         source: None,
     };
+    while playlist_path(&pl.id)?.exists() {
+        pl.id = new_id(name);
+    }
     write_playlist(&pl)?;
     Ok(pl)
 }
@@ -121,7 +138,7 @@ pub fn rename(id: &str, name: &str) -> Result<SavedPlaylist> {
 }
 
 pub fn delete(id: &str) -> Result<()> {
-    let path = playlist_path(id);
+    let path = playlist_path(id)?;
     if path.exists() {
         fs::remove_file(&path)?;
     }
@@ -146,8 +163,7 @@ pub fn remove_track(id: &str, track_id: &str) -> Result<SavedPlaylist> {
 
 /// Parse an M3U / M3U8 file into absolute paths (relative lines resolve against the M3U dir).
 pub fn parse_m3u(path: &Path) -> Result<Vec<PathBuf>> {
-    let raw = fs::read_to_string(path)
-        .with_context(|| format!("read {}", path.display()))?;
+    let raw = fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?;
     let base = path.parent().unwrap_or_else(|| Path::new("."));
     let mut tracks = Vec::new();
     for line in raw.lines() {
@@ -202,6 +218,29 @@ pub fn export_m3u(id: &str, out: &Path) -> Result<()> {
     if let Some(parent) = out.parent() {
         fs::create_dir_all(parent)?;
     }
-    fs::write(out, body).with_context(|| format!("write {}", out.display()))?;
+    option_sdk::atomic_write(out, body.as_bytes())
+        .with_context(|| format!("write {}", out.display()))?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn playlist_ids_are_single_safe_segments() {
+        assert!(playlist_path("../escape").is_err());
+        assert!(playlist_path("nested/id").is_err());
+        assert!(playlist_path("UPPER").is_err());
+        assert!(playlist_path("safe-id-0123").is_ok());
+    }
+
+    #[test]
+    fn new_ids_include_subsecond_entropy() {
+        let first = new_id("Same name");
+        let second = new_id("Same name");
+        assert_ne!(first, second);
+        assert!(first.starts_with("same-name-"));
+        assert!(second.starts_with("same-name-"));
+    }
 }

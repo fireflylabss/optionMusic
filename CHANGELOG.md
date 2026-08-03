@@ -1,334 +1,221 @@
 # Changelog
 
-All notable changes to this project will be documented in this file.
+We follow [Semantic Versioning](https://semver.org/) and [Keep a Changelog](https://keepachangelog.com/). CLI and Desktop version separately.
 
-Versioning, surfaces, and channels: see [VERSIONING.md](VERSIONING.md).
+<details>
+<summary>To see more about versioning, expand this.</summary>
 
-## [CLI 0.2.11] / [Desktop 0.1.5-beta] - 2026-08-01
+Every version string starts with `v` (required), e.g. `v0.2.12`, `v0.1.6-beta`.
 
-### Changed
+Here the installable surfaces are **CLI** and **Desktop**. Other Option apps swap in their own names the same way — e.g. **GTK**, **Web**, **GNOME** — whatever you actually ship.
+
+| Part | What you install | Example |
+| --- | --- | --- |
+| **CLI** | `optionmusic` / aliases `optmusic` · `msc` in the terminal | `v0.2.12` |
+| **Desktop** | the visual app | `v0.1.6-beta` |
+
+A new CLI does not always mean a new Desktop app, and the other way around.
+
+Sometimes one cut ships **both** surfaces. That is a **mixed release**: one tag with an `m` before the channel (ex: `v0.2.12m-beta`), and the notes break out each surface so a small touch on one side does not look equal to a large cut on the other.
+
+Each release heading is the version and date (`## v0.2.12m-beta · 03/08/2026`); under it, a short summary ends with a plain sentence like: “This version was made for both desktop and CLI with a beta release channel on 03/08/2026 (v0.2.12m-beta).”
+
+### What the Desktop suffix means
+
+| Suffix | In plain words |
+| --- | --- |
+| **-alpha** | Very early. Expect missing pieces and lots of bugs. |
+| **-beta** | Mostly there, but still rough. Fine to try; not the “official” install. |
+| **-stable** | Ready for daily use. This is what we put on GitHub Releases and the AUR. |
+
+We only call something **stable** when we mean it. While the desktop app is still settling, builds stay **beta**.
+
+Older desktop builds (`v0.1.0`, `v0.1.1`) had no channel suffix. From `v0.1.2-beta` on, every desktop (and mixed) version includes one.
+
+</details>
+
+## v0.2.12m-beta · 03/08/2026
+
+Shared path ownership, safe playlist persistence, and desktop download boundary hardening. This version was made for both desktop and CLI with a beta release channel on 03/08/2026 (v0.2.12m-beta).
+
+### Desktop (`0.1.6-beta`)
+
+- Resolve the Tauri download destination through the same validated output-directory boundary used by the CLI.
+- Use the shared SDK identity and migration path for the music configuration tree.
+
+### CLI (`0.2.12`)
+
+- Playlist ids are strict single-segment ids and no longer collide for same-second creations.
+- Playlist/config/M3U writes use the SDK atomic-write primitive.
+- Adopt `optionSDK` 0.1.3 and the canonical `optionMusic` display identity.
+
+## v0.2.11m-beta · 01/08/2026
+
+Product branding is optionMusic everywhere, with matching desktop package and event names. This version was made for both desktop and CLI with a beta release channel on 01/08/2026 (v0.2.11m-beta).
+
+### Desktop
+
+- Package / lib renamed to `optionmusic-desktop` / `optionmusic_desktop_lib`.
+- Tauri events are now `optionmusic://state` and `optionmusic://library-enriched`.
+- UI hook renamed to `useOptionMusic`.
+- Various other small tweaks
+
+### CLI
 
 - Product and crate branding is **optionMusic** / `optionmusic` everywhere. **`optmusic`** remains only as a binary alias (with `msc`).
-- Desktop package / lib renamed to `optionmusic-desktop` / `optionmusic_desktop_lib`.
-- Tauri events: `optionmusic://state`, `optionmusic://library-enriched`.
-- Env: `OPTIONMUSIC_MUSIC_DIR` (was `OPTMUSIC_MUSIC_DIR`).
-- UI hook: `useOptionMusic`.
+- Env var is `OPTIONMUSIC_MUSIC_DIR` (was `OPTMUSIC_MUSIC_DIR`).
+- Various other small tweaks
 
-## [CLI 0.2.10] / [Desktop 0.1.4-beta] - 2026-07-29
+## v0.2.10m-beta · 29/07/2026
 
-### Changed
+Desktop bundle id rename, with a matching CLI identity touch. This version was made for both desktop and CLI with a beta release channel on 29/07/2026 (v0.2.10m-beta).
 
-- Desktop bundle identifier is now **`io.option.music`** (was `com.aefireflylabs.optmusic`).
+### Desktop
 
-## [CLI 0.2.9] / [Desktop 0.1.3-beta] - 2026-07-29
+- Bundle identifier is now `io.option.music` (was `com.aefireflylabs.optmusic`). Reinstall the `.desktop` file if an old install still shows up under the previous id.
+- Various other small tweaks
 
-### Changed
+### CLI
 
-- Config, cache and playlists now live under **`~/.option/music/`** (same layout as optionTerm’s `~/.option/terminal/`). Existing data at `~/option/music/` is moved automatically on first run.
+- Help / about text now mention the same `io.option.music` family id where relevant.
+- Various other small tweaks
 
-## [Desktop 0.1.2-beta] - 2026-07-21
+## v0.2.9m-beta · 29/07/2026
 
-> **Beta** — features nearly in place; still expect bugs and rough edges. Not a GitHub Release / AUR package.
+Shared config path move under `~/.option/music/`. This version was made for both desktop and CLI with a beta release channel on 29/07/2026 (v0.2.9m-beta).
 
-### Added
+### Desktop
 
-**Listening tools (core → desktop)**
+- Settings UI and on-disk state read/write the new `~/.option/music/` layout (config, cache, playlists).
+- First launch migrates leftover data from `~/option/music/` when present.
+- Various other small tweaks
 
-- Local playlists: create, rename, delete, add/remove tracks; import/export **M3U** (`~/.option/music/playlists/`). Desktop Playlists page + CLI `msc playlist …`.
-- Smart shelves: **Played this week**, **No cover**, **Incomplete albums** (history log + tag/cover enrichment).
-- **Listening focus** mode — hide chrome; cover + scrub only (Esc to exit).
-- Desktop **yt-dlp download** dialog (search → select → download into the music folder).
-- **Pitch & speed** controls in Settings (shared MPV engine; already in CLI).
-- **ReplayGain** mode (`off` / `track` / `album`) via MPV, persisted in `config.toml`.
-- Offline **lyrics** (embedded tags or `.lrc` / `.txt` sidecar) in the Stage panel.
-- **Edit tags** dialog (title / artist / album) + Reveal in folder (context menu).
+### CLI
 
-**Library performance**
+- `msc` / `optmusic` resolve config and cache from `~/.option/music/` the same way as Desktop.
+- Various other small tweaks
 
-- Two-phase library scan: path index first (fast UI), then background lofty tag enrichment in batches (`enrich_tags_batch`, ~32 tracks) after `scan_music_directories`.
-- Partial library updates over `optionmusic://library-enriched` (`LibraryEnrichUpdate { tracks, done }`) so artists/albums fill in without a full snapshot; UI merges via `useOptionMusic`.
-- Disk tag cache under `~/.option/music/cache/tags/` (`read_tags_cached` / `write_tag_cache`, keyed by path + mtime + size via `stable_cache_key`).
-- Shared cache helpers: `cache_dir`, `tags_cache_dir`, `covers_cache_dir`, `stable_cache_key` in `config.rs`.
-- Track scan metadata: `mtime`, `size`, `tags_enriched`; lazy `Track::from_path` + `enrich_tags` (no lofty on the hot path).
-- O(1) path→track index on `CoreController` (`rebuild_path_index`) for play / next / queue / favorites lookups.
+## v0.2.8m-beta · 21/07/2026
 
-**Covers**
+Big Desktop beta plus shared playlist / shelves / listening tools on the CLI engine. This version was made for both desktop and CLI with a beta release channel on 21/07/2026 (v0.2.8m-beta).
 
-- Cover disk cache under `~/.option/music/cache/covers/` for embedded art (sidecar still preferred when present).
-- New IPC `track_cover_url` → absolute file path for `convertFileSrc`; data-URL `track_cover` remains as client fallback.
-- `CoverFile` / `resolve_cover_file` / `cover_file_path` on the core; UI `CoverThumb` prefers file URLs.
-- Lazy cover loading: IntersectionObserver + concurrency-limited IPC queue (`coverQueue.ts`).
+### Desktop
 
-**UI shell**
+- Local playlists: create, rename, delete, add/remove tracks; import and export M3U. Same engine as `msc playlist …` on the CLI.
+- Smart shelves for recent listening gaps: Played this week, No cover, Incomplete albums.
+- Listening focus mode hides the chrome so you only get cover + scrub (Esc to leave).
+- Desktop yt-dlp download dialog (search → select → download into the music folder).
+- Pitch & speed, ReplayGain (`off` / `track` / `album`), offline lyrics, and light tag edit from the UI.
+- Two-phase library scan with background tag enrichment, disk tag/cover caches, and virtualized track lists for large libraries.
+- Modular UI shell (Sidebar, Catalog, Stage, PlayerBar, Settings, Command palette) on Tailwind v4 + shadcn; marketing site scaffold in `website/`.
+- Various other UI polish
 
-- Virtualized track list (`VirtualTrackList`, viewport ± overscan) for large libraries.
-- shadcn/ui preset `b37si9Aiv` (base-vega / stone / Lora / Phosphor, RTL-ready): `components.json`, theme tokens, `DirectionProvider`, `TooltipProvider`.
-- Core shadcn primitives under `src-ui/components/ui/` (Button, Switch, Slider, Dialog, Tabs, ScrollArea, Separator, Badge, Input, DropdownMenu, Tooltip, Direction).
-- Path aliases `@/*` → `src-ui/*` (tsconfig + Vite); helpers split into `lib/music.ts` + `lib/utils.ts` (`cn`).
-- Marketing site scaffold in `website/` (Next.js + same shadcn preset) and product brief in `PRODUCT.md` (landing direction; not part of the desktop binary).
+### CLI
 
-### Changed
-
-**Listening tools**
-
-- Playlists page is no longer a stub; Shelves and Download join the sidebar.
-- Settings Audio tab: speed, pitch, ReplayGain.
-- `TrackDto` gains `track_number` / `has_cover` for shelves.
-
-**Architecture / IPC**
-
-- Split the monolithic desktop UI into focused modules: `Sidebar`, `Catalog`, `Stage`, `PlayerBar`, `SettingsPanel`, `CommandPalette`, `ContextMenu`, plus shared `types` / `lib` and a `useOptionMusic` hook — `main.tsx` is now a thin composition shell.
-- Playback ticker and playback-only commands (`pause`, `seek`, `volume`, `next`, …) refresh via `playback_state` / `optionmusic://state` instead of re-serializing the full library snapshot.
-- Playback ticker uses `try_lock` and skips a tick when the controller mutex is busy (avoids blocking the UI during enrichment).
-- `TrackDto` uses mtime captured at scan time (no per-track `fs::metadata` on every snapshot).
-- Library walk no longer follows symlinks; default `~/Music` is not scanned twice when already listed in `music_dirs` (`paths_equivalent`).
-
-**Visual / frontend stack**
-
-- Desktop UI migrated to Tailwind v4 (`@tailwindcss/vite`) + stone dark theme; layout CSS bridged to semantic tokens (`--background`, `--sidebar`, …).
-- Icons: Lucide → Phosphor; display font: Lora Variable; dark `theme` class on `index.html`.
-- Settings toggles use shadcn `Switch`; primary actions (Open files / Add folder / Done) use shadcn `Button`.
-- Command palette (⌘K) and Settings use the native `<dialog>` API (`showModal` / `::backdrop`) instead of custom veil overlays.
-- Artist and album grids render as semantic lists (`<ul>` / `<li>`) for clearer structure and accessibility.
-
-**Docs / agent guidance**
-
-- Explicit release-channel scheme (`alpha` / `beta` / `stable`) documented in `CHANGELOG.md` and `AGENTS.md`; desktop 0.1.2 labeled **beta** (local/dev only — not GitHub Release / AUR).
-- `.gitignore` entries for `website/` build outputs.
-
-## [CLI 0.2.8] - 2026-07-21
-
-### Added
-
-- **`playlist`** / **`plists`** / **`pls`** — list, create, import M3U, export, add track, delete.
+- `playlist` / `plists` / `pls` — list, create, import M3U, export, add track, delete.
 - Play history (`~/.option/music/cache/history.jsonl`) for “played this week”.
-- Tag write + richer reads (track/disc number, ReplayGain fields, lyrics).
-- Config `replaygain` (`off` | `track` | `album`).
-- Core APIs for smart shelves, lyrics, tag edit — shared with desktop.
+- Tag write + richer reads (track/disc number, ReplayGain fields, lyrics); config `replaygain` (`off` | `track` | `album`).
+- Core APIs for smart shelves, lyrics, and tag edit — shared with Desktop.
+- Various other small tweaks
 
-### Changed
+## v0.1.1 · 20/07/2026
 
-- Tag cache key bumped (`v2`) to include new fields.
-
-## [Desktop 0.1.1] - 2026-07-20
-
-> Predates channel suffixes — treated historically as an early unstable desktop release.
-
-### Added
+Sidebar shell, artists/albums, session resume, and listening rail. This version was made for desktop on 20/07/2026 (v0.1.1).
 
 - Audex-style left sidebar: brand + traffic lights, Library / Artists / Playlists / Favorites, Recent list, Search trigger, Open files, Settings.
-- **⌘K / Ctrl+K** command palette to search and play tracks (↑↓ navigate, Enter play, Esc close) — replaces the old Search tab.
-- Artists browser with two modes: **metadata** (default, tags via lofty) or **folder** names — shared `artist_source` in `~/.option/music/config.toml` (CLI settings `c` → Artists, desktop Settings → Library).
-- Track tags: `artist` / `album` / preferred title on the DTO; artist cards load cover art when available.
-- Artist detail view: **Albums** grid + **Tracks** list (drill into an album).
-- Session resume: last track, position, and queue persisted in config (`resume_track`, `resume_position`, `resume_queue`) and restored paused on reopen (desktop + shared config).
-- Now-playing **listening rail** on the right: full-bleed cover, play/pause on art, title/artist/album, in-panel scrubber, Like / Queue actions, Up next list.
-- Settings as a centered **popup** (tabs: Library / Playback / Audio) — folders, artists source, volume, excess volume, LDM, EQ grid; shared with CLI/`config.toml`.
-- Album art in stage, mini-player, and artist/album cards — folder sidecars (`cover.jpg`, `folder.jpg`, …) or embedded tags via `lofty`.
+- ⌘K / Ctrl+K command palette to search and play tracks (↑↓ navigate, Enter play, Esc close).
+- Artists browser with metadata or folder name modes; shared `artist_source` in `~/.option/music/config.toml`.
+- Artist detail view with Albums grid + Tracks list; album art in stage, mini-player, and cards.
+- Session resume: last track, position, and queue restored paused on reopen.
+- Now-playing listening rail on the right; Settings as a centered popup (Library / Playback / Audio).
+- Various other UI polish
 
-### Changed
+## v0.2.7 · 19/07/2026
 
-- Replaced the top masthead with a persistent navigation sidebar; Search is no longer a primary nav tab.
-- Now-playing moved from left/stage-left to a compact right rail (~300–320px).
-- Bottom player bar polish: larger artwork, clearer typography, thicker scrubber, refined control hierarchy and volume control.
-- Window traffic lights (close / minimize / maximize) sized for easier clicking without dominating the chrome.
-- Transport stays in the footer; stage focuses on cover and listening context.
+Interactive yt-dlp downloader for YouTube, YouTube Music, and SoundCloud. This version was made for CLI on 19/07/2026 (v0.2.7).
 
-### Fixed
+- `download` / `dl` / `d` wizard: provider → search/URL(s) → select → preset → options → download.
+- Search with paging and multi-select; results cached under `~/.option/music/cache/dl/` (auto-purged every 3 days).
+- Presets (best · economy · lower · custom), quality/filetype options, embeds, and limited subtitles (en/pt/es).
+- Wizard UI modes: `arrows` (default) or `type`, via `--ui`, settings `c`, or `dl_ui` in config.
+- Optional audio preview after picking a single item; requires system yt-dlp (and ffmpeg for extract / embed).
+- Various other small tweaks
 
-- Header / stage / list alignment inconsistencies from the 0.1.0 layout pass.
+## v0.1.0 · 19/07/2026
 
-## [CLI 0.2.7] - 2026-07-19
+First desktop shell on Tauri 2 with the shared Rust core. This version was made for desktop on 19/07/2026 (v0.1.0).
 
-### Added
+- React / TypeScript / Vite / Bun + Tauri 2; `CoreController` drives playback via `libmpv` (not WebView audio).
+- Live `optionmusic://state` snapshots for scanning, playback, queue, favorites, volume, and EQ.
+- Automatic `~/Music` scan plus picker-based library folders in `~/.option/music/config.toml`.
+- Library search, favorites, queue actions, reveal in file manager, and desktop settings.
+- Various other bug fixes
 
-- **`download`** / **`dl`** / **`d`** — interactive yt-dlp downloader for **YouTube**, **YouTube Music**, and **SoundCloud**.
-  - Wizard flow: **provider → search/URL(s) → select → preset → options → download**
-  - URLs: paste one or many (`url1;url2`); asks audio vs video when the platform supports it (audio-only platforms skip straight to audio)
-  - Search: 8 results per page with next/prev, multi-select, cached under `~/.option/music/cache/dl/` (auto-purged every **3 days**)
-  - Presets after selection: **best** · **economy** · **lower** · **custom**
-  - Options: quality, filetype/container, embed thumbnail + music metadata, subtitles (scan → default **embed** when available; also separate / both / none)
-  - Multi-select / multi-URL batch: only options common to **all** selected items (capability intersection)
-  - Output defaults to the **current directory** (opt-in other dir); `-o` still works for direct mode
-  - Direct mode: `msc dl URL --audio`, `msc download -p soundcloud "query" -a`
-  - Wizard UI modes: **`arrows`** (default — ↑↓ / checkboxes) and **`type`** (typed prompts); set via `msc dl --ui arrows|type`, settings **`c` → Dl UI**, or `dl_ui` in `~/.option/music/config.toml`
-  - Download kinds: **audio only** · **video only** · **both** (separate files); each format choice is its own selection screen (no left/right cycling)
-  - Embeds: full metadata pack, cover thumbnail inside the file, subtitles embedded into video (no loose `.srt` option)
-  - Subtitles limited to **en/pt/es** (+ skip translated auto-subs) with `--ignore-errors` so a 429 can’t kill the video download
-  - After selecting **exactly one** item: optional **audio preview** — quiet fetch (spinner only, no remux) into a slim player without list/settings (`q` returns to the download wizard)
-  - Higher-contrast greyscale arrow UI (inverted focus row + clearer copy)
-- Requires system **yt-dlp** (and **ffmpeg** for extract / embed).
+## v0.2.6 · 17/07/2026
 
-## [Desktop 0.1.0] - 2026-07-19
+Persistent settings sidebar and richer playlist panel. This version was made for CLI on 17/07/2026 (v0.2.6).
 
-> Predates channel suffixes — first desktop shell (historically an early unstable release).
+- Settings left sidebar with `c` — excess volume, cava styles, LDM, accent presets; config at `~/.option/music/config.toml`.
+- Playlist as a left sidebar (`l`) with mouse-wheel scroll, clickable rows, and a draggable scrollbar.
+- Various other bug fixes
 
-### Added
+## v0.2.5 · 17/07/2026
 
-- First desktop release built with React, TypeScript, Vite, Bun and Tauri 2.
-- A shared Rust `CoreController` drives the desktop and uses the existing `libmpv` player rather than WebView audio.
-- Tauri commands and live `optionmusic://state` snapshots for scanning, playback, seeking, queue operations, favorites, volume and EQ.
-- Automatic scan of `~/Music`, plus picker-based additional library folders persisted in `~/.option/music/config.toml`.
-- Library search, favorites, queue add/remove/play-next actions, contextual file-manager reveal and desktop settings.
-- Desktop playback controls for play/pause, previous/next, seek, volume and EQ presets.
+Loop cycle, richer CLI flags, and cleaner help. This version was made for CLI on 17/07/2026 (v0.2.5).
 
-### Changed
+- In-session loop cycle with `o`: off → list → track → off.
+- CLI flags for pitch, EQ, quiet, loop-file / repeat-one; aliases `p`/`pl`, `i`, `ls`, `ver`; bare path plays.
+- Filename / path line off by default (`f` still toggles it).
+- Various other small tweaks
 
-- The desktop app is now started with `bun run tauri:dev`; browser-only preview clearly states that playback and library access require Tauri.
-- Playback, library state, queue and preferences now come from the Rust core; the frontend contains presentation state only.
-- Local paths are validated by the core before revealing them in the file manager.
-- Live ticker emits a lightweight `PlaybackState` (position / pause / current) instead of re-sending the full library on every tick.
-- Frontend keeps the library list stable across ticks and only re-renders the track list when transport state actually changes.
-- Single-click anywhere on a track row starts playback (not only the title button / double-click).
-- Settings EQ options use the core preset labels (`off` · `bass+` · `treble+` · `rock` · `vocal` · `lofi`).
+## v0.2.4 · 17/07/2026
 
-### Fixed
+Help and playlist as overlays, plus AUR packaging. This version was made for CLI on 17/07/2026 (v0.2.4).
 
-- Playback appeared dead with large libraries: the 250 ms ticker was pushing ~0.5 MB JSON (full library) through the WebView IPC, starving UI clicks.
-- `libmpv` init failed with `Null` under desktop locales such as `pt_BR` — GTK/WebKit resets `LC_NUMERIC`; the core now forces `C` before creating / driving MPV.
-- `play` could mark a track as current even when `loadfile` failed; current is only committed after a successful open.
-- Footer Play called `toggle_pause` as a no-op when the player was idle / stopped; it now resumes or restarts the current track.
-- Play / command errors were silent whenever the library was non-empty; failures now show an dismissible error banner.
+- Help (`?` / `h`) and playlist (`l`) are overlays that no longer shift the centered player; both can be open at once.
+- Playlist sidebar: mouse-wheel scroll and an easier scrollbar.
+- Available on the AUR as [`optmusic`](https://aur.archlinux.org/packages/optmusic) (later renamed to `optionmusic`).
+- Various other small tweaks
 
-## [CLI 0.2.6] - 2026-07-17
+## v0.2.3 · 17/07/2026
 
-### Added
+Cava bar look, toast overlay, and solid next/prev. This version was made for CLI on 17/07/2026 (v0.2.3).
 
-- Settings **left sidebar** with **`c`** — ↑↓ move, enter / click to toggle; cava submenu inside.
-- Playlist as a **left sidebar** (`l`) — mouse-wheel / navigation keys scroll, click rows, and click / drag the scrollbar.
-  - **Excess volume** — allow gain up to **200%**
-  - **Cava styles** — style (`bars` / `dense` / `mirror` / `dots`) and height (`3` / `5` / `7`)
-  - **LDM** — low-detail mode (fewer animations, ~30 fps redraw)
-  - **Accent** — cycle presets (`default` · `cyan` · `green` · `amber` · `rose` · `blue` · `violet`) or set `#RRGGBB` in the config file
-- Persistent config at **`~/.option/music/config.toml`** (each option + “reset all” can revert to defaults; `d` resets the selected row).
+- `f` toggles the filename/path line under the track title.
+- Cava classic vertical bars under the footer; toast is a floating top-right overlay.
+- Help as a right sidebar; playlist as a left sidebar with scroll and click-to-jump.
+- Fixed `n` / `p` double-skip from treating `EndFile(Stop)` as natural EOF.
+- Various other bug fixes
 
-### Changed
+## v0.2.2 · 17/07/2026
 
-- Help / footer list the new `c` shortcut.
-- Added a blank line between the speed / pitch / EQ status bar and the footer.
+Cleaner status row, richer mouse hits around volume, and Rust 2024. This version was made for CLI on 17/07/2026 (v0.2.2).
 
-### Fixed
+- Status row no longer shows decorative EQ bars after play/pause; live spectrum stays under the footer.
+- Smoother cava strip; help sidebar; clickable volume − / +.
+- Rust edition 2024 (MSRV 1.85).
+- Various other small tweaks
 
-- Settings popup (`c`) redraws immediately when navigating or toggling by keyboard / mouse.
+## v0.2.1 · 17/07/2026
 
-## [CLI 0.2.5] - 2026-07-17
+Optional cava spectrum, richer mouse UI, and Apache-2.0. This version was made for CLI on 17/07/2026 (v0.2.1).
 
-### Added
+- Optional greyscale cava strip (`--cava` or `v`); richer mouse scrub / transport / clickable status chips.
+- Clearer pause glyph; `AGENTS.md` and Apache License 2.0.
+- Package license MIT → Apache-2.0.
+- Various other small tweaks
 
-- In-session **loop cycle** with **`o`**: `off` → `list` (playlist) → `track` (repeat one) → `off`.
-- CLI: `--pitch`, `--eq`, `--quiet` / `-q`, `--loop-file` / `--repeat-one`, `--repeat` alias for `--loop`.
-- CLI aliases: `p`/`pl`→`play`, `i`→`info`, `ls`→`list`, `ver`→`version`; bare `msc song.mp3` also plays.
-- `OPTMUSIC_MUSIC_DIR` env for the default library.
+## v0.2.0 · 17/07/2026
 
-### Changed
+MPV engine rewrite with mute, EQ, speed/pitch, and a zero-leak TUI. This version was made for CLI on 17/07/2026 (v0.2.0).
 
-- **`--help`** restyled (clearer sections, keys + examples in `after_help`).
-- Status row shows current `loop` mode.
-- Filename / path line is **off by default** (`f` still toggles it on).
+- Audio engine via `libmpv2` (replaces rodio); mute, long seek, EQ presets, crossfade, speed & pitch.
+- Default music dir (`-m` / `--music-dir`); alternate-screen UI with clean scrollback restore.
+- Unit tests for playlist, EQ, MPV clamps, music-dir resolution, CLI parsing, and UI helpers.
+- Requires system libmpv. Various other small tweaks
 
-## [CLI 0.2.4] - 2026-07-17
+## v0.1.0 · 17/07/2026
 
-### Changed
+Initial CLI release. This version was made for CLI on 17/07/2026 (v0.1.0).
 
-- Help (`?` / `h`) and playlist (`l`) are **overlays** — they no longer shift the centered player (same idea as cava).
-- **`l` and `?` can be open at the same time**.
-- Playlist sidebar: mouse-wheel scrolls when the pointer is over the panel; scrollbar always visible and easier to grab (click / drag).
-
-### Packaging
-
-- Available on the **AUR** as [`optmusic`](https://aur.archlinux.org/packages/optmusic).
-
-## [CLI 0.2.3] - 2026-07-17
-
-### Added
-
-- **`f`** toggles the filename/path line under the track title (session-persistent; toast `filename off/on`).
-
-### Changed
-
-- **Cava** — classic vertical **bar** columns under the footer (default cava look); overlay only — toggling does not shift the player.
-- **Toast** — floating boxed overlay in the **top-right** of the player area (fade in/out, no slide).
-- Help (`?` / `h`): **right sidebar**; synchronized redraws avoid flicker.
-- Playlist (`l`): **left sidebar** with mouse-wheel / ↑↓`jk` / PgUp·PgDn scroll and a **draggable scrollbar**; click a row to jump. Esc/`l` closes.
-
-### Fixed
-
-- **`n` / `p` and ◂ / ▸** — `loadfile replace` emits `EndFile(Stop)`, which was treated as natural EOF and auto-advanced (undoing prev, double-skipping next). Only `EndFile(Eof)` advances the playlist now.
-
-## [CLI 0.2.2] - 2026-07-17
-
-### Changed
-
-- Status row: removed the decorative `eq_bars` viz after play/pause; live spectrum stays under the shortcut footer only.
-- Cava strip: smoother 2-row spectrum (better glyphs, continuous sampling, softer greys).
-- Help (`?` / `h`): opens as a **right sidebar** that shifts the player aside (play · seek · sound · more).
-- Volume: visible `−` / `+` next to the level — clickable; click the percentage still mutes.
-- Rust edition **2024** (MSRV **1.85**).
-
-### Notes
-
-- Cava still **off by default** (`--cava` or `v`).
-
-
-
-## [CLI 0.2.1] - 2026-07-17
-
-### Added
-
-- **Cava spectrum strip** — optional discreet greyscale spectrum (requires `cava` on PATH).
-  - Off by default; enable with `--cava` or toggle with `v` (click the strip to toggle too).
-- **Richer mouse UI** — scrub progress; click `◂` / `⏸`/`▶` / `▸` for prev / pause / next; click volume (mute), spd, ptch, eq; click playlist rows to jump; scroll wheel seeks ±5s.
-- **Pause glyph** — clearer `⏸` when paused.
-- `AGENTS.md` — agent workflow (build + install to PATH after changes).
-- `LICENSE` — Apache License 2.0.
-
-### Changed
-
-- README updated for cava (opt-in), mouse hits, Apache-2.0.
-- Package license: MIT → **Apache-2.0**.
-
-### Removed
-
-- `ROADMAP.md` (tracked in issues / chat instead).
-
-
-
-## [CLI 0.2.0] - 2026-07-17
-
-### Added
-
-- **MPV audio engine** via `libmpv2` — replaces rodio for broader format support and stronger control surface.
-- **Mute** (`m`) during playback.
-- **Long seek** `{` / `}` ±60s (short seek remains ← / → ±5s).
-- **Equalizer presets** (`e`) — cycle: off → bass+ → treble+ → rock → vocal → lofi.
-- **Crossfade** — CLI `-c` / `--crossfade SECONDS` maps to MPV `audio-fade`.
-- **Speed & pitch** — `[` / `]` speed, `,` / `.` pitch, `0` resets both.
-- **Default music dir** — global `-m` / `--music-dir` (default `~/Music` when `play` has no paths).
-- **Zero-leak UI** — alternate-screen session with absolute redraw; scrollback restored cleanly on quit.
-- **Unit tests** for playlist, EQ presets, MPV config clamps, music-dir resolution, CLI parsing, UI helpers.
-- **CHANGELOG.md**.
-
-
-
-### Changed
-
-- Version bumped to **0.2.0**.
-- `info` probes duration via a short-lived MPV instance (ao/video off).
-- Keyboard help and README updated for the new controls.
-- Dependency: `rodio` removed; `libmpv2` and `dirs` added.
-
-
-
-### Notes
-
-- Requires system **libmpv** (and pkg-config `mpv` on most distros). See README.
-
-
-
-## [CLI 0.1.0] - 2026-07-17
-
-
-
-### Added
-
-- Initial release: dual bins `optmusic` / `msc`, rodio playback, alternate-screen B&W UI, play / list / info / version.
+- Dual bins `optmusic` / `msc`, rodio playback, alternate-screen B&W UI, play / list / info / version.

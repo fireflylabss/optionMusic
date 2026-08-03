@@ -50,15 +50,15 @@ export CARGO_TARGET_DIR="$(pwd)/target"
 
 ## Release channels
 
-See [VERSIONING.md](VERSIONING.md). Short rules for agents:
+See [VERSIONING.md](VERSIONING.md) and the blurb in [CHANGELOG.md](CHANGELOG.md). Short rules for agents:
 
-- Desktop and CLI are **independent** version lines.
-- Changelog headings must include the channel when applicable, e.g. `## [Desktop 0.1.2-beta] - YYYY-MM-DD`.
+- Desktop and CLI are **independent** version lines; changelog headings use Option style (`## v0.1.2-beta · DD/MM/YYYY`, or `## v0.2.12m-beta · …` when both surfaces change).
+- Mixed releases: insert `m` before the channel, heavier surface section first.
 - Do **not** label something `stable` unless it is actually release-ready.
 - Prefer **beta** for desktop while the Tauri shell is still maturing; use **alpha** only for brand-new / half-built surfaces.
 - Alpha/beta desktop builds are normally changelog + local/dev artifacts — not GitHub Release / AUR — unless the user explicitly promotes a **stable** cut.
 
-When documenting uncommitted desktop work, append or expand the matching `Desktop x.y.z-<channel>` section rather than inventing a parallel scheme.
+When documenting uncommitted desktop work, prepend or expand the matching `vX.Y.Z[-m]-<channel>` entry rather than inventing a parallel scheme.
 
 ## Don’t
 
