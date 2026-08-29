@@ -40,7 +40,6 @@ cat > "$SRCINFO" <<EOF
 pkgbase = optionmusic
 	pkgdesc = Minimal black and white CLI music player powered by MPV
 	pkgver = ${PKGVER}
-	_tag = ${VER}
 	pkgrel = 1
 	url = https://github.com/fireflylabss/optionMusic
 	arch = x86_64
