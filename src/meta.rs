@@ -22,6 +22,10 @@ pub struct AudioTags {
     #[serde(default)]
     pub disc_number: Option<u32>,
     #[serde(default)]
+    pub genre: Option<String>,
+    #[serde(default)]
+    pub year: Option<u32>,
+    #[serde(default)]
     pub replaygain_track_gain: Option<f64>,
     #[serde(default)]
     pub replaygain_album_gain: Option<f64>,
@@ -47,7 +51,7 @@ fn tag_cache_path(path: &Path, mtime: u64, size: u64) -> std::path::PathBuf {
         path.to_string_lossy().as_bytes(),
         mtime.to_string().as_bytes(),
         size.to_string().as_bytes(),
-        b"v2",
+        b"v3",
     ]);
     config::tags_cache_dir().join(format!("{key}.toml"))
 }
@@ -123,6 +127,14 @@ pub fn read_tags(audio: &Path) -> AudioTags {
     let disc_number = tag
         .disk()
         .or_else(|| parse_u32_item(tag, ItemKey::DiscNumber));
+    let genre = tag
+        .genre()
+        .map(|s| s.trim().to_owned())
+        .filter(|s| !s.is_empty());
+    let year = tag
+        .date()
+        .map(|y| y.year as u32)
+        .or_else(|| parse_u32_item(tag, ItemKey::Year));
     let replaygain_track_gain = tag
         .get_string(ItemKey::ReplayGainTrackGain)
         .and_then(parse_gain);
@@ -136,6 +148,8 @@ pub fn read_tags(audio: &Path) -> AudioTags {
         album,
         track_number,
         disc_number,
+        genre,
+        year,
         replaygain_track_gain,
         replaygain_album_gain,
     }

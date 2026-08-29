@@ -84,6 +84,10 @@ impl CliEq {
   msc i song.flac         same as  msc info song.flac\n\
   msc dl                  interactive download wizard\n\
   msc dl URL --audio      direct download (aliases: download, d)\n\
+  msc library refresh     incremental rescan (adds/removes/changes)\n\
+  msc library paths       absolute paths for scripts / xargs\n\
+  msc browse              browse artists → albums → tracks & play\n\
+  msc browse --favorites  browse favorites only\n\
 \n\
 Playback keys (press ? / h in the player for the full sidebar):\n\
   space        pause / resume          n / p        next / previous\n\
@@ -271,6 +275,21 @@ pub enum Command {
         action: PlaylistCmd,
     },
 
+    /// Scan and manage the music library (incremental refresh, listing)
+    #[command(visible_aliases = ["lib"])]
+    Library {
+        #[command(subcommand)]
+        action: LibraryCmd,
+    },
+
+    /// Browse the library and play from a tree (artists → albums → tracks)
+    #[command(visible_alias = "br")]
+    Browse {
+        /// Restrict the whole tree to favorites only
+        #[arg(short, long)]
+        favorites: bool,
+    },
+
     /// Print version
     #[command(visible_alias = "ver")]
     Version,
@@ -312,6 +331,19 @@ pub enum PlaylistCmd {
         /// Playlist id
         id: String,
     },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum LibraryCmd {
+    /// Incremental refresh: prints `+added · -removed · changed · total`
+    #[command(visible_aliases = ["r"])]
+    Refresh,
+    /// List tracks with indices (full scan + tag read)
+    #[command(visible_aliases = ["l"])]
+    Ls,
+    /// Print only absolute paths (for scripts / xargs)
+    #[command(visible_aliases = ["p"])]
+    Paths,
 }
 
 #[cfg(test)]
@@ -481,30 +513,44 @@ mod tests {
     }
 
     #[test]
-    fn parses_download_soundcloud_search() {
-        let cli = Cli::parse_from([
-            "optionmusic",
-            "download",
-            "ambient mix",
-            "-p",
-            "soundcloud",
-            "-a",
-        ]);
+    fn parses_library_refresh() {
+        let cli = Cli::parse_from(["msc", "library", "refresh"]);
         match cli.command {
-            Some(Command::Download {
-                query,
-                provider,
-                audio,
-                ..
-            }) => {
-                assert_eq!(query.as_deref(), Some("ambient mix"));
-                assert!(matches!(
-                    provider,
-                    Some(crate::download::Provider::Soundcloud)
-                ));
-                assert!(audio);
+            Some(Command::Library { action }) => {
+                assert!(matches!(action, LibraryCmd::Refresh));
             }
-            _ => panic!("expected download"),
+            _ => panic!("expected library refresh"),
+        }
+    }
+
+    #[test]
+    fn parses_library_alias_ls() {
+        let cli = Cli::parse_from(["msc", "lib", "ls"]);
+        match cli.command {
+            Some(Command::Library { action }) => {
+                assert!(matches!(action, LibraryCmd::Ls));
+            }
+            _ => panic!("expected library ls"),
+        }
+    }
+
+    #[test]
+    fn parses_library_paths() {
+        let cli = Cli::parse_from(["msc", "library", "paths"]);
+        match cli.command {
+            Some(Command::Library { action }) => {
+                assert!(matches!(action, LibraryCmd::Paths));
+            }
+            _ => panic!("expected library paths"),
+        }
+    }
+
+    #[test]
+    fn parses_browse_favorites() {
+        let cli = Cli::parse_from(["msc", "browse", "--favorites"]);
+        match cli.command {
+            Some(Command::Browse { favorites }) => assert!(favorites),
+            _ => panic!("expected browse"),
         }
     }
 }

@@ -14,9 +14,10 @@ use crossterm::event::{
 };
 use crossterm::style::Stylize;
 
-use optionmusic::cli::{Cli, Command, PlaylistCmd};
+use optionmusic::cli::{Cli, Command, LibraryCmd, PlaylistCmd};
 use optionmusic::config::resolve_music_dir;
 use optionmusic::download::{self, DownloadRequest, MediaKind};
+use optionmusic::library::Library;
 use optionmusic::player::Player;
 use optionmusic::playlist::Playlist;
 use optionmusic::settings::SettingsAction;
@@ -41,8 +42,8 @@ fn parse_cli() -> Cli {
     if raw.len() >= 2 {
         let first = raw[1].as_str();
         const CMDS: &[&str] = &[
-            "play", "p", "pl", "info", "i", "list", "ls", "download", "dl", "d", "version", "ver",
-            "help",
+            "play", "p", "pl", "info", "i", "list", "ls", "download", "dl", "d", "library", "lib",
+            "browse", "br", "version", "ver", "help",
         ];
         if !first.starts_with('-') && !CMDS.iter().any(|c| *c == first) {
             let mut rewritten = Vec::with_capacity(raw.len() + 1);
@@ -143,6 +144,18 @@ fn run() -> Result<()> {
                 banner();
             }
             cmd_playlist(action)?;
+        }
+        Some(Command::Library { action }) => {
+            if !quiet {
+                banner();
+            }
+            cmd_library(action, &cli.music_dir)?;
+        }
+        Some(Command::Browse { favorites }) => {
+            if !quiet {
+                banner();
+            }
+            cmd_browse(favorites, &cli.music_dir, cli.cava)?;
         }
         Some(Command::Version) => {
             println!(
@@ -999,6 +1012,76 @@ fn cmd_list(path: &std::path::Path, recursive: bool) -> Result<()> {
         );
     }
     Ok(())
+}
+
+fn cmd_library(action: LibraryCmd, music_dir_flag: &str) -> Result<()> {
+    let root = resolve_music_dir(music_dir_flag)?;
+    let mut library = Library::scan(root.clone())?;
+    if !library.walk_errors.is_empty() {
+        print_warn(&format!(
+            "{} path(s) could not be read",
+            library.walk_errors.len()
+        ));
+        for e in library.walk_errors.iter().take(3) {
+            print_warn(e);
+        }
+    }
+
+    match action {
+        LibraryCmd::Refresh => {
+            let res = library.refresh()?;
+            println!(
+                "  {} {}",
+                format!("+{} added", res.added).with(BRIGHT),
+                format!("· {} removed", res.removed).with(DIM)
+            );
+            println!(
+                "  {} {}",
+                format!("{} changed", res.changed).with(GRAY),
+                format!("· {} total", res.total).with(GRAY)
+            );
+        }
+        LibraryCmd::Ls => {
+            if library.is_empty() {
+                print_warn(&format!("no tracks found in {}", root.display()));
+                return Ok(());
+            }
+            println!(
+                "  {} {}",
+                format!("{}", library.len()).with(BRIGHT),
+                if library.len() == 1 {
+                    "track".with(DIM)
+                } else {
+                    "tracks".with(DIM)
+                }
+            );
+            println!();
+            for (i, track) in library.tracks().iter().enumerate() {
+                println!(
+                    "  {}  {}",
+                    format!("{:>3}", i + 1).with(DIM),
+                    track.display_name().with(BRIGHT)
+                );
+            }
+        }
+        LibraryCmd::Paths => {
+            for track in library.tracks() {
+                println!("{}", track.path.display());
+            }
+        }
+    }
+    Ok(())
+}
+
+fn cmd_browse(favorites: bool, music_dir_flag: &str, enable_cava: bool) -> Result<()> {
+    let root = resolve_music_dir(music_dir_flag)?;
+    let library = Library::scan(root.clone())?;
+    if library.walk_errors.is_empty() && library.is_empty() {
+        print_warn(&format!("no tracks found in {}", root.display()));
+        print_warn("add audio files to the folder, or pass another folder with -m / --music-dir");
+        return Ok(());
+    }
+    optionmusic::browse::run(library, favorites, enable_cava)
 }
 
 fn cmd_playlist(action: PlaylistCmd) -> Result<()> {

@@ -20,6 +20,8 @@ pub struct Track {
     pub album: Option<String>,
     pub track_number: Option<u32>,
     pub disc_number: Option<u32>,
+    pub genre: Option<String>,
+    pub year: Option<u32>,
     /// Whether a cover was found (sidecar or embedded); None until checked.
     pub has_cover: Option<bool>,
     /// Unix seconds of file mtime; `0` when metadata is unavailable.
@@ -34,6 +36,11 @@ impl Track {
     /// Fast path-only scan entry (tags deferred).
     pub fn from_path(path: PathBuf) -> Self {
         let (mtime, size) = file_stat(&path);
+        Self::from_path_with_stat(path, mtime, size)
+    }
+
+    /// Path-only entry with pre-known mtime/size (used by the library baseline).
+    pub fn from_path_with_stat(path: PathBuf, mtime: u64, size: u64) -> Self {
         Self {
             path,
             title: None,
@@ -41,6 +48,8 @@ impl Track {
             album: None,
             track_number: None,
             disc_number: None,
+            genre: None,
+            year: None,
             has_cover: None,
             mtime,
             size,
@@ -66,6 +75,8 @@ impl Track {
         self.album = tags.album;
         self.track_number = tags.track_number;
         self.disc_number = tags.disc_number;
+        self.genre = tags.genre;
+        self.year = tags.year;
         self.has_cover = Some(
             crate::cover::resolve_cover_file(&self.path, self.mtime, self.size)
                 .ok()
@@ -225,6 +236,11 @@ fn is_audio(path: &Path) -> bool {
         .and_then(|e| e.to_str())
         .map(|ext| AUDIO_EXTS.iter().any(|a| a.eq_ignore_ascii_case(ext)))
         .unwrap_or(false)
+}
+
+/// Whether `path` is a supported audio extension. Public for the library core.
+pub fn is_audio_file(path: &Path) -> bool {
+    is_audio(path)
 }
 
 #[cfg(test)]

@@ -1,6 +1,6 @@
 [package]
 name = "optionmusic"
-version = "0.2.13"
+version = "0.2.14"
 edition = "2024"
 rust-version = "1.85"
 description = "optionMusic — minimal black & white CLI music player"
@@ -15,6 +15,7 @@ categories = ["command-line-utilities", "multimedia::audio"]
 name = "optionmusic"
 path = "src/main.rs"
 
+# Short alias (same entrypoint)
 [[bin]]
 name = "msc"
 path = "src/main.rs"

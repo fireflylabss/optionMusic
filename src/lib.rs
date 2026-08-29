@@ -1,3 +1,4 @@
+pub mod browse;
 pub mod cava;
 pub mod cli;
 pub mod config;
@@ -7,6 +8,7 @@ pub mod dl_ui;
 pub mod download;
 pub mod eq;
 pub mod history;
+pub mod library;
 pub mod meta;
 pub mod mpv;
 pub mod player;

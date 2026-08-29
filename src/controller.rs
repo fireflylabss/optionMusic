@@ -897,6 +897,8 @@ mod tests {
             album: None,
             track_number: None,
             disc_number: None,
+            genre: None,
+            year: None,
             has_cover: Some(true),
             mtime: 12_345,
             size: 999,

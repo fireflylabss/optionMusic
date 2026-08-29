@@ -5,13 +5,13 @@ We follow [Semantic Versioning](https://semver.org/) and [Keep a Changelog](http
 <details>
 <summary>To see more about versioning, expand this.</summary>
 
-Every version string starts with `v` (required), e.g. `v0.2.13`, `v0.1.6-beta`.
+Every version string starts with `v` (required), e.g. `v0.2.14`, `v0.1.6-beta`.
 
 Here the installable surfaces are **CLI** and **Desktop**. Other Option apps swap in their own names the same way — e.g. **GTK**, **Web**, **GNOME** — whatever you actually ship.
 
 | Part | What you install | Example |
 | --- | --- | --- |
-| **CLI** | `optionmusic` / alias `msc` in the terminal | `v0.2.13` |
+| **CLI** | `optionmusic` / alias `msc` in the terminal | `v0.2.14` |
 | **Desktop** | the visual app | `v0.1.6-beta` |
 
 A new CLI does not always mean a new Desktop app, and the other way around.
@@ -33,6 +33,19 @@ We only call something **stable** when we mean it. While the desktop app is stil
 Older desktop builds (`v0.1.0`, `v0.1.1`) had no channel suffix. From `v0.1.2-beta` on, every desktop (and mixed) version includes one.
 
 </details>
+
+## v0.2.14-beta · 29/08/2026
+
+Library core on the CLI: incremental refresh, an artists → albums → tracks browser, and genre/year search across the tree. This version was made for CLI with a beta release channel on 29/08/2026 (v0.2.14-beta).
+
+### CLI (`0.2.14`)
+
+- New `src/library.rs` shared library core: one-time scan plus incremental `refresh()` driven by mtime/size — removed/renamed files are pruned, changed files are re-tagged, unchanged files keep their cached tags (zero re-parse).
+- `msc library` / `msc lib` subcommand: `refresh` prints `+added · -removed · changed · total`, `ls` lists tracks with indices, `paths` prints absolute paths for scripts / `xargs`.
+- `msc browse` / `msc br`: tree navigation (artists → albums → tracks) with album/track counts, genre (`g`) and year (`y`) filters, unified search (`/`), favorites toggle (`f`) plus a favorites-only mode (`1` / `--favorites`), and an in-memory queue (`a` append, `n` play-next, `tab` queue view with `j/k` reorder, `enter` play).
+- `AudioTags`/`Track` now read genre and year (cache key bumped to `v3`); incomplete-metadata and missing-cover badges shown in the browser.
+- Permission-denied subtrees during a scan are surfaced as distinct warnings instead of a generic empty list.
+- Various other small tweaks
 
 ## v0.2.13-stable · 22/08/2026
 
