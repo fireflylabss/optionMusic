@@ -1,6 +1,7 @@
 pkgbase = optionmusic
 	pkgdesc = Minimal black and white CLI music player powered by MPV
-	pkgver = 0.2.14-beta
+	pkgver = 0.2.14
+	_tag = 0.2.14-beta
 	pkgrel = 1
 	url = https://github.com/fireflylabss/optionMusic
 	arch = x86_64
