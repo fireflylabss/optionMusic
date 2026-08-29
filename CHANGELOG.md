@@ -5,13 +5,13 @@ We follow [Semantic Versioning](https://semver.org/) and [Keep a Changelog](http
 <details>
 <summary>To see more about versioning, expand this.</summary>
 
-Every version string starts with `v` (required), e.g. `v0.2.12`, `v0.1.6-beta`.
+Every version string starts with `v` (required), e.g. `v0.2.13`, `v0.1.6-beta`.
 
 Here the installable surfaces are **CLI** and **Desktop**. Other Option apps swap in their own names the same way — e.g. **GTK**, **Web**, **GNOME** — whatever you actually ship.
 
 | Part | What you install | Example |
 | --- | --- | --- |
-| **CLI** | `optionmusic` / aliases `optmusic` · `msc` in the terminal | `v0.2.12` |
+| **CLI** | `optionmusic` / alias `msc` in the terminal | `v0.2.13` |
 | **Desktop** | the visual app | `v0.1.6-beta` |
 
 A new CLI does not always mean a new Desktop app, and the other way around.
@@ -33,6 +33,15 @@ We only call something **stable** when we mean it. While the desktop app is stil
 Older desktop builds (`v0.1.0`, `v0.1.1`) had no channel suffix. From `v0.1.2-beta` on, every desktop (and mixed) version includes one.
 
 </details>
+
+## v0.2.13-stable · 22/08/2026
+
+The legacy binary alias era ends: `optmusic` is gone, `optionmusic` and `msc` remain. This version was made for CLI with a stable release channel on 22/08/2026 (v0.2.13-stable).
+
+### CLI (`0.2.13`)
+
+- Removed the legacy `optmusic` binary alias. The canonical binary is `optionmusic`, with the `msc` short alias.
+- Bumped the package to `0.2.13`.
 
 ## v0.2.12m-beta · 03/08/2026
 

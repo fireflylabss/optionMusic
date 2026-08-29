@@ -1,6 +1,6 @@
 //! optionMusic — minimal black & white CLI music player (option music).
 //!
-//! Binaries: `optionmusic`, alias `optmusic`, short `msc`.
+//! Binaries: `optionmusic`, short alias `msc`.
 //! Engine: MPV via libmpv2.
 
 use std::io::{self, IsTerminal};
@@ -153,7 +153,7 @@ fn run() -> Result<()> {
             );
             println!(
                 "  {}",
-                format!("optionmusic · optmusic · msc  ({bin})  ·  mpv").with(GRAY)
+                format!("optionmusic · msc  ({bin})  ·  mpv").with(GRAY)
             );
         }
         None => {

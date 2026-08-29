@@ -12,7 +12,7 @@ web
 
 Primary audience: casual desktop listeners who want an elegant, out-of-the-box local music app — the MacBook-user instinct: open it, see the library, play. They are not chasing streaming discovery; they already own files and want a quiet, powerful player.
 
-Secondary: power users who already know the CLI (`optionmusic` / `optmusic` / `msc`). The landing speaks to the desktop first; the CLI is proof of depth, not the hero.
+Secondary: power users who already know the CLI (`optionmusic` / `msc`). The landing speaks to the desktop first; the CLI is proof of depth, not the hero.
 
 ## Product Purpose
 

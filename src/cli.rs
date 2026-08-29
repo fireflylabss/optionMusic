@@ -65,7 +65,7 @@ impl CliEq {
 
 /// optionMusic — minimal black & white CLI music player
 ///
-/// Invoke as `optionmusic`, or aliases `optmusic` / `msc`.
+/// Invoke as `optionmusic`, or the `msc` alias.
 #[derive(Debug, Parser)]
 #[command(
     name = "optionmusic",
@@ -73,7 +73,7 @@ impl CliEq {
     about = "♪ optionMusic — minimal black & white CLI music player",
     long_about = "optionMusic — play local audio from the terminal.\n\
 \n\
-  binaries   optionmusic · optmusic · msc\n\
+  binaries   optionmusic · msc\n\
   engine     MPV (libmpv)\n\
   optional   cava spectrum bars",
     after_help = "Shortcuts:\n\

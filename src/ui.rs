@@ -1551,7 +1551,7 @@ fn toast_alpha(elapsed: f64) -> f64 {
 
 // ── Shared helpers ──────────────────────────────────────────────
 
-/// Binary name as invoked (`optionmusic`, `optmusic`, or `msc`).
+/// Binary name as invoked (`optionmusic` or `msc`).
 pub fn bin_name() -> String {
     std::env::args()
         .next()

@@ -40,7 +40,7 @@ yay -S optionmusic
 paru -S optionmusic
 ```
 
-(`optmusic` still works as a binary alias after install.)
+(`msc` still works as a short alias after install.)
 ### System deps
 
 | Dep | Why |
@@ -75,7 +75,6 @@ cargo install --git https://github.com/fireflylabss/optionMusic --tag v0.2.7
 | Command | Description |
 |---------|-------------|
 | `optionmusic` | canonical name |
-| `optmusic` | legacy alias |
 | `msc` | short alias |
 
 ## Usage

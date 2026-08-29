@@ -378,14 +378,14 @@ checksum = "384b8ab6d37215f3c5301a95a4accb5d64aa607f1fcb26a11b5303878451b4fe"
 name = "optionSDK"
 version = "0.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9cf4df8054389a657cdbc78c4a258d7d5e9ac550eb65cc60ae66f0202cf193f4"
+checksum = "b0a6065fe92ebbfd99b7f0ba2aed5d7fb076a660caf755fb3583cc6db5d5dd09"
 dependencies = [
  "tempfile",
 ]
 
 [[package]]
 name = "optionmusic"
-version = "0.2.12"
+version = "0.2.13"
 dependencies = [
  "anyhow",
  "base64",

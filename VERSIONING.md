@@ -8,7 +8,7 @@ The public changelog is the source of truth for headings, mixed releases, and ch
 
 | Surface | What you install | Artifact version today |
 | --- | --- | --- |
-| **CLI** | `optionmusic` / aliases `optmusic` · `msc` | `0.2.12` (`Cargo.toml`) |
+| **CLI** | `optionmusic` / alias `msc` | `0.2.13` (`Cargo.toml`) |
 | **Desktop** | Tauri visual app | `0.1.6` (`package.json` / `tauri.conf.json`) |
 
 Changelog tags always include the leading `v`. Mixed cuts that change both surfaces use an `m` before the channel (e.g. `v0.2.12m-beta`).

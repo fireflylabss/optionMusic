@@ -6,7 +6,7 @@ Guidance for coding agents working on this repo.
 
 **optionMusic** (*option music*) — minimal black & white CLI music player powered by **MPV** (`libmpv2`).
 
-Binaries: `optionmusic` · `optmusic` (alias) · `msc` (same entrypoint).
+Binaries: `optionmusic` (canonical) · `msc` (short alias).
 
 ## After every change
 
@@ -20,7 +20,7 @@ When you finish a task that touches code (features, fixes, UI, deps):
    cargo build --release
    ```
 
-2. **Install to PATH** — always refresh the local binaries so `optionmusic` / `optmusic` / `msc` match the working tree:
+2. **Install to PATH** — always refresh the local binaries so `optionmusic` / `msc` match the working tree:
 
    ```bash
    export CARGO_TARGET_DIR="$(pwd)/target"
