@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en" dir="ltr" class="no-js">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light dark" />
+    <meta name="description" content="This page points agents and developers to the source, install instructions, changelog, and packaging information for optionMusic." />
+    <title>Developer resources — optionMusic</title>
+    <link rel="stylesheet" href="/style.css" />
+    <link rel="canonical" href="https://music.hory.one/docs" />
+    <link rel="sitemap" type="application/xml" title="Sitemap" href="/sitemap.xml" />
+  </head>
+  <body>
+    <main class="page">
+      <h1>Developer resources</h1>
+      <p class="lede">This page points agents and developers to the source, install instructions, changelog, and packaging information for optionMusic.</p>
+      
+    <section aria-labelledby="source-code">
+      <h2 id="source-code">Source code</h2>
+      <p>The complete source is at github.com/fireflylabss/optionMusic. It includes the Rust core, the Tauri desktop shell, the terminal TUI, and the website.</p>
+    </section>
+
+    <section aria-labelledby="install">
+      <h2 id="install">Install</h2>
+      <p>On Arch Linux the recommended install is <code>yay -S optionmusic</code>. For other platforms, clone the repository and run <code>cargo build --release</code> from the project root. See the README for dependencies such as libmpv-dev.</p>
+    </section>
+
+    <section aria-labelledby="releases-and-versioning">
+      <h2 id="releases-and-versioning">Releases and versioning</h2>
+      <p>Releases follow the Option-family versioning convention. See VERSIONING.md and CHANGELOG.md in the repository. Desktop and CLI version lines are independent.</p>
+    </section>
+
+    <section aria-labelledby="aur-packaging">
+      <h2 id="aur-packaging">AUR packaging</h2>
+      <p>The packaging/aur directory contains the PKGBUILD, .SRCINFO template, and the GitHub Action that publishes to the Arch User Repository.</p>
+    </section>
+
+    <section aria-labelledby="when-to-use-optionmusic">
+      <h2 id="when-to-use-optionmusic">When to use optionMusic</h2>
+      <p>Use optionMusic when you need an offline, local-first music player for Linux with a minimal CLI and an optional desktop UI. It is not a streaming client and does not support mobile playback.</p>
+    </section>
+    </main>
+    <footer class="page" style="padding-top:0;">
+      <a href="/">Home</a>
+      <a href="/about">About</a>
+      <a href="/contact">Contact</a>
+      <a href="/privacy">Privacy</a>
+      <a href="/llms.txt">llms.txt</a>
+      <a href="https://github.com/fireflylabss/optionMusic">GitHub</a>
+    </footer>
+  </body>
+</html>

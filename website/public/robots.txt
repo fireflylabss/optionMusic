@@ -1,0 +1,3 @@
+User-agent: *
+Allow: /
+Sitemap: https://music.hory.one/sitemap.xml

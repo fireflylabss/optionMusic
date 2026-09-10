@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en" dir="ltr">
+<html lang="en" dir="ltr" class="no-js">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
@@ -7,11 +7,15 @@
     <meta name="theme-color" content="#14120b" media="(prefers-color-scheme: dark)" />
     <meta name="color-scheme" content="light dark" />
     <script>
-      try {
-        var t = localStorage.getItem("optionmusic-theme");
-        if (t === "light" || t === "dark") document.documentElement.setAttribute("data-theme", t);
-      } catch (e) {}
+      (function () {
+        document.documentElement.className = "js";
+        try {
+          var t = localStorage.getItem("optionmusic-theme");
+          if (t === "light" || t === "dark") document.documentElement.setAttribute("data-theme", t);
+        } catch (e) {}
+      })();
     </script>
+    <link rel="stylesheet" href="/style.css" />
     <meta
       name="description"
       content="optionMusic — minimal local music player. Calm desktop, MPV engine, real CLI. Local music, without the noise — only what matters."
@@ -34,9 +38,79 @@
       content="A local player for people who still own music. No account, no feed, no recommendations."
     />
     <meta name="twitter:image" content="/og.png" />
+    <link rel="canonical" href="https://music.hory.one/" />
+    <link rel="sitemap" type="application/xml" title="Sitemap" href="/sitemap.xml" />
     <title>optionMusic — Local music, without the noise</title>
+    
+    <script type="application/ld+json">{"@context":"https://schema.org","@type":"SoftwareApplication","name":"optionMusic","description":"A minimal local music player for Linux. Calm desktop UI and a real terminal interface, both powered by libmpv/MPV. No account, no feed, no recommendations — your files stay yours and playback works offline.","url":"https://music.hory.one","applicationCategory":"MusicApplication","operatingSystem":"Linux","offers":{"@type":"Offer","price":"0","priceCurrency":"USD"},"sameAs":["https://github.com/fireflylabss/optionMusic"]}</script>
+    <script type="application/ld+json">{"@context":"https://schema.org","@type":"Organization","name":"AEFireflyLabs","url":"https://github.com/fireflylabss","email":"support@hory.one","sameAs":["https://github.com/fireflylabss/optionMusic"],"contactPoint":{"@type":"ContactPoint","email":"support@hory.one","contactType":"customer support"},"address":{"@type":"PostalAddress","addressCountry":"BR"}}</script>
   </head>
   <body>
+    <noscript>
+  <main class="noscript-fallback">
+    <p class="font-mono ghost" style="font-size:0.85rem;opacity:0.6;">a local player for CLI and desktop</p>
+    <h1><em class="accent">optionMusic</em> is a local player for people who still <em class="accent">own music</em>. A calm surface over your files.</h1>
+    <p class="lede">No account, no feed, no recommendations. Desktop when you want to <em class="accent">see</em>, terminal when you want to <em class="accent">stay</em>. Same MPV engine underneath.</p>
+
+    <a class="btn" href="https://github.com/fireflylabss/optionMusic">Get the app</a>
+
+    <p class="section-label" style="margin-top:2.5rem;">features</p>
+    <ul>
+      
+      <li>
+        <strong>Local playlists + M3U</strong> — your lists are files, yours to keep
+      </li>
+
+      <li>
+        <strong>MPV engine, cava spectrum</strong> — serious playback, quiet surface
+      </li>
+
+      <li>
+        <strong>Offline lyrics + ReplayGain</strong> — even volume, no connection needed
+      </li>
+    </ul>
+
+    <p class="section-label">faq</p>
+    
+      <section aria-labelledby="where-does-optionmusic-look-for-music-">
+        <h3 id="where-does-optionmusic-look-for-music-">Where does optionMusic look for music?</h3>
+        <p>Your ~/Music folder by default. Point it anywhere with -m / --music-dir.</p>
+      </section>
+
+      <section aria-labelledby="do-i-need-an-account-">
+        <h3 id="do-i-need-an-account-">Do I need an account?</h3>
+        <p>No. No account, no feed, no recommendations — your files stay yours and playback works offline.</p>
+      </section>
+
+      <section aria-labelledby="which-formats-can-it-play-">
+        <h3 id="which-formats-can-it-play-">Which formats can it play?</h3>
+        <p>Whatever MPV plays — MP3, FLAC, OGG, M4A, Opus and more, powered by libmpv.</p>
+      </section>
+
+      <section aria-labelledby="desktop-or-terminal-">
+        <h3 id="desktop-or-terminal-">Desktop or terminal?</h3>
+        <p>Both, same MPV engine underneath. Desktop when you want to see, terminal (msc) when you want to stay.</p>
+      </section>
+
+      <section aria-labelledby="how-do-playlists-work-">
+        <h3 id="how-do-playlists-work-">How do playlists work?</h3>
+        <p>Local playlists plus M3U — your lists are files, yours to keep.</p>
+      </section>
+
+    <p class="section-label">download</p>
+    <pre><code>yay -S optionmusic</code></pre>
+    <p><a href="https://github.com/fireflylabss/optionMusic#readme">More install options on GitHub</a></p>
+
+    <footer>
+      <a href="/about">About</a>
+      <a href="/contact">Contact</a>
+      <a href="/privacy">Privacy</a>
+      <a href="/llms.txt">llms.txt</a>
+      <a href="/sitemap.xml">Sitemap</a>
+      <a href="https://github.com/fireflylabss/optionMusic">GitHub</a>
+    </footer>
+  </main>
+</noscript>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

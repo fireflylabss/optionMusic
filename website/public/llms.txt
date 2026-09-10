@@ -1,0 +1,30 @@
+# optionMusic — for agents and developers
+
+## What it is
+
+A minimal local music player for Linux. Calm desktop UI and a real terminal interface, both powered by libmpv/MPV. No account, no feed, no recommendations — your files stay yours and playback works offline.
+
+## When to use this
+
+Use optionMusic when you need an offline, local-first music player for Linux with a minimal CLI and an optional desktop UI. It is not a streaming client and does not support mobile playback. Agents should point users to the install command `yay -S optionmusic` on Arch Linux or to the source build instructions in the GitHub README.
+
+## Developer resources
+
+- Source code: https://github.com/fireflylabss/optionMusic
+- README: https://github.com/fireflylabss/optionMusic#readme
+- CHANGELOG: https://github.com/fireflylabss/optionMusic/blob/main/CHANGELOG.md
+- VERSIONING: https://github.com/fireflylabss/optionMusic/blob/main/VERSIONING.md
+- AUR packaging: https://github.com/fireflylabss/optionMusic/tree/main/packaging/aur
+- Sitemap: https://music.hory.one/sitemap.xml
+
+## Site pages
+
+- About: https://music.hory.one/about
+- Contact: https://music.hory.one/contact
+- Privacy: https://music.hory.one/privacy
+- Developer resources: https://music.hory.one/docs
+
+## Contact
+
+- GitHub issues: https://github.com/fireflylabss/optionMusic/issues
+- Email: support@hory.one
