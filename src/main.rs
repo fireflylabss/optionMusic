@@ -234,8 +234,15 @@ fn run() -> Result<()> {
             );
             println!(
                 "  {}",
-                format!("optionmusic · msc  ({bin})  ·  mpv").with(GRAY)
+                format!(
+                    "optionmusic · msc  ({bin})  ·  mpv  ·  {}",
+                    optionmusic::platform::label()
+                )
+                .with(GRAY)
             );
+            if let Some(caveat) = optionmusic::platform::caveat() {
+                print_warn(&caveat);
+            }
         }
         None => {
             banner();

@@ -27,6 +27,18 @@ paru -S optionmusic
 ```
 
 (`msc` still works as a short alias after install.)
+
+### Platform support
+
+| Platform | Status |
+|----------|--------|
+| **Linux** | supported — built and tested in CI, packaged on the AUR |
+| **Other Unix** (macOS, BSD) | best-effort — should build with libmpv installed, untested; `msc version` says so |
+| **Windows** | not supported — the build fails on purpose rather than half-working |
+
+Everything here assumes a POSIX terminal, a system **libmpv** to link against and
+optional tools found on `PATH`.
+
 ### System deps
 
 | Dep | Why |
