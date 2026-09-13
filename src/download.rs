@@ -43,14 +43,12 @@ pub fn is_retryable_download_error(output: &str) -> bool {
 /// existing `youtube:skip=translated_subs` flag.
 pub fn with_mweb_fallback(args: &[String]) -> Vec<String> {
     let mut out = args.to_vec();
-    out.insert(
-        out.len().saturating_sub(1),
-        "--extractor-args".to_string(),
-    );
-    out.insert(
-        out.len().saturating_sub(1),
-        MWEB_FALLBACK_EXTRACTOR_ARG.to_string(),
-    );
+    let at = out
+        .iter()
+        .position(|a| a == "--")
+        .unwrap_or(out.len().saturating_sub(1));
+    out.insert(at, MWEB_FALLBACK_EXTRACTOR_ARG.to_string());
+    out.insert(at, "--extractor-args".to_string());
     out
 }
 
@@ -314,6 +312,9 @@ pub fn detect_provider(input: &str) -> Option<Provider> {
 
 pub fn looks_like_url(s: &str) -> bool {
     let t = s.trim();
+    if t.starts_with('-') {
+        return false;
+    }
     t.starts_with("http://")
         || t.starts_with("https://")
         || t.starts_with("www.")
@@ -563,6 +564,7 @@ pub fn search(provider: Provider, query: &str) -> Result<Vec<SearchHit>> {
         "--dump-json".into(),
         "--color".into(),
         "never".into(),
+        "--".into(),
         expr,
     ];
     let stdout = run_yt_dlp_output(&yt, &args)?;
@@ -618,6 +620,7 @@ fn probe_caps(yt: &str, url: &str, fallback: Caps) -> Caps {
         "--color".into(),
         "never".into(),
         "--no-warnings".into(),
+        "--".into(),
         url.to_string(),
     ];
     let Ok(stdout) = run_yt_dlp_output(yt, &args) else {
@@ -691,6 +694,7 @@ pub fn fetch_preview_audio(url: &str) -> Result<PathBuf> {
         "--no-mtime",
         "-o",
         template.to_str().context("preview path utf-8")?,
+        "--",
         url,
     ];
 
@@ -813,6 +817,7 @@ fn build_args_pass(url: &str, opts: &DownloadOptions, pass: Pass) -> Vec<String>
     }
 
     push_embed_flags(&mut args, opts, pass);
+    args.push("--".into());
     args.push(url.to_string());
     args
 }
@@ -1654,6 +1659,37 @@ mod tests {
     fn input_urls_vs_search() {
         assert!(input_is_urls("https://youtu.be/a;https://youtu.be/b"));
         assert!(!input_is_urls("lofi hip hop"));
+    }
+
+    #[test]
+    fn leading_dash_is_not_url() {
+        let evil = "--exec=sh -c id # youtube.com/";
+        assert!(!looks_like_url(evil));
+        assert!(!input_is_urls(evil));
+        assert_eq!(
+            resolve_input(evil, Provider::Youtube),
+            format!("ytsearch1:{evil}")
+        );
+    }
+
+    #[test]
+    fn build_args_terminates_options_before_url() {
+        let req = DownloadRequest {
+            query: "https://youtu.be/abc".into(),
+            provider: Provider::Youtube,
+            kind: MediaKind::Audio,
+            output_dir: PathBuf::from("/tmp/music"),
+            audio_format: "mp3".into(),
+        };
+        let args = build_args(&req);
+        let n = args.len();
+        assert_eq!(args[n - 2], "--");
+        assert_eq!(args[n - 1], "https://youtu.be/abc");
+        let retry = with_mweb_fallback(&args);
+        let n = retry.len();
+        assert_eq!(retry[n - 4], "--extractor-args");
+        assert_eq!(retry[n - 2], "--");
+        assert_eq!(retry[n - 1], "https://youtu.be/abc");
     }
 
     #[test]
