@@ -19,6 +19,7 @@ pub mod preview;
 pub mod radio;
 pub mod rpc;
 pub mod saved_playlists;
+pub mod session;
 pub mod settings;
 pub mod sleep;
 pub mod smart_shuffle;
