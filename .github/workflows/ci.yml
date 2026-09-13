@@ -24,6 +24,36 @@ jobs:
       - run: cargo test --all-targets --locked
       - run: cargo build --release --locked
 
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fetch libmpv dev package
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $url = gh release view --repo shinchiro/mpv-winbuild-cmake --json assets -q '.assets[] | select(.name | test("^mpv-dev-x86_64-[0-9]+-git-[0-9a-f]+\\.7z$")) | .url'
+          if (-not $url) { throw "no mpv-dev-x86_64 asset in latest shinchiro/mpv-winbuild-cmake release" }
+          Write-Host "libmpv package: $url"
+          curl.exe -fSL -o mpv-dev.7z "$url"
+          7z x -y -o"$env:RUNNER_TEMP\mpv-dev" mpv-dev.7z
+          Get-ChildItem "$env:RUNNER_TEMP\mpv-dev"
+          "RUSTFLAGS=-L $env:RUNNER_TEMP\mpv-dev" | Out-File -Append $env:GITHUB_ENV
+          "$env:RUNNER_TEMP\mpv-dev" | Out-File -Append $env:GITHUB_PATH
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-gnu
+      - run: cargo test --all-targets --locked --target x86_64-pc-windows-gnu
+      - run: cargo build --release --locked --target x86_64-pc-windows-gnu
+      - uses: actions/upload-artifact@v4
+        with:
+          name: optionmusic-windows-x86_64
+          path: |
+            target/x86_64-pc-windows-gnu/release/optionmusic.exe
+            target/x86_64-pc-windows-gnu/release/msc.exe
+
   macos:
     runs-on: macos-latest
     steps:
