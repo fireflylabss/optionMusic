@@ -579,18 +579,18 @@ pub fn search(provider: Provider, query: &str) -> Result<Vec<SearchHit>> {
         // Nested playlist entries
         if let Some(entries) = v.get("entries").and_then(|e| e.as_array()) {
             for e in entries {
-                if let Some(hit) = parse_hit(e, provider) {
-                    if seen.insert(hit.url.clone()) {
-                        results.push(hit);
-                    }
+                if let Some(hit) = parse_hit(e, provider)
+                    && seen.insert(hit.url.clone())
+                {
+                    results.push(hit);
                 }
             }
             continue;
         }
-        if let Some(hit) = parse_hit(&v, provider) {
-            if seen.insert(hit.url.clone()) {
-                results.push(hit);
-            }
+        if let Some(hit) = parse_hit(&v, provider)
+            && seen.insert(hit.url.clone())
+        {
+            results.push(hit);
         }
     }
 
@@ -1122,11 +1122,10 @@ fn run_interactive_type(
             ),
             true,
         )?
+        && let Err(e) = crate::preview::fetch_and_play(&items[0].url)
     {
-        if let Err(e) = crate::preview::fetch_and_play(&items[0].url) {
-            print_warn(&format!("preview: {e:#}"));
-            println!();
-        }
+        print_warn(&format!("preview: {e:#}"));
+        println!();
     }
 
     // Scan capabilities (subs / video presence)
@@ -1519,14 +1518,14 @@ fn browse_search(provider: Provider, query: &str) -> Result<Vec<MediaItem>> {
             .collect();
         let mut handled = false;
         for tok in tokens {
-            if let Ok(n) = tok.parse::<usize>() {
-                if (1..=slice.len()).contains(&n) {
-                    let hit = &slice[n - 1];
-                    if selected.remove(&hit.url).is_none() {
-                        selected.insert(hit.url.clone(), hit.clone());
-                    }
-                    handled = true;
+            if let Ok(n) = tok.parse::<usize>()
+                && (1..=slice.len()).contains(&n)
+            {
+                let hit = &slice[n - 1];
+                if selected.remove(&hit.url).is_none() {
+                    selected.insert(hit.url.clone(), hit.clone());
                 }
+                handled = true;
             }
         }
         if !handled {
@@ -1588,10 +1587,10 @@ fn prompt(label: &str, default: Option<&str>) -> Result<String> {
         .read_line(&mut line)
         .context("failed to read stdin")?;
     let trimmed = line.trim().to_string();
-    if trimmed.is_empty() {
-        if let Some(d) = default {
-            return Ok(d.to_string());
-        }
+    if trimmed.is_empty()
+        && let Some(d) = default
+    {
+        return Ok(d.to_string());
     }
     Ok(trimmed)
 }

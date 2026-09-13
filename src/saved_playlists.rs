@@ -83,10 +83,10 @@ pub fn list() -> Result<Vec<SavedPlaylist>> {
         if path.extension().and_then(|e| e.to_str()) != Some("toml") {
             continue;
         }
-        if let Ok(raw) = fs::read_to_string(&path) {
-            if let Ok(pl) = toml::from_str::<SavedPlaylist>(&raw) {
-                out.push(pl);
-            }
+        if let Ok(raw) = fs::read_to_string(&path)
+            && let Ok(pl) = toml::from_str::<SavedPlaylist>(&raw)
+        {
+            out.push(pl);
         }
     }
     out.sort_by_key(|a| a.name.to_lowercase());

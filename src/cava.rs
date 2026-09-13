@@ -148,10 +148,10 @@ fn read_loop<R: std::io::Read>(reader: R, levels: Arc<Mutex<Vec<f32>>>, bars: us
         match reader.read_line(&mut line) {
             Ok(0) => break,
             Ok(_) => {
-                if let Some(parsed) = parse_ascii_frame(&line, bars) {
-                    if let Ok(mut g) = levels.lock() {
-                        *g = parsed;
-                    }
+                if let Some(parsed) = parse_ascii_frame(&line, bars)
+                    && let Ok(mut g) = levels.lock()
+                {
+                    *g = parsed;
                 }
             }
             Err(_) => break,

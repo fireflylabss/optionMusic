@@ -387,10 +387,10 @@ fn fetch_lrclib(artist: &str, title: &str, album: &str, duration: Option<f64>) -
     if !album.trim().is_empty() {
         url.push_str(&format!("&album_name={}", percent_encode(album)));
     }
-    if let Some(d) = duration {
-        if d > 0.0 {
-            url.push_str(&format!("&duration={}", d.round() as u64));
-        }
+    if let Some(d) = duration
+        && d > 0.0
+    {
+        url.push_str(&format!("&duration={}", d.round() as u64));
     }
     let probe = std::process::Command::new("curl")
         .args([

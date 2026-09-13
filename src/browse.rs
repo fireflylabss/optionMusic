@@ -346,12 +346,11 @@ impl Session {
         if self.player.is_idle() {
             return;
         }
-        if let Some(cur) = self.queue_cursor {
-            if let Some(pos) = self.queue.iter().position(|&i| i == cur) {
-                if let Some(&next) = self.queue.get(pos + 1) {
-                    self.play_index(next);
-                }
-            }
+        if let Some(cur) = self.queue_cursor
+            && let Some(pos) = self.queue.iter().position(|&i| i == cur)
+            && let Some(&next) = self.queue.get(pos + 1)
+        {
+            self.play_index(next);
         }
     }
 
@@ -452,17 +451,17 @@ impl Session {
             self.auto_advance();
 
             // Discord presence (deduped inside; no-op when disabled).
-            if let Some(i) = self.queue_cursor {
-                if let Some(t) = self.library.get(i) {
-                    rpc.update(
-                        &t.display_name(),
-                        &t.artist_album(),
-                        t.thumb_url().as_deref(),
-                        self.player.position(),
-                        self.player.duration(),
-                        self.player.is_paused(),
-                    );
-                }
+            if let Some(i) = self.queue_cursor
+                && let Some(t) = self.library.get(i)
+            {
+                rpc.update(
+                    &t.display_name(),
+                    &t.artist_album(),
+                    t.thumb_url().as_deref(),
+                    self.player.position(),
+                    self.player.duration(),
+                    self.player.is_paused(),
+                );
             }
 
             if event::poll(Duration::from_millis(40)).unwrap_or(false) {
@@ -496,10 +495,10 @@ impl Session {
                                             self.move_queue(1);
                                         }
                                         KeyCode::Enter => {
-                                            if let Some(pos) = self.queue_sel {
-                                                if let Some(&i) = self.queue.get(pos) {
-                                                    self.play_index(i);
-                                                }
+                                            if let Some(pos) = self.queue_sel
+                                                && let Some(&i) = self.queue.get(pos)
+                                            {
+                                                self.play_index(i);
                                             }
                                         }
                                         KeyCode::Char('d') => {
@@ -995,10 +994,10 @@ enum Row {
 fn read_key() -> Result<KeyCode> {
     loop {
         let ev = event::read().context("read key")?;
-        if let Event::Key(key) = ev {
-            if key.kind == KeyEventKind::Press {
-                return Ok(key.code);
-            }
+        if let Event::Key(key) = ev
+            && key.kind == KeyEventKind::Press
+        {
+            return Ok(key.code);
         }
     }
 }

@@ -421,28 +421,27 @@ impl Library {
     ) -> Vec<usize> {
         let q = query.map(str::trim).filter(|s| !s.is_empty());
         let out = self.tracks.iter().enumerate().filter(|(_, t)| {
-            if let Some(g) = genre {
-                if !t
+            if let Some(g) = genre
+                && !t
                     .genre
                     .as_deref()
                     .map(|tg| tg.eq_ignore_ascii_case(g.trim()))
                     .unwrap_or(false)
-                {
-                    return false;
-                }
+            {
+                return false;
             }
-            if let Some(y) = year {
-                if t.year != Some(y) {
-                    return false;
-                }
+            if let Some(y) = year
+                && t.year != Some(y)
+            {
+                return false;
             }
             if favorites_only && !self.is_favorite(&t.path) {
                 return false;
             }
-            if let Some(q) = q {
-                if !self.matches_query(t, q) {
-                    return false;
-                }
+            if let Some(q) = q
+                && !self.matches_query(t, q)
+            {
+                return false;
             }
             true
         });

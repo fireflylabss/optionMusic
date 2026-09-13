@@ -99,15 +99,15 @@ fn score_candidate(
     fresh: bool,
 ) -> f64 {
     let mut score = 0.0;
-    if let (Some(a), Some(b)) = (&artists[cand], &artists[cur]) {
-        if a == b {
-            score += W_SAME_ARTIST;
-        }
+    if let (Some(a), Some(b)) = (&artists[cand], &artists[cur])
+        && a == b
+    {
+        score += W_SAME_ARTIST;
     }
-    if let (Some(a), Some(b)) = (&albums[cand], &albums[cur]) {
-        if a == b {
-            score += W_SAME_ALBUM;
-        }
+    if let (Some(a), Some(b)) = (&albums[cand], &albums[cur])
+        && a == b
+    {
+        score += W_SAME_ALBUM;
     }
     if genres[cand].iter().any(|g| genres[cur].contains(g)) {
         score += W_GENRE_OVERLAP;
@@ -211,16 +211,16 @@ pub fn build_order(
         }
         // Run cap: after SAME_ARTIST_RUN_CAP picks of one artist, exclude it
         // while any other artist remains.
-        if run_len >= SAME_ARTIST_RUN_CAP {
-            if let Some(ra) = &run_artist {
-                let filtered: Vec<(f64, usize)> = scored
-                    .iter()
-                    .copied()
-                    .filter(|(_, i)| artists[*i].as_ref() != Some(ra))
-                    .collect();
-                if !filtered.is_empty() {
-                    scored = filtered;
-                }
+        if run_len >= SAME_ARTIST_RUN_CAP
+            && let Some(ra) = &run_artist
+        {
+            let filtered: Vec<(f64, usize)> = scored
+                .iter()
+                .copied()
+                .filter(|(_, i)| artists[*i].as_ref() != Some(ra))
+                .collect();
+            if !filtered.is_empty() {
+                scored = filtered;
             }
         }
         scored.sort_by(|a, b| {

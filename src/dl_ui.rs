@@ -250,11 +250,9 @@ pub fn run_interactive_arrows(
                 true,
             )?
         };
-        if want {
-            if let Err(e) = preview::fetch_and_play(&items[0].url) {
-                print_warn(&format!("preview: {e:#}"));
-                println!();
-            }
+        if want && let Err(e) = preview::fetch_and_play(&items[0].url) {
+            print_warn(&format!("preview: {e:#}"));
+            println!();
         }
     }
 
@@ -797,10 +795,10 @@ fn browse_search_arrows(ui: &TermUi, results: &[SearchHit]) -> Result<Vec<MediaI
                 }
             }
             KeyCode::Char(' ') => {
-                if let Some(hit) = slice.get(cursor) {
-                    if selected.remove(&hit.url).is_none() {
-                        selected.insert(hit.url.clone(), hit.clone());
-                    }
+                if let Some(hit) = slice.get(cursor)
+                    && selected.remove(&hit.url).is_none()
+                {
+                    selected.insert(hit.url.clone(), hit.clone());
                 }
             }
             KeyCode::Char('a') => {
@@ -809,10 +807,10 @@ fn browse_search_arrows(ui: &TermUi, results: &[SearchHit]) -> Result<Vec<MediaI
                 }
             }
             KeyCode::Enter | KeyCode::Char('d') => {
-                if selected.is_empty() {
-                    if let Some(hit) = slice.get(cursor) {
-                        selected.insert(hit.url.clone(), hit.clone());
-                    }
+                if selected.is_empty()
+                    && let Some(hit) = slice.get(cursor)
+                {
+                    selected.insert(hit.url.clone(), hit.clone());
                 }
                 if !selected.is_empty() {
                     break;
@@ -973,10 +971,10 @@ fn text_input(ui: &TermUi, title: &str, blurb: &[&str], initial: &str) -> Result
 fn read_key() -> Result<KeyCode> {
     loop {
         let ev = event::read().context("read key")?;
-        if let Event::Key(key) = ev {
-            if key.kind == KeyEventKind::Press {
-                return Ok(key.code);
-            }
+        if let Event::Key(key) = ev
+            && key.kind == KeyEventKind::Press
+        {
+            return Ok(key.code);
         }
     }
 }
