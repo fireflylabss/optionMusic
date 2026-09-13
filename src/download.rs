@@ -362,20 +362,10 @@ pub fn ensure_yt_dlp() -> Result<String> {
 }
 
 fn which_bin(name: &str) -> Result<String> {
-    let output = Command::new("sh")
-        .args(["-c", &format!("command -v {name}")])
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .output()
-        .with_context(|| format!("looking up {name}"))?;
-    if !output.status.success() {
-        bail!("{name} not found");
+    match crate::which::lookup(name) {
+        Some(path) => Ok(path.to_string_lossy().into_owned()),
+        None => bail!("{name} not found"),
     }
-    let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    if path.is_empty() {
-        bail!("{name} not found");
-    }
-    Ok(path)
 }
 
 fn ffmpeg_available() -> bool {

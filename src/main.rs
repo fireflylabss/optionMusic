@@ -45,12 +45,7 @@ fn parse_cli() -> Cli {
     let raw: Vec<String> = std::env::args().collect();
     if raw.len() >= 2 {
         let first = raw[1].as_str();
-        const CMDS: &[&str] = &[
-            "play", "p", "pl", "info", "i", "list", "ls", "download", "dl", "d", "library", "lib",
-            "browse", "br", "stats", "stat", "st", "sleep", "radio", "rd", "mix", "version", "ver",
-            "help",
-        ];
-        if !first.starts_with('-') && !CMDS.iter().any(|c| *c == first) {
+        if !first.starts_with('-') && !optionmusic::cli::is_subcommand(first) {
             let mut rewritten = Vec::with_capacity(raw.len() + 1);
             rewritten.push(raw[0].clone());
             rewritten.push("play".into());
@@ -224,6 +219,9 @@ fn run() -> Result<()> {
                 cli.cava,
                 quiet,
             )?;
+        }
+        Some(Command::Doctor) => {
+            cmd_doctor();
         }
         Some(Command::Version) => {
             println!(
@@ -2094,6 +2092,45 @@ fn cmd_radio(
         run_plain(&mut player, &mut playlist, loop_mode == LoopMode::Playlist)?;
     }
     Ok(())
+}
+
+fn cmd_doctor() {
+    use optionmusic::doctor::{Need, checks, downloads_ready};
+
+    let checks = checks();
+    println!("  {}", "external tools".with(BRIGHT));
+    for c in &checks {
+        let tag = match c.need {
+            Need::Downloads => "dl",
+            Need::Optional => "opt",
+        };
+        match &c.found {
+            Some(path) => println!(
+                "  {} {} {}  {}",
+                "·".with(BRIGHT),
+                c.tool.with(BRIGHT),
+                format!("[{tag}]").with(DIM),
+                path.display().to_string().with(GRAY)
+            ),
+            None => {
+                println!(
+                    "  {} {} {}  {}",
+                    "·".with(DIM),
+                    c.tool.with(WHITE),
+                    format!("[{tag}]").with(DIM),
+                    "not found".with(GRAY)
+                );
+                println!("    {} {}", "↳".with(DIM), c.purpose.with(GRAY));
+                println!("    {} {}", "↳".with(DIM), c.hint.with(DIM));
+            }
+        }
+    }
+    println!();
+    if downloads_ready(&checks) {
+        print_success("playback and downloads are ready");
+    } else {
+        print_warn("playback works; `msc dl` needs the [dl] tools above");
+    }
 }
 
 fn cmd_stats(limit: usize) -> Result<()> {
