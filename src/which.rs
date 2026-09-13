@@ -16,8 +16,26 @@ pub fn lookup_in(name: &str, path_var: Option<&OsStr>) -> Option<PathBuf> {
     }
     std::env::split_paths(path_var?)
         .filter(|dir| !dir.as_os_str().is_empty())
-        .map(|dir| dir.join(name))
+        .flat_map(|dir| {
+            std::iter::once(dir.join(name))
+                .chain(exe_suffixes().map(move |ext| dir.join(format!("{name}{ext}"))))
+        })
         .find(|candidate| is_executable_file(candidate))
+}
+
+/// Extensions Windows appends to a bare command name (`PATHEXT`); empty on Unix,
+/// where the name on `PATH` is already the whole file name.
+fn exe_suffixes() -> impl Iterator<Item = String> {
+    let raw = if cfg!(windows) {
+        std::env::var("PATHEXT").unwrap_or_else(|_| ".EXE;.CMD;.BAT".into())
+    } else {
+        String::new()
+    };
+    raw.split(';')
+        .filter(|ext| !ext.is_empty())
+        .map(str::to_string)
+        .collect::<Vec<_>>()
+        .into_iter()
 }
 
 /// [`lookup_in`] against the process `PATH`.
