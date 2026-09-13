@@ -23,3 +23,28 @@ jobs:
       - run: cargo fmt --all --check
       - run: cargo test --all-targets --locked
       - run: cargo build --release --locked
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fetch libmpv dev package
+        shell: pwsh
+        run: |
+          $rss = Invoke-WebRequest -UseBasicParsing "https://sourceforge.net/projects/mpv-player-windows/rss?path=/libmpv"
+          $name = ([regex]::Matches($rss.Content, 'mpv-dev-x86_64-\d+-git-[0-9a-f]+\.7z') | Select-Object -First 1).Value
+          Invoke-WebRequest -UseBasicParsing "https://sourceforge.net/projects/mpv-player-windows/files/libmpv/$name/download" -OutFile mpv-dev.7z
+          7z x -y -o"$env:RUNNER_TEMP\mpv-dev" mpv-dev.7z
+          "RUSTFLAGS=-L $env:RUNNER_TEMP\mpv-dev" | Out-File -Append $env:GITHUB_ENV
+          "$env:RUNNER_TEMP\mpv-dev" | Out-File -Append $env:GITHUB_PATH
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-gnu
+      - run: cargo test --all-targets --locked --target x86_64-pc-windows-gnu
+      - run: cargo build --release --locked --target x86_64-pc-windows-gnu
+      - uses: actions/upload-artifact@v4
+        with:
+          name: optionmusic-windows-x86_64
+          path: |
+            target/x86_64-pc-windows-gnu/release/optionmusic.exe
+            target/x86_64-pc-windows-gnu/release/msc.exe
