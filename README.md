@@ -51,8 +51,9 @@ PipeWire or PulseAudio should be running if you use cava.
 
 ### Windows
 
-Built from source (no installer yet). Grab the **`mpv-dev-x86_64-*.7z`** package from
-[mpv-player-windows](https://sourceforge.net/projects/mpv-player-windows/files/libmpv/) — it
+Built from source (no installer yet; CI also uploads `optionmusic.exe` / `msc.exe` artifacts).
+Grab the **`mpv-dev-x86_64-*.7z`** package from the
+[shinchiro/mpv-winbuild-cmake releases](https://github.com/shinchiro/mpv-winbuild-cmake/releases) — it
 contains `libmpv-2.dll` and the `libmpv.dll.a` import library.
 
 ```powershell
