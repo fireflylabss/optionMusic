@@ -243,6 +243,26 @@ YouTube — streamed via `msc play <url>` or downloaded files with the
 media proxy. Everything else falls back to the `logo` art asset registered
 on the app (local embedded covers can't be sent over IPC).
 
+## MPRIS & multimedia keys
+
+On Linux the player exports `org.mpris.MediaPlayer2` on the session bus, so the
+desktop drives it like any other player — multimedia keys, panel/lockscreen
+widgets, GNOME/KDE media controls, `playerctl`:
+
+```bash
+playerctl -p optionmusic play-pause
+playerctl -p optionmusic metadata
+```
+
+Play/pause, stop, next/prev, seek, position and volume are exposed, plus
+title / artist / album / duration metadata. Media keys reach optionMusic
+through the desktop's own routing (that is what MPRIS is for) — no global
+grab. Terminals that forward media keys themselves (kitty keyboard protocol)
+also work directly.
+
+On by default; set `mpris = false` in `~/.option/music/config.toml` to opt out.
+Without a session bus (TTY, containers) it silently stays off.
+
 ## Features
 
 - MPV-backed playback (mp3, flac, ogg, wav, m4a, opus, aac, …)
@@ -252,6 +272,7 @@ on the app (local embedded covers can't be sent over IPC).
 - Sleep timer, smart shuffle, lyrics
 - Mute, long seek, EQ presets, crossfade, speed & pitch
 - Discord Rich Presence (opt-in, local IPC, thumbnails for YT tracks)
+- MPRIS on the session bus — multimedia keys, `playerctl`, desktop widgets
 - Default music directory (`~/Music`)
 - Optional cava spectrum bars (opt-in)
 - yt-dlp downloader (YouTube / YouTube Music / SoundCloud)

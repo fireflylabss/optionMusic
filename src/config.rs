@@ -390,7 +390,12 @@ impl DlUiMode {
 pub enum ToastPos {
     /// Bottom-center (default).
     #[default]
-    #[serde(alias = "bottom_center", alias = "bottomcenter", alias = "bottom", alias = "center")]
+    #[serde(
+        alias = "bottom_center",
+        alias = "bottomcenter",
+        alias = "bottom",
+        alias = "center"
+    )]
     BottomCenter,
     #[serde(alias = "bottom_left", alias = "bottomleft", alias = "left")]
     BottomLeft,
@@ -639,6 +644,9 @@ pub struct AppConfig {
     /// Discord application client id override (empty = built-in).
     #[serde(default)]
     pub discord_rpc_id: String,
+    /// MPRIS on the session bus — multimedia keys and `playerctl` (on by default).
+    #[serde(default = "default_true")]
+    pub mpris: bool,
     /// Persisted playback prefs (restored on next launch; CLI flags win).
     #[serde(default = "default_volume")]
     pub volume: u8,
@@ -676,6 +684,7 @@ impl Default for AppConfig {
             resume: true,
             discord_rpc: false,
             discord_rpc_id: String::new(),
+            mpris: true,
             volume: 80,
             eq: crate::eq::EqPreset::Off,
             repeat: RepeatMode::Off,
@@ -748,10 +757,7 @@ mod tests {
         assert_eq!(config_dir(), option_sdk::App::MUSIC.dir());
         assert_eq!(config_path(), option_sdk::App::MUSIC.config_toml());
         assert_eq!(cache_dir(), option_sdk::App::MUSIC.cache_dir());
-        assert_eq!(
-            tags_cache_dir(),
-            option_sdk::App::MUSIC.path("cache/tags")
-        );
+        assert_eq!(tags_cache_dir(), option_sdk::App::MUSIC.path("cache/tags"));
         assert_eq!(
             covers_cache_dir(),
             option_sdk::App::MUSIC.path("cache/covers")
@@ -855,10 +861,7 @@ mod tests {
 
     #[test]
     fn toast_pos_defaults_to_bottom_center() {
-        assert_eq!(
-            AppConfig::default().toast_pos,
-            ToastPos::BottomCenter
-        );
+        assert_eq!(AppConfig::default().toast_pos, ToastPos::BottomCenter);
         let back: AppConfig = toml::from_str("ldm = false").unwrap();
         assert_eq!(back.toast_pos, ToastPos::BottomCenter);
         let tl: AppConfig = toml::from_str("toast_pos = \"bottom-left\"").unwrap();
