@@ -402,6 +402,11 @@ fn run_plain(
 
     'queue: loop {
         for (idx, track) in playlist.tracks().iter().enumerate() {
+            // A signal between tracks must not start another one.
+            if optionmusic::signals::interrupted() {
+                interrupted = true;
+                break 'queue;
+            }
             if out.prose() {
                 print_info(&format!("[{}/{}] {}", idx + 1, total, track.display_name()));
             }
@@ -475,9 +480,9 @@ fn run_plain(
             print_info("Stopped.");
         }
         // MPV is stopped and everything is persisted, so exiting here is safe and
-        // keeps the shell's `130` contract for "killed by SIGINT".
+        // keeps the shell's `128 + signo` contract for "killed by a signal".
         io::Write::flush(&mut io::stdout()).ok();
-        std::process::exit(optionmusic::signals::SIGINT_EXIT_CODE);
+        std::process::exit(optionmusic::signals::exit_code());
     }
 
     emit(out, &PlainEvent::End { tracks_played });
@@ -487,9 +492,15 @@ fn run_plain(
     Ok(())
 }
 
+/// One NDJSON line per event, flushed so a consumer sees it while the track
+/// plays. Write errors (a `head`-style reader closing the pipe) are ignored
+/// rather than panicking mid-playback like `println!` would.
 fn emit(out: OutputMode, event: &PlainEvent) {
     if out.json {
-        println!("{}", event.to_line());
+        use io::Write;
+        let mut stdout = io::stdout().lock();
+        let _ = writeln!(stdout, "{}", event.to_line());
+        let _ = stdout.flush();
     }
 }
 
@@ -2095,7 +2106,7 @@ fn cmd_radio(
     let prefs = AppConfig::load();
     let root = resolve_music_dir(music_dir_flag)?;
     let library = Library::scan(root.clone())?;
-    if !library.walk_errors.is_empty() {
+    if !library.walk_errors.is_empty() && out.prose() {
         print_warn(&format!(
             "{} path(s) could not be read",
             library.walk_errors.len()

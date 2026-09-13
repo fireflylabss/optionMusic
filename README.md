@@ -119,8 +119,8 @@ settings `c` → Resume or `resume = false` in config.
 
 Without a TTY (or with `--json`) playback runs headless: the queue plays
 straight through, listening time still counts toward `msc stats`, and `Ctrl-C`
-(or `SIGTERM`) stops MPV, saves, and exits `130` — press it twice to bail out
-immediately.
+(or `SIGTERM`/`SIGHUP`) stops MPV, saves, and exits `128 + signo` (`130` for
+Ctrl-C) — press it twice to bail out immediately.
 
 `--json` prints one event per line, so it can be consumed while playing:
 
