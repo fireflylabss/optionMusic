@@ -84,3 +84,33 @@ jobs:
       - uses: EmbarkStudios/cargo-deny-action@v2
         with:
           command: check advisories bans licenses sources
+
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install MPV development files
+        run: |
+          brew install mpv pkg-config
+          echo "LIBRARY_PATH=$(brew --prefix)/lib" >> "$GITHUB_ENV"
+          echo "PKG_CONFIG_PATH=$(brew --prefix)/lib/pkgconfig" >> "$GITHUB_ENV"
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo test --all-targets --locked
+      - run: cargo build --release --locked
+      - name: Smoke test CLI
+        run: ./target/release/optionmusic --help
+
+  macos-gpui:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install MPV development files
+        run: |
+          brew install mpv pkg-config
+          echo "LIBRARY_PATH=$(brew --prefix)/lib" >> "$GITHUB_ENV"
+          echo "PKG_CONFIG_PATH=$(brew --prefix)/lib/pkgconfig" >> "$GITHUB_ENV"
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.97.1
+      - run: cargo build --locked
+        working-directory: src-gpui
