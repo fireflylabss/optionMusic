@@ -26,10 +26,9 @@ impl CavaBridge {
         if !cava_on_path() {
             return None;
         }
-        match Self::start_with_input("pipewire").or_else(|_| Self::start_with_input("pulse")) {
-            Ok(bridge) => Some(bridge),
-            Err(_) => None,
-        }
+        Self::start_with_input("pipewire")
+            .or_else(|_| Self::start_with_input("pulse"))
+            .ok()
     }
 
     fn start_with_input(input_method: &str) -> Result<Self> {

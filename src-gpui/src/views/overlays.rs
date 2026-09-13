@@ -178,22 +178,24 @@ impl RootView {
             .child(self.sound_controls(tokens, cx))
             .child(div().h(px(1.0)).bg(tokens.border))
             .child(self.section_label("DISCORD", tokens))
-            .child(self.sound_row(
-                "discord-rpc",
-                "Rich Presence",
-                if self
-                    .controller
-                    .as_ref()
-                    .is_some_and(|c| c.config.discord_rpc)
-                {
-                    "on"
-                } else {
-                    "off"
-                },
-                tokens,
-                cx,
-                |this, cx| this.do_toggle_discord_rpc(cx),
-            ))
+            .child(
+                self.sound_row(
+                    "discord-rpc",
+                    "Rich Presence",
+                    if self
+                        .controller
+                        .as_ref()
+                        .is_some_and(|c| c.config.discord_rpc)
+                    {
+                        "on"
+                    } else {
+                        "off"
+                    },
+                    tokens,
+                    cx,
+                    |this, cx| this.do_toggle_discord_rpc(cx),
+                ),
+            )
             .child(div().h(px(1.0)).bg(tokens.border))
             .child(
                 div()

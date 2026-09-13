@@ -431,6 +431,6 @@ mod tests {
     fn seek_constants_are_sensible() {
         assert_eq!(SEEK_SHORT_SECS, 5);
         assert_eq!(SEEK_LONG_SECS, 60);
-        assert!(SEEK_LONG_SECS > SEEK_SHORT_SECS);
+        const { assert!(SEEK_LONG_SECS > SEEK_SHORT_SECS) };
     }
 }

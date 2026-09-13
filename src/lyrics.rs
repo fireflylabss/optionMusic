@@ -136,7 +136,9 @@ fn parse_timestamp(tag: &str) -> Option<Duration> {
         let scale = 10f64.powi(digits.len() as i32);
         digits.parse::<f64>().ok()? / scale
     };
-    Some(Duration::from_secs_f64(mins as f64 * 60.0 + secs as f64 + frac))
+    Some(Duration::from_secs_f64(
+        mins as f64 * 60.0 + secs as f64 + frac,
+    ))
 }
 
 /// Split an LRC line body on inline `<time> word` tags (Enhanced-LRC).
@@ -184,7 +186,7 @@ fn parse_inline_words(body: &str) -> (String, Vec<LyricWord>) {
             None => seg_start,
         };
         // Preserve one leading space gap between words for karaoke join.
-        let word_text = seg.trim_start_matches(|c| c == ' ' || c == '\t');
+        let word_text = seg.trim_start_matches([' ', '\t']);
         // Empty segment (back-to-back tags) carries no word — skip it so
         // timing stays attached to real syllables.
         if !word_text.trim().is_empty() {
@@ -332,9 +334,8 @@ pub fn ease_lyric_offset(current: f64, target: f64, rate: f64) -> f64 {
     }
     let rate = rate.clamp(0.0, 1.0);
     let next = current + (target - current) * rate;
-    if (target - next).abs() < 0.5 && rate >= 0.99 {
-        target
-    } else if (target - next).abs() < 0.02 {
+    let remaining = (target - next).abs();
+    if remaining < 0.02 || (remaining < 0.5 && rate >= 0.99) {
         target
     } else {
         next
@@ -427,14 +428,8 @@ fn from_lrclib_body(body: &str) -> ResolvedLyrics {
         Ok(v) => v,
         Err(_) => return ResolvedLyrics::empty(),
     };
-    let synced = v
-        .get("syncedLyrics")
-        .and_then(|s| s.as_str())
-        .unwrap_or("");
-    let plain = v
-        .get("plainLyrics")
-        .and_then(|s| s.as_str())
-        .unwrap_or("");
+    let synced = v.get("syncedLyrics").and_then(|s| s.as_str()).unwrap_or("");
+    let plain = v.get("plainLyrics").and_then(|s| s.as_str()).unwrap_or("");
     let lines = parse_lrc(synced);
     if !lines.is_empty() {
         return ResolvedLyrics {
@@ -541,7 +536,8 @@ mod tests {
 
     #[test]
     fn parses_multi_tag_and_skips_metadata() {
-        let lines = parse_lrc("[ar:Someone]\n[00:10.00][00:20.00] chorus\n[ti:Title]\nno tags here\n");
+        let lines =
+            parse_lrc("[ar:Someone]\n[00:10.00][00:20.00] chorus\n[ti:Title]\nno tags here\n");
         assert_eq!(lines.len(), 2);
         assert_eq!(lines[0].time, Duration::from_secs(10));
         assert_eq!(lines[1].time, Duration::from_secs(20));
@@ -657,17 +653,26 @@ mod tests {
         let lines = parse_lrc("[00:10.00] <00:10.00> one <00:11.00> two <00:12.00> three\n");
         let l = &lines[0];
         // Before start: 0.
-        assert_eq!(word_progress_fraction(l, 0, Duration::from_secs_f64(9.9), None), 0.0);
+        assert_eq!(
+            word_progress_fraction(l, 0, Duration::from_secs_f64(9.9), None),
+            0.0
+        );
         // Word 0 spans 10.0 -> 11.0: halfway at 10.5.
         let half = word_progress_fraction(l, 0, Duration::from_secs_f64(10.5), None);
         assert!((half - 0.5).abs() < 0.001);
         // At the boundary the word is fully sung.
-        assert_eq!(word_progress_fraction(l, 0, Duration::from_secs_f64(11.0), None), 1.0);
+        assert_eq!(
+            word_progress_fraction(l, 0, Duration::from_secs_f64(11.0), None),
+            1.0
+        );
         // Active progress pairs index + fraction.
         let (idx, f) = active_word_progress(l, Duration::from_secs_f64(10.25), None).unwrap();
         assert_eq!(idx, 0);
         assert!((f - 0.25).abs() < 0.001);
-        assert_eq!(active_word_progress(l, Duration::from_secs_f64(9.9), None), None);
+        assert_eq!(
+            active_word_progress(l, Duration::from_secs_f64(9.9), None),
+            None
+        );
     }
 
     #[test]
@@ -678,7 +683,10 @@ mod tests {
         let next = Some(Duration::from_secs_f64(12.0));
         let mid = word_progress_fraction(l, 0, Duration::from_secs_f64(11.0), next);
         assert!((mid - 0.5).abs() < 0.001);
-        assert_eq!(word_progress_fraction(l, 0, Duration::from_secs_f64(12.0), next), 1.0);
+        assert_eq!(
+            word_progress_fraction(l, 0, Duration::from_secs_f64(12.0), next),
+            1.0
+        );
         // No next line: 2s fallback window.
         assert_eq!(
             word_progress_fraction(l, 0, Duration::from_secs_f64(12.0), None),

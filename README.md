@@ -262,7 +262,7 @@ on the app (local embedded covers can't be sent over IPC).
 
 ## Requirements
 
-- Rust **1.85+** (edition 2024)
+- Rust **1.89+** (edition 2024)
 - **libmpv** (see Install)
 - System audio (PipeWire / PulseAudio / ALSA)
 - Optional: **cava** for the spectrum strip

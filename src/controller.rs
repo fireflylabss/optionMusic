@@ -413,6 +413,7 @@ impl CoreController {
         }
         let _ = self.persist_resume(true);
     }
+    #[allow(clippy::should_implement_trait)]
     pub fn next(&mut self) -> Result<()> {
         let id = self
             .queue
@@ -516,7 +517,8 @@ impl CoreController {
         self.library
             .get(candidates[(state as usize) % candidates.len()])
             .map(|t| t.path.to_string_lossy().into_owned())
-    }    pub fn seek(&mut self, s: f64) -> Result<()> {
+    }
+    pub fn seek(&mut self, s: f64) -> Result<()> {
         self.player()?.seek(Duration::from_secs_f64(s.max(0.0)))?;
         let _ = self.persist_resume(true);
         Ok(())

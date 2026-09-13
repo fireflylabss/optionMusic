@@ -58,7 +58,7 @@ pub fn load_entries() -> Vec<HistoryEntry> {
         return Vec::new();
     };
     let mut entries = Vec::new();
-    for line in BufReader::new(file).lines().flatten() {
+    for line in BufReader::new(file).lines().map_while(Result::ok) {
         if let Ok(entry) = serde_json::from_str::<HistoryEntry>(&line) {
             entries.push(entry);
         }

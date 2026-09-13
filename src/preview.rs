@@ -191,10 +191,9 @@ where
             let frame = FRAMES[i % FRAMES.len()];
             let _ = write!(
                 out,
-                "\r  {} {} {}",
+                "\r  {} {}    ",
                 frame.to_string().with(GRAY),
-                label.as_str().with(DIM),
-                "   "
+                label.as_str().with(DIM)
             );
             let _ = out.flush();
             i = i.wrapping_add(1);

@@ -675,7 +675,10 @@ impl SessionUi {
 
     fn free_side_for_help(&self) -> PanelSide {
         if self.settings.is_open() {
-            match self.settings_side_at_open.unwrap_or(self.free_side_for_settings()) {
+            match self
+                .settings_side_at_open
+                .unwrap_or(self.free_side_for_settings())
+            {
                 PanelSide::Right => PanelSide::Left,
                 PanelSide::Left => PanelSide::Right,
             }
@@ -994,10 +997,9 @@ impl SessionUi {
             synced.len()
         };
         // Smooth window: eased float from draw bookkeeping.
-        let start_f = self.lyrics_smooth.clamp(
-            0.0,
-            total.saturating_sub(body_rows.max(1)) as f64,
-        );
+        let start_f = self
+            .lyrics_smooth
+            .clamp(0.0, total.saturating_sub(body_rows.max(1)) as f64);
         let start = (start_f.round() as usize)
             .min(total.saturating_sub(body_rows.max(1).min(total.max(1))));
         let start = if total <= body_rows { 0 } else { start };
@@ -1026,13 +1028,7 @@ impl SessionUi {
                 let base = if is_active {
                     BRIGHT
                 } else if let Some(a) = state.lyrics_active {
-                    if idx < a {
-                        GRAY
-                    } else if idx == a + 1 {
-                        GRAY
-                    } else {
-                        DIM
-                    }
+                    if idx < a || idx == a + 1 { GRAY } else { DIM }
                 } else if idx == start {
                     GRAY
                 } else {
@@ -1088,15 +1084,14 @@ impl SessionUi {
                             // precomputed widths so no layout jitter.
                             let chars: Vec<char> = w.text.chars().collect();
                             let n = chars.len();
-                            let done =
-                                sung_letters(n, active_frac.unwrap_or(0.0)).min(n);
+                            let done = sung_letters(n, active_frac.unwrap_or(0.0)).min(n);
                             let sung_s: String = chars[..done].iter().collect();
                             let cur_s: String = if done < n {
                                 chars[done].to_string()
                             } else {
                                 String::new()
                             };
-                            let rest_s: String = if done + 1 <= n {
+                            let rest_s: String = if done < n {
                                 chars.iter().skip(done + 1).collect()
                             } else {
                                 String::new()
@@ -1166,7 +1161,10 @@ impl SessionUi {
                     }
                 } else {
                     let marker = if is_active { "› " } else { "  " };
-                    let text = format!("{marker}{}", truncate(&line.text, block_w.saturating_sub(2)));
+                    let text = format!(
+                        "{marker}{}",
+                        truncate(&line.text, block_w.saturating_sub(2))
+                    );
                     let tw = text.chars().count().min(block_w);
                     let tx = cx0 + block_w.saturating_sub(tw) / 2 + slide;
                     if is_active {
@@ -1699,11 +1697,7 @@ impl SessionUi {
         // so it never freezes the pulse — karaoke motion is geometry-only.
         let frozen = settings_visual || help_visual || list_visual;
         let pulse = |period: f64| {
-            if frozen {
-                0.5
-            } else {
-                breath(t, period)
-            }
+            if frozen { 0.5 } else { breath(t, period) }
         };
 
         let block_w = content_cols.saturating_sub(4).clamp(28, 56);
@@ -1774,15 +1768,13 @@ impl SessionUi {
         let lyrics_want =
             state.lyrics_open && self.config.lyrics_pos != LyricsPos::Hidden && !self.preview;
         let lyrics_prog = self.lyrics_progress(ldm).clamp(0.0, 1.0);
-        let lyrics_visual = lyrics_want || (!self.preview
-            && self.config.lyrics_pos != LyricsPos::Hidden
-            && lyrics_prog > 0.02);
+        let lyrics_visual = lyrics_want
+            || (!self.preview && self.config.lyrics_pos != LyricsPos::Hidden && lyrics_prog > 0.02);
         let lyrics_h = if lyrics_visual {
             if ldm {
                 LYRICS_H_FULL
             } else {
-                ((LYRICS_H_FULL as f64 * lyrics_prog).round() as usize)
-                    .clamp(1, LYRICS_H_FULL)
+                ((LYRICS_H_FULL as f64 * lyrics_prog).round() as usize).clamp(1, LYRICS_H_FULL)
             }
         } else {
             0
@@ -1806,9 +1798,9 @@ impl SessionUi {
                 state.lyrics_plain.len()
             };
             self.note_lyrics_track(&key, state.lyrics_active);
-            let target = self.lyrics_manual.unwrap_or_else(|| {
-                lyric_window_start(state.lyrics_active, total, LYRICS_ROWS)
-            });
+            let target = self
+                .lyrics_manual
+                .unwrap_or_else(|| lyric_window_start(state.lyrics_active, total, LYRICS_ROWS));
             // Clamp manual overrides that outlived a shorter track.
             if total <= LYRICS_ROWS {
                 self.lyrics_manual = None;
@@ -2404,7 +2396,9 @@ fn paint_help_sidebar(
             ((box_w as f64 * (0.55 + 0.45 * e)) as usize)
                 .max(12)
                 .min(box_w),
-            ((box_h as f64 * (0.6 + 0.4 * e)) as usize).max(5).min(box_h),
+            ((box_h as f64 * (0.6 + 0.4 * e)) as usize)
+                .max(5)
+                .min(box_h),
         )
     };
     let x0 = if anchor_right {
@@ -2518,7 +2512,7 @@ fn paint_help_sidebar(
             y += 1;
         }
     }
-    if y + 1 <= last {
+    if y < last {
         y += 1;
         paint_row(y, &[Span::fg(DARK, "h  close")])?;
     }
@@ -2564,11 +2558,7 @@ fn paint_list_sidebar(
         return Ok((0, 1, 0, 1, visible.max(1)));
     }
     let pulse = |period: f64| {
-        if frozen {
-            0.5
-        } else {
-            breath(t, period)
-        }
+        if frozen { 0.5 } else { breath(t, period) }
     };
     let panel_bg = Color::Rgb {
         r: 22,
@@ -2589,7 +2579,9 @@ fn paint_list_sidebar(
             ((box_w as f64 * (0.55 + 0.45 * e)) as usize)
                 .max(16)
                 .min(box_w),
-            ((box_h as f64 * (0.6 + 0.4 * e)) as usize).max(5).min(box_h),
+            ((box_h as f64 * (0.6 + 0.4 * e)) as usize)
+                .max(5)
+                .min(box_h),
         )
     };
     let x0 = if anchor_right {
@@ -2739,7 +2731,7 @@ fn paint_list_sidebar(
                 HitRect {
                     x: x0 as u16,
                     y,
-                    w: (track_x as usize).saturating_sub(x0) as u16,
+                    w: track_x.saturating_sub(x0) as u16,
                     h: 1,
                 },
                 track_n,
@@ -2797,6 +2789,7 @@ fn paint_list_sidebar(
 /// Compact footer: bright keys, dim gaps.
 /// Every chip also registers a footer hit rect so `space n/p ←→ +/− v c ?`
 /// (and preview `q`) are clickable — same action as pressing the key.
+#[allow(clippy::too_many_arguments)]
 fn paint_key_footer(
     out: &mut impl Write,
     y: u16,
@@ -2852,14 +2845,10 @@ fn foot_targets(chip: &str, w: u16) -> Vec<(u16, u16, HitTarget)> {
         "space" => vec![(0, w, HitTarget::PlayPause)],
         // `n`ext on the left, `p`rev on the right.
         "n/p" if w >= 3 => vec![(0, 1, HitTarget::Next), (2, 1, HitTarget::Prev)],
-        "←→" if w >= 2 => vec![
-            (0, 1, HitTarget::SeekBack),
-            (1, 1, HitTarget::SeekForward),
-        ],
-        "+/−" | "+/-" if w >= 3 => vec![
-            (0, 1, HitTarget::VolumeUp),
-            (2, 1, HitTarget::VolumeDown),
-        ],
+        "←→" if w >= 2 => vec![(0, 1, HitTarget::SeekBack), (1, 1, HitTarget::SeekForward)],
+        "+/−" | "+/-" if w >= 3 => {
+            vec![(0, 1, HitTarget::VolumeUp), (2, 1, HitTarget::VolumeDown)]
+        }
         "v" => vec![(0, w, HitTarget::CavaToggle)],
         "c" => vec![(0, w, HitTarget::Settings)],
         "?" => vec![(0, w, HitTarget::Help)],
@@ -2922,6 +2911,7 @@ fn paint_in_region(
 
 /// Classic vertical cava bars under the shortcut bar (default bar look).
 /// Returns (start_x, rows_painted).
+#[allow(clippy::too_many_arguments)]
 fn paint_cava_bars(
     out: &mut impl Write,
     y: u16,
@@ -2946,7 +2936,7 @@ fn paint_cava_bars(
 
     let gap = matches!(style, CavaStyle::Bars | CavaStyle::Mirror);
     let bar_cols = if gap {
-        ((block_w + 1) / 2).clamp(8, n.min(block_w))
+        block_w.div_ceil(2).clamp(8, n.min(block_w))
     } else {
         block_w.clamp(8, n.min(block_w))
     };
@@ -2995,7 +2985,7 @@ fn paint_cava_bars(
 
         let eighths = (level * (rows * (RAMP.len() - 1)) as f64).round() as usize;
         let full = RAMP.len() - 1;
-        for r in 0..rows {
+        for (r, line) in lines.iter_mut().enumerate().take(rows) {
             let from_bottom = rows - 1 - r;
             let cell_base = from_bottom * full;
             let ch = if eighths >= cell_base + full {
@@ -3005,9 +2995,9 @@ fn paint_cava_bars(
             } else {
                 RAMP[0]
             };
-            lines[r].push(ch);
+            line.push(ch);
             if gap && b + 1 < bar_cols {
-                lines[r].push(' ');
+                line.push(' ');
             }
         }
     }
@@ -3084,9 +3074,7 @@ fn paint_toast_stack(
         let x = match pos {
             ToastPos::BottomCenter | ToastPos::TopCenter => cols.saturating_sub(box_w) / 2,
             ToastPos::BottomLeft | ToastPos::TopLeft => 2usize,
-            ToastPos::BottomRight | ToastPos::TopRight => {
-                cols.saturating_sub(box_w + 2).max(1)
-            }
+            ToastPos::BottomRight | ToastPos::TopRight => cols.saturating_sub(box_w + 2).max(1),
         };
         // 3-row box; newest hugs the edge, older ones step away.
         let base_y = if top_anchor {
@@ -3338,9 +3326,14 @@ mod tests {
         // SessionUi::enter needs a terminal; exercise the stack logic via
         // push semantics on a bare deque instead.
         let mut q: VecDeque<ToastItem> = VecDeque::new();
-        for (i, k) in [ToastKind::Info, ToastKind::Track, ToastKind::Config, ToastKind::Error]
-            .into_iter()
-            .enumerate()
+        for (i, k) in [
+            ToastKind::Info,
+            ToastKind::Track,
+            ToastKind::Config,
+            ToastKind::Error,
+        ]
+        .into_iter()
+        .enumerate()
         {
             q.push_back(ToastItem {
                 text: format!("m{i}"),
@@ -3366,9 +3359,9 @@ mod tests {
 
     #[test]
     fn list_dock_threshold_keeps_player_min() {
-        assert!(LIST_DOCK_MIN_COLS >= PLAYER_MIN_W + LIST_SIDEBAR_W);
+        const { assert!(LIST_DOCK_MIN_COLS >= PLAYER_MIN_W + LIST_SIDEBAR_W) };
         // Narrow terminals must overlay instead of docking.
-        assert!(LIST_DOCK_MIN_COLS > 60);
+        const { assert!(LIST_DOCK_MIN_COLS > 60) };
     }
 
     #[cfg(test)]

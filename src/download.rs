@@ -43,10 +43,7 @@ pub fn is_retryable_download_error(output: &str) -> bool {
 /// existing `youtube:skip=translated_subs` flag.
 pub fn with_mweb_fallback(args: &[String]) -> Vec<String> {
     let mut out = args.to_vec();
-    out.insert(
-        out.len().saturating_sub(1),
-        "--extractor-args".to_string(),
-    );
+    out.insert(out.len().saturating_sub(1), "--extractor-args".to_string());
     out.insert(
         out.len().saturating_sub(1),
         MWEB_FALLBACK_EXTRACTOR_ARG.to_string(),
@@ -92,7 +89,10 @@ fn ask_mweb_retry() -> bool {
     if io::stdin().read_line(&mut line).is_err() {
         return false;
     }
-    matches!(line.trim().to_ascii_lowercase().as_str(), "s" | "sim" | "y" | "yes")
+    matches!(
+        line.trim().to_ascii_lowercase().as_str(),
+        "s" | "sim" | "y" | "yes"
+    )
 }
 
 pub(crate) const PAGE_SIZE: usize = 8;
@@ -1031,6 +1031,7 @@ fn expand_tilde_path(p: &Path) -> PathBuf {
 
 // ── Interactive wizard ──────────────────────────────────────────
 
+#[allow(clippy::too_many_arguments)]
 pub fn run_interactive(
     music_dir_flag: &str,
     prefill_query: Option<&str>,
@@ -1789,7 +1790,9 @@ mod tests {
     #[test]
     fn retryable_errors_detected() {
         assert!(is_retryable_download_error("ERROR: 403 Forbidden"));
-        assert!(is_retryable_download_error("Sign in to confirm… PO Token missing"));
+        assert!(is_retryable_download_error(
+            "Sign in to confirm… PO Token missing"
+        ));
         assert!(is_retryable_download_error("po_token refresh failed"));
         assert!(is_retryable_download_error("SABR streaming failed"));
         assert!(is_retryable_download_error(
@@ -1827,7 +1830,10 @@ mod tests {
             retry.iter().filter(|a| *a == "--extractor-args").count(),
             base.iter().filter(|a| *a == "--extractor-args").count() + 1
         );
-        assert_eq!(retry.last().map(String::as_str), Some("https://youtu.be/abc"));
+        assert_eq!(
+            retry.last().map(String::as_str),
+            Some("https://youtu.be/abc")
+        );
     }
 
     #[test]

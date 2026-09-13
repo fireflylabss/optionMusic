@@ -60,8 +60,7 @@ enum Level {
 pub fn run(library: Library, favorites_only: bool, enable_cava: bool) -> Result<()> {
     // Saved playback prefs are the defaults here too (same as `play`).
     let prefs = AppConfig::load();
-    let mut player = Player::new(prefs.volume, prefs.speed, 0.0)
-        .context("cannot open player")?;
+    let mut player = Player::new(prefs.volume, prefs.speed, 0.0).context("cannot open player")?;
     player.set_volume_max(prefs.volume_max());
     player.set_volume(prefs.volume);
     player.set_eq(prefs.eq);
@@ -159,14 +158,14 @@ impl Session {
                 .library
                 .artists(&base)
                 .into_iter()
-                .map(|a| Row::Artist(a))
+                .map(Row::Artist)
                 .collect(),
             Level::Albums => {
                 let artist = self.selected_artist.clone().unwrap_or_default();
                 self.library
                     .albums_of_artist(&base, &artist)
                     .into_iter()
-                    .map(|a| Row::Album(a))
+                    .map(Row::Album)
                     .collect()
             }
             Level::Tracks => {
@@ -175,7 +174,7 @@ impl Session {
                 self.library
                     .tracks_of_album(&base, &artist, &album)
                     .into_iter()
-                    .map(|i| Row::Track(i))
+                    .map(Row::Track)
                     .collect()
             }
         }
@@ -205,8 +204,7 @@ impl Session {
             Level::Tracks => {
                 let artist = self.selected_artist.clone().unwrap_or_default();
                 let album = self.selected_album.clone().unwrap_or_default();
-                self.library
-                    .tracks_of_album(&self.base(), &artist, &album)
+                self.library.tracks_of_album(&self.base(), &artist, &album)
             }
             _ => Vec::new(),
         }
@@ -646,8 +644,7 @@ impl Session {
             &["favorites only: 1 · clear: x"],
             &years,
             self.year
-                .map(|y| years.iter().position(|s| s == &y.to_string()))
-                .flatten(),
+                .and_then(|y| years.iter().position(|s| s == &y.to_string())),
         )?;
         self.year = chosen.and_then(|s| s.parse().ok());
         self.cursor = 0;
@@ -656,29 +653,72 @@ impl Session {
     }
 
     /// Small reusable choice screen (genre / year pickers).
-    fn choose(&mut self, title: &str, blurb: &[&str], items: &[String], def: Option<usize>) -> Result<Option<String>> {
+    fn choose(
+        &mut self,
+        title: &str,
+        blurb: &[&str],
+        items: &[String],
+        def: Option<usize>,
+    ) -> Result<Option<String>> {
         let mut cursor = def.unwrap_or(0).min(items.len().saturating_sub(1));
         loop {
             let mut out = io::stdout();
             queue!(out, Clear(ClearType::All), MoveTo(0, 0)).ok();
-            queue!(out, SetForegroundColor(FG_TITLE), Print(format!("♪  {title}")), ResetColor).ok();
+            queue!(
+                out,
+                SetForegroundColor(FG_TITLE),
+                Print(format!("♪  {title}")),
+                ResetColor
+            )
+            .ok();
             queue!(out, MoveTo(0, 1)).ok();
-            queue!(out, SetForegroundColor(FG_MUTED), Print(format!("  {}", blurb.join(" · "))), ResetColor).ok();
+            queue!(
+                out,
+                SetForegroundColor(FG_MUTED),
+                Print(format!("  {}", blurb.join(" · "))),
+                ResetColor
+            )
+            .ok();
 
-            let visible = (crossterm::terminal::size().map(|(_, r)| r as usize).unwrap_or(20))
-                .saturating_sub(3);
-            let scroll = if cursor >= visible { cursor + 1 - visible } else { 0 };
+            let visible = (crossterm::terminal::size()
+                .map(|(_, r)| r as usize)
+                .unwrap_or(20))
+            .saturating_sub(3);
+            let scroll = if cursor >= visible {
+                cursor + 1 - visible
+            } else {
+                0
+            };
             for (i, item) in items.iter().enumerate().skip(scroll).take(visible) {
                 queue!(out, MoveTo(0, 2 + (i - scroll) as u16)).ok();
                 if i == cursor {
                     let line = format!("  ▸ {}", item);
-                    queue!(out, SetBackgroundColor(BG_FOCUS), SetForegroundColor(FG_ON_FOCUS), Print(line), ResetColor).ok();
+                    queue!(
+                        out,
+                        SetBackgroundColor(BG_FOCUS),
+                        SetForegroundColor(FG_ON_FOCUS),
+                        Print(line),
+                        ResetColor
+                    )
+                    .ok();
                 } else {
-                    queue!(out, SetForegroundColor(FG_BODY), Print(format!("    {item}")), ResetColor).ok();
+                    queue!(
+                        out,
+                        SetForegroundColor(FG_BODY),
+                        Print(format!("    {item}")),
+                        ResetColor
+                    )
+                    .ok();
                 }
             }
             queue!(out, MoveTo(0, 2 + visible as u16)).ok();
-            queue!(out, SetForegroundColor(FG_MUTED), Print("  ↑↓ move · enter select · esc cancel"), ResetColor).ok();
+            queue!(
+                out,
+                SetForegroundColor(FG_MUTED),
+                Print("  ↑↓ move · enter select · esc cancel"),
+                ResetColor
+            )
+            .ok();
             out.flush().ok();
 
             match read_key()? {
@@ -700,7 +740,11 @@ impl Session {
     fn queue_line(&self, idx: usize, pos: usize) -> String {
         let t = self.library.get(idx);
         let Some(t) = t else { return String::new() };
-        let marker = if self.queue_cursor == Some(idx) { "▶" } else { " " };
+        let marker = if self.queue_cursor == Some(idx) {
+            "▶"
+        } else {
+            " "
+        };
         format!("  {marker} {:>3}. {}", pos + 1, t.display_name())
     }
     fn paint(&mut self) -> Result<()> {
@@ -715,11 +759,7 @@ impl Session {
         let width = crossterm::terminal::size()
             .map(|(w, _)| {
                 let w = w as usize;
-                if w < 8 {
-                    80
-                } else {
-                    w
-                }
+                if w < 8 { 80 } else { w }
             })
             .unwrap_or(80);
 
@@ -728,7 +768,7 @@ impl Session {
             out,
             MoveTo(0, 0),
             SetForegroundColor(FG_TITLE),
-            Print(format!("♪  browse")),
+            Print("♪  browse".to_string()),
             SetForegroundColor(FG_MUTED),
             Print(format!(
                 "  ·  {} · {} track{}",
@@ -905,15 +945,9 @@ impl Session {
 
     fn row_line(&self, row: &Row, _i: usize) -> String {
         match row {
-            Row::Artist(a) => format!(
-                "  {}",
-                a.name,
-            ),
+            Row::Artist(a) => format!("  {}", a.name,),
             Row::Album(a) => {
-                let year = a
-                    .year
-                    .map(|y| format!(" · {y}"))
-                    .unwrap_or_default();
+                let year = a.year.map(|y| format!(" · {y}")).unwrap_or_default();
                 format!("  {}{}", a.name, year)
             }
             Row::Track(i) => {
@@ -933,7 +967,11 @@ impl Session {
                 if t.has_cover == Some(false) {
                     badges.push_str(" ▢");
                 }
-                let fav = if self.library.is_favorite(&t.path) { " ★" } else { "" };
+                let fav = if self.library.is_favorite(&t.path) {
+                    " ★"
+                } else {
+                    ""
+                };
                 format!("  {num}{}{}  {dur}{badges}", t.display_name(), fav)
             }
         }
