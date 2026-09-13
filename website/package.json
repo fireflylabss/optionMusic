@@ -30,6 +30,8 @@
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^4.3.4",
+    "axe-core": "4.10.2",
+    "happy-dom": "15.11.7",
     "tailwindcss": "^4",
     "typescript": "^5.7.2",
     "vite": "^6.0.5"
