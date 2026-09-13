@@ -49,10 +49,7 @@ impl SleepTimer {
 
     /// Cycle off → 15 → 30 → 60 → off. Returns the status label.
     pub fn cycle(&mut self) -> String {
-        let current_mins = self
-            .total
-            .map(|t| t.as_secs() / 60)
-            .unwrap_or(0);
+        let current_mins = self.total.map(|t| t.as_secs() / 60).unwrap_or(0);
         let next = match STEPS_MIN.iter().find(|m| **m > current_mins) {
             Some(m) => *m,
             None => 0,
