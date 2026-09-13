@@ -31,10 +31,14 @@ jobs:
       - name: Fetch libmpv dev package
         shell: pwsh
         run: |
-          $rss = Invoke-WebRequest -UseBasicParsing "https://sourceforge.net/projects/mpv-player-windows/rss?path=/libmpv"
-          $name = ([regex]::Matches($rss.Content, 'mpv-dev-x86_64-\d+-git-[0-9a-f]+\.7z') | Select-Object -First 1).Value
-          Invoke-WebRequest -UseBasicParsing "https://sourceforge.net/projects/mpv-player-windows/files/libmpv/$name/download" -OutFile mpv-dev.7z
+          $ErrorActionPreference = "Stop"
+          $rss = curl.exe -fsSL "https://sourceforge.net/projects/mpv-player-windows/rss?path=/libmpv"
+          $name = ([regex]::Matches(($rss -join "`n"), 'mpv-dev-x86_64-\d+-git-[0-9a-f]+\.7z') | Select-Object -First 1).Value
+          if (-not $name) { throw "no mpv-dev package found in RSS feed" }
+          Write-Host "libmpv package: $name"
+          curl.exe -fSL -A "Mozilla/5.0" -o mpv-dev.7z "https://sourceforge.net/projects/mpv-player-windows/files/libmpv/$name/download"
           7z x -y -o"$env:RUNNER_TEMP\mpv-dev" mpv-dev.7z
+          Get-ChildItem "$env:RUNNER_TEMP\mpv-dev"
           "RUSTFLAGS=-L $env:RUNNER_TEMP\mpv-dev" | Out-File -Append $env:GITHUB_ENV
           "$env:RUNNER_TEMP\mpv-dev" | Out-File -Append $env:GITHUB_PATH
       - uses: dtolnay/rust-toolchain@stable
