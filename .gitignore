@@ -1,9 +1,10 @@
 /target
+/src-gpui/target
 /node_modules
 /dist
 /.agents
 /.opencode
-/src-tauri/target
-/src-tauri/gen
+/.commandcode
+command-code-session-*.html
 *.log
 skills-lock.json

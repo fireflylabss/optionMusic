@@ -3,16 +3,7 @@
 **optionMusic** (*option music*) — minimal black & white CLI music player written in Rust.  
 Powered by **MPV** (`libmpv`), with an optional discreet **cava** spectrum strip.
 
-```
-♪  optionMusic
-   track title
-   ───●────────
-   ◂ ⏸ paused ▸  ·  1/12  ·  − 80% +
-   space · n/p · ←→ · ?
-      ▄ █ ▄
-    ▄ █ █ █ ▄     ← cava bars under shortcuts (opt-in)
-   ▁▅█████▅▁
-```
+<video src="website/public/demo.mp4" controls muted loop></video>
 
 Help (`?` / `h`) is a **right sidebar**, while settings (`c`) and playlist (`l`) are **left sidebars**. The playlist makes layout space so it remains easy to use.
 
@@ -20,17 +11,12 @@ Help (`?` / `h`) is a **right sidebar**, while settings (`c`) and playlist (`l`)
 
 ### Desktop app
 
-The React/Tauri desktop client lives alongside the Rust CLI. Install Bun, then
-from the repository root:
+The native GPUI desktop client lives in `src-gpui/` and shares the CLI engine
+via the `optionmusic` crate:
 
 ```bash
-bun install
-bun run tauri:dev    # desktop app with libmpv playback
+cd src-gpui && cargo run    # toolchain pinned in rust-toolchain.toml
 ```
-
-Browser-only `bun run dev` is a UI preview — it cannot play audio. Package with
-`bun run tauri build` (Tauri / WebKit system deps may be required).
-`bun run build` runs a locked `bun install` then Vite for the web assets.
 
 ### Arch / CachyOS (AUR)
 
@@ -69,7 +55,7 @@ PipeWire or PulseAudio should be running if you use cava.
 export CARGO_TARGET_DIR="$(pwd)/target"
 cargo install --path . --force
 # or a tagged release:
-cargo install --git https://github.com/fireflylabss/optionMusic --tag v0.2.7
+cargo install --git https://github.com/fireflylabss/optionMusic --tag v0.2.14-beta
 ```
 
 | Command | Description |
@@ -92,6 +78,14 @@ msc i song.mp3
 msc dl                                              # interactive wizard
 msc dl https://youtu.be/… --audio                   # direct → cwd
 msc download -p soundcloud "ambient" -a
+msc browse                                          # library tree: artists → albums → tracks
+msc browse -f                                       # favorites only
+msc stats -n 10                                     # top tracks & artists
+msc sleep 30                                        # fade out in 30 min (off to clear)
+msc playlist ls                                     # saved playlists
+msc radio                                           # endless radio from your library
+msc radio "daft punk"                               # seed by search
+msc rd --genre trip-hop --fresh                     # seed by genre, rediscovery mode
 msc --help
 ```
 
@@ -107,14 +101,18 @@ msc --help
 
 | Flag | Meaning |
 |------|---------|
-| `-v` / `--volume` | 0–100 (default 80) |
-| `-f` / `--speed` | playback speed factor |
-| `--pitch` | pitch factor (default 1.0) |
-| `--eq` | starting EQ (`off` `bass` `treble` `rock` `vocal` `lofi`) |
+| `-v` / `--volume` | 0–100 (default: last used, else 80) |
+| `-f` / `--speed` | playback speed factor (default: last used) |
+| `--pitch` | pitch factor (default: last used, else 1.0) |
+| `--eq` | starting EQ (default: last used, else `off`; `bass` `treble` `rock` `vocal` `lofi`) |
 | `-c` / `--crossfade` | audio-fade seconds between loads |
 | `-s` / `--shuffle` | shuffle playlist |
 | `-l` / `--loop` / `--repeat` | loop playlist |
 | `--loop-file` / `--repeat-one` | repeat current track |
+
+`msc play` with no paths and no playback flags **resumes** the last session —
+saved queue order, last track paused at the saved position. Toggle with
+settings `c` → Resume or `resume = false` in config.
 
 ### Download (`download` / `dl` / `d`)
 
@@ -139,6 +137,17 @@ Uses system **yt-dlp**. Interactive wizard (`msc dl`):
 | `--audio-format FMT` | audio container for direct `--audio` (default `mp3`) |
 | `-i` / `--interactive` | force the wizard |
 | `--ui arrows\|type` | wizard UI (default `arrows`; also settings `c` → Dl UI) |
+
+### Library & extras
+
+| Command | What |
+|---------|------|
+| `msc browse` / `br` | Tree: artists → albums → tracks, with queue playback; `-f` favorites only |
+| `msc radio` / `rd` | Endless queue from your library — similarity walk (artist · album · genre · era) weighted by play stats, penalizing what you heard this week. Seed: `QUERY`, `--artist`, `--genre`; `--fresh` favors rarely-played tracks. Same playback flags as `play` |
+| `msc stats` / `st` | Top tracks & artists, totals (`-n` limit) |
+| `msc sleep MIN\|off` | Sleep timer — fades playback after N minutes |
+| `msc playlist` / `pls` | `ls` · `create` · `import`/`export` M3U · `add` · `delete` |
+| `msc library` / `lib` | `refresh` (incremental index) · `ls` · `paths` (script-friendly) |
 
 ### Keyboard
 
@@ -171,13 +180,22 @@ Uses system **yt-dlp**. Interactive wizard (`msc dl`):
 
 Left sidebar. Persisted in `~/.option/music/config.toml`:
 
+Grouped into sections — **player** · **interface** · **library & dl**:
+
 | Option | Meaning |
 |--------|---------|
-| Excess volume | Allow volume up to 200% |
-| Cava styles | Style (`bars` / `dense` / `mirror` / `dots`) and height |
-| LDM | Fewer animations, lighter redraw |
+| Excess vol | Allow volume up to 200% |
+| Resume | Persist prefs + session; `msc play` resumes (on by default) |
+| Discord | Discord Rich Presence via local IPC (off by default) |
 | Accent | Color accent (presets or `#RRGGBB` in the file) |
+| LDM | Fewer animations, lighter redraw |
+| Cava | Style (`bars` / `dense` / `mirror` / `dots`) and height |
+| Lyrics | Docked lyrics strip: `above` / `below` / `hidden` |
+| Toast pos | Toast anchor position |
+| Toast stack | Stack up to 3 toasts (off = newest only) |
+| Artists | Artists browser grouping: `metadata` (default) or `folder` |
 | Dl UI | Download wizard UI: `arrows` (default) or `type` |
+| Dl fallbk | yt-dlp 403 fallback: `ask` (default) / `auto` / `off` |
 
 In the sidebar: `↑↓` move · `enter` / click toggle · `←→` cycle · `d` reset · `c` / Esc close.
 
@@ -209,10 +227,31 @@ Off by default. With `--cava` or `v`, and `cava` installed, optionMusic draws a 
 - Click the strip or press `v` to toggle
 - Missing cava → strip unavailable; playback unaffected
 
+## Discord presence
+
+Opt-in Rich Presence — toggle in settings `c` → Discord or `discord_rpc = true`
+in `~/.option/music/config.toml`. It talks to the Discord client over the local
+IPC socket only (no network): title / artist — album with a live progress bar,
+pause-aware, and works in `msc browse` too.
+
+Works out of the box via the built-in `optionMusic` application id. To use
+your own app instead, set `discord_rpc_id` in `config.toml`.
+
+Cover art: Discord can only render image *URLs*, so tracks coming from
+YouTube — streamed via `msc play <url>` or downloaded files with the
+`[videoId]` tag in the name — show the video thumbnail through Discord's
+media proxy. Everything else falls back to the `logo` art asset registered
+on the app (local embedded covers can't be sent over IPC).
+
 ## Features
 
 - MPV-backed playback (mp3, flac, ogg, wav, m4a, opus, aac, …)
+- Session memory — prefs + queue/track/position persist and resume
+- Library tree (`msc browse`), favorites, playlists (M3U), stats & history
+- `msc radio` — endless similarity-walked queue from your own library
+- Sleep timer, smart shuffle, lyrics
 - Mute, long seek, EQ presets, crossfade, speed & pitch
+- Discord Rich Presence (opt-in, local IPC, thumbnails for YT tracks)
 - Default music directory (`~/Music`)
 - Optional cava spectrum bars (opt-in)
 - yt-dlp downloader (YouTube / YouTube Music / SoundCloud)

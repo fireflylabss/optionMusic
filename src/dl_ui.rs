@@ -177,6 +177,7 @@ pub fn run_interactive_arrows(
     prefill_kind: Option<MediaKind>,
     prefill_output: Option<&Path>,
     _audio_format: &str,
+    fallback: crate::config::DlFallbackMode,
 ) -> Result<()> {
     download::ensure_yt_dlp()?;
     download::purge_expired_cache();
@@ -304,7 +305,7 @@ pub fn run_interactive_arrows(
         bail!("cancelled");
     }
     println!();
-    download::run_batch(&items, &opts)
+    download::run_batch(&items, &opts, fallback)
 }
 
 fn configure_download(

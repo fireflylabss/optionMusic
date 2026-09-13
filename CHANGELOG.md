@@ -34,6 +34,61 @@ Older desktop builds (`v0.1.0`, `v0.1.1`) had no channel suffix. From `v0.1.2-be
 
 </details>
 
+## v0.1.7-beta · 12/09/2026
+
+The native GPUI desktop app grows up: albums page, full playlist flows, sound controls, lyrics, tag edit, queue tools, and real keyboard/accessibility coverage. This version was made for desktop with a beta release channel on 12/09/2026 (v0.1.7-beta).
+
+- New **Albums** page grouping by album + artist with cover art, detail view, and play — alongside Library / Artists / Playlists / Favorites / Shelves (Ctrl/Cmd+1–6).
+- Background tag enrichment after scan: real artists, albums, and covers fill in incrementally instead of staying on folder names forever.
+- Track rows now show real cover art through a shared per-track cache with bounded background resolution; hero, player bar, and album cards share it.
+- Session resume on startup: last queue, track, and position come back (same engine as `msc play` resume).
+- Playlists end-to-end: create, rename, delete (with confirm dialog), per-track "Add to playlist…" picker, and M3U import/export via native file dialogs.
+- Queue panel: reorder with buttons or Shift+↑/↓, jump-to-current, and clear with confirmation.
+- Settings gains a **Sound** section: EQ presets, speed/pitch steppers with reset, ReplayGain cycle, volume boost, loudness normalize, and artist grouping (metadata/folder).
+- Optional **Discord Rich Presence** (Settings → Discord → Rich Presence, or `discord_rpc = true` in config) — same engine as the CLI: local IPC only, title / artist — album with a live progress bar, pause-aware, YouTube thumbnails for downloaded streams.
+- Lyrics panel and a light tag editor (title / artist / album / track / disc / year) in the stage column, which now toggles open/closed.
+- Context menus are fully keyboard-navigable (↑/↓/Enter) and rendered from the same action list the keys drive.
+- Every list is reachable with Tab and exposes proper listbox/position semantics; focus rings are now visibly drawn; sliders expose the slider role with ←/→/Home/End; the status toast announces via a status role.
+- Window size, active page, and stage panel persist via `desktop_preferences` in `config.toml`; folders and audio files can be dropped onto the window; search filters the active page instead of forcing Library.
+- macOS uses native traffic lights instead of custom window controls.
+- Various other UI polish
+
+## v0.2.17-beta · 12/09/2026
+
+Local-library radio: `msc radio` turns your whole library into an endless similarity-walked queue. This version was made for CLI with a beta release channel on 12/09/2026 (v0.2.17-beta).
+
+### CLI (`0.2.17`)
+
+- `msc radio` (aliases `rd`, `mix`): orders the entire library as a radio walk — each next track is picked by similarity to the current one (same artist +4, same album +2, genre overlap +2, year proximity) weighted by play counts, with a penalty for anything heard this week. A random pick among the top-5 candidates per step keeps the queue drifting like a real radio; same artist caps at 2 in a row while alternatives remain.
+- Seeds: `msc radio` (most-played or random), `msc radio "query"` (title/artist/album/genre search), `--artist NAME`, `--genre GENRE`, and `--fresh` for rediscovery mode (favors rarely/never-played tracks).
+- Same playback flags as `play` (`-v`, `-f`, `--pitch`, `--eq`, `-c`, `-l`, `--loop-file`); the radio queue rides the normal session — playlist sidebar `l`, stats, lyrics, Discord RPC, and `msc play` session resume all work on it.
+
+## v0.2.16-beta · 12/09/2026
+
+Discord Rich Presence and session memory: quit and come back to the same queue, track, and position. This version was made for CLI with a beta release channel on 12/09/2026 (v0.2.16-beta).
+
+### CLI (`0.2.16`)
+
+- Playback prefs persist to `config.toml` (on quit + every ~5s while playing): volume, EQ, repeat (`o`), speed, pitch, smart shuffle (`x`). Next launch restores them; explicit flags still win (`-v`, `-f`, `--pitch`, `--eq`, `-l`, `--loop-file`, `-s`).
+- Session resume: `msc play` with no paths or playback flags restores the saved queue order and re-opens the last track paused at the saved position (toast `resumed · title`). Toggle in settings `c` → Resume or `resume = false` in config; turning it off clears the saved session.
+- Discord Rich Presence (opt-in): settings `c` → Discord or `discord_rpc = true` in config. Local IPC only (no network) — shows title / artist — album with a live progress bar, pause-aware, also in `msc browse` and headless `play`. Needs a Discord application id until we register a built-in one: create a free app at discord.dev/developers and set `discord_rpc_id` in `config.toml`.
+- `msc browse` now starts with the saved playback prefs (volume / EQ / speed / pitch).
+- Removed the Tauri desktop surface (`src-tauri` / `src-ui`); the native GPUI app in `src-gpui/` is the desktop line going forward.
+
+## v0.2.15-stable · 04/09/2026
+
+Floating panels, docked karaoke lyrics, and a hardened downloader on a stable cut. This version was made for CLI with a stable release channel on 04/09/2026 (v0.2.15-stable).
+
+- `msc dl` yt-dlp 403 fallback: retry with `player_client=mweb` (ask in TTY by default, `--fallback-mweb` / `--no-fallback`, `dl_fallback` config).
+- Fixed toasts: fixed anchor plus `toast_pos` (six positions including top-left / top-right) and `toast_stack` (off by default, up to 3 typed toasts: info / track / config / error).
+- Panels: config `c` and list `l` as compact floating cards, `?` overlay that never pushes the player, slot policy with sticky sides plus a `no room — close a panel` refusal, open/close animations, clickable footer chips (`space n/p ←→ +/− v c ? q`).
+- List `l`: real cursor selection, cursor-following window, proportional scrollbar with 1:1 drag, wheel/click, works with `c` open.
+- Playback: `msc stats`, repeat off/all/one (`o`), smart shuffle (`x`), sleep timer (`z`, `msc sleep`), key `v` cava toggle fixed globally.
+- Lyrics: docked karaoke strip above header / below shortcuts (`lyrics_pos`, `c` row), `.lrc` sidecar plus lrclib cache, Enhanced-LRC word tags, per-letter real-time highlight, pinned `lyrics · y hide` header, manual scroll plus follow.
+- Deeper optionSDK integration (paths via `App::MUSIC`, atomic state/cache writes).
+- All UI strings English-only.
+- Various other small tweaks
+
 ## v0.2.14-beta · 29/08/2026
 
 Library core on the CLI: incremental refresh, an artists → albums → tracks browser, and genre/year search across the tree. This version was made for CLI with a beta release channel on 29/08/2026 (v0.2.14-beta).

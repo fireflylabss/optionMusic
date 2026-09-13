@@ -150,7 +150,7 @@ fn cached_embedded_cover(audio: &Path, mtime: u64, size: u64) -> Result<Option<P
     let cache = cover_cache_path(audio, mtime, size, ext);
     let dir = config::covers_cache_dir();
     fs::create_dir_all(&dir)?;
-    fs::write(&cache, &bytes)?;
+    option_sdk::atomic_write(&cache, &bytes)?;
     Ok(Some(cache))
 }
 

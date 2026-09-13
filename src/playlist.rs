@@ -28,6 +28,8 @@ pub struct Track {
     pub mtime: u64,
     /// File size in bytes; `0` when metadata is unavailable.
     pub size: u64,
+    /// Track length in seconds (`None` until enrichment probes the file).
+    pub duration_secs: Option<f64>,
     /// Whether tag enrichment has been attempted for this track.
     pub tags_enriched: bool,
 }
@@ -53,6 +55,7 @@ impl Track {
             has_cover: None,
             mtime,
             size,
+            duration_secs: None,
             tags_enriched: false,
         }
     }
@@ -70,6 +73,16 @@ impl Track {
             return;
         }
         let tags = crate::meta::read_tags_cached(&self.path, self.mtime, self.size);
+        let has_cover = crate::cover::resolve_cover_file(&self.path, self.mtime, self.size)
+            .ok()
+            .flatten()
+            .is_some();
+        self.apply_tags(tags, has_cover);
+    }
+
+    /// Store already-read tags and mark this track enriched. Shared by
+    /// `enrich_tags` and the controller's off-thread `enrich_apply` path.
+    pub(crate) fn apply_tags(&mut self, tags: crate::meta::AudioTags, has_cover: bool) {
         self.title = tags.title;
         self.artist = tags.artist;
         self.album = tags.album;
@@ -77,13 +90,20 @@ impl Track {
         self.disc_number = tags.disc_number;
         self.genre = tags.genre;
         self.year = tags.year;
-        self.has_cover = Some(
-            crate::cover::resolve_cover_file(&self.path, self.mtime, self.size)
-                .ok()
-                .flatten()
-                .is_some(),
-        );
+        self.duration_secs = tags.duration_secs;
+        self.has_cover = Some(has_cover);
         self.tags_enriched = true;
+    }
+
+    /// "artist — album" / "artist" / "album" / "" (RPC state line — empty
+    /// when untagged so Discord shows just the title, no "local file").
+    pub fn artist_album(&self) -> String {
+        match (self.artist.as_deref(), self.album.as_deref()) {
+            (Some(a), Some(b)) => format!("{a} — {b}"),
+            (Some(a), None) => a.to_string(),
+            (None, Some(b)) => b.to_string(),
+            (None, None) => String::new(),
+        }
     }
 
     /// Human-friendly name: tagged title, else file stem, else full path.
@@ -97,6 +117,49 @@ impl Track {
             .map(|s| s.to_string())
             .unwrap_or_else(|| self.path.display().to_string())
     }
+
+    /// YouTube thumbnail URL derived from a stream URL or a `[id]` yt-dlp-style
+    /// filename — the only art Discord can render for local playback.
+    /// `mqdefault` is pure 16:9 (no baked-in letterbox bars like `hqdefault`),
+    /// so Discord's square center-crop lands cleanly.
+    pub fn thumb_url(&self) -> Option<String> {
+        yt_video_id(&self.path.to_string_lossy())
+            .map(|id| format!("https://i.ytimg.com/vi/{id}/mqdefault.jpg"))
+    }
+}
+
+/// Extract a YouTube video id from a URL (`youtu.be/`, `watch?v=`) or from a
+/// `[id]` tag in the file name (yt-dlp's default `%(id)s` convention).
+fn yt_video_id(text: &str) -> Option<&str> {
+    fn is_id(s: &str) -> bool {
+        s.len() == 11
+            && s.chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+    }
+    for marker in ["youtu.be/", "watch?v="] {
+        if let Some(i) = text.find(marker) {
+            let rest = &text[i + marker.len()..];
+            let end = rest
+                .find(['?', '&', '/', ' '])
+                .unwrap_or(rest.len());
+            let cand = &rest[..end];
+            if is_id(cand) {
+                return Some(cand);
+            }
+        }
+    }
+    let mut start = 0;
+    while let Some(off) = text[start..].find('[') {
+        let i = start + off;
+        if let Some(j) = text[i..].find(']') {
+            let cand = &text[i + 1..i + j];
+            if is_id(cand) {
+                return Some(cand);
+            }
+        }
+        start = i + 1;
+    }
+    None
 }
 
 #[derive(Debug, Default)]
@@ -131,6 +194,11 @@ impl Playlist {
         Ok(Self { tracks })
     }
 
+    /// Playlist from an explicit ordered track list (radio order, etc.).
+    pub fn from_tracks(tracks: Vec<Track>) -> Self {
+        Self { tracks }
+    }
+
     pub fn tracks(&self) -> &[Track] {
         &self.tracks
     }
@@ -145,6 +213,35 @@ impl Playlist {
 
     pub fn is_empty(&self) -> bool {
         self.tracks.is_empty()
+    }
+
+    /// Reorder tracks to match `ordered` paths (saved session queue). Paths
+    /// that no longer exist drop out; tracks absent from `ordered` keep their
+    /// relative order at the end.
+    pub fn reorder(&mut self, ordered: &[String]) {
+        if ordered.is_empty() {
+            return;
+        }
+        let mut rank = std::collections::HashMap::with_capacity(ordered.len());
+        for (i, p) in ordered.iter().enumerate() {
+            rank.insert(p.as_str(), i);
+        }
+        // Stable sort: queued tracks first in saved order; anything not in
+        // the saved queue (new files) keeps its relative order at the end.
+        self.tracks.sort_by_key(|t| {
+            rank.get(t.path.to_string_lossy().as_ref())
+                .copied()
+                .unwrap_or(usize::MAX)
+        });
+    }
+
+    /// Rebuild from saved queue paths only — used by session resume.
+    /// Returns the index of `resume_track` when found.
+    pub fn resume_order(&mut self, queue: &[String], resume_track: &str) -> Option<usize> {
+        self.reorder(queue);
+        self.tracks
+            .iter()
+            .position(|t| t.path.to_string_lossy() == resume_track)
     }
 
     pub fn shuffle(&mut self) {
@@ -260,6 +357,24 @@ mod tests {
     fn track_display_name() {
         let t = Track::new(PathBuf::from("/music/My Song.mp3"));
         assert_eq!(t.display_name(), "My Song");
+    }
+
+    #[test]
+    fn yt_id_from_url_and_filename() {
+        assert_eq!(
+            yt_video_id("https://youtu.be/fCO7f0SmrDc"),
+            Some("fCO7f0SmrDc")
+        );
+        assert_eq!(
+            yt_video_id("https://www.youtube.com/watch?v=fCO7f0SmrDc&t=4s"),
+            Some("fCO7f0SmrDc")
+        );
+        assert_eq!(
+            yt_video_id("/Music/(G)I-DLE - 'Nxde' MV [fCO7f0SmrDc].mp3"),
+            Some("fCO7f0SmrDc")
+        );
+        assert_eq!(yt_video_id("/Music/ordinary song.mp3"), None);
+        assert_eq!(yt_video_id("/Music/[too short].mp3"), None);
     }
 
     #[test]

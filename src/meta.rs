@@ -25,6 +25,9 @@ pub struct AudioTags {
     pub genre: Option<String>,
     #[serde(default)]
     pub year: Option<u32>,
+    /// Stream length in seconds, probed during the same read (no extra parse).
+    #[serde(default)]
+    pub duration_secs: Option<f64>,
     #[serde(default)]
     pub replaygain_track_gain: Option<f64>,
     #[serde(default)]
@@ -51,7 +54,7 @@ fn tag_cache_path(path: &Path, mtime: u64, size: u64) -> std::path::PathBuf {
         path.to_string_lossy().as_bytes(),
         mtime.to_string().as_bytes(),
         size.to_string().as_bytes(),
-        b"v3",
+        b"v4",
     ]);
     config::tags_cache_dir().join(format!("{key}.toml"))
 }
@@ -67,7 +70,7 @@ fn write_tag_cache(path: &Path, mtime: u64, size: u64, tags: &AudioTags) {
     let _ = fs::create_dir_all(&dir);
     let cache = tag_cache_path(path, mtime, size);
     if let Ok(body) = toml::to_string(tags) {
-        let _ = fs::write(cache, body);
+        let _ = option_sdk::atomic_write(cache, body.as_bytes());
     }
 }
 
@@ -99,8 +102,14 @@ pub fn read_tags(audio: &Path) -> AudioTags {
     let Ok(tagged) = probe.read() else {
         return AudioTags::default();
     };
+    // Duration lives in stream properties, not tags — read it in this same
+    // probe so tagless files still report a length without a second parse.
+    let duration_secs = Some(tagged.properties().duration().as_secs_f64());
     let Some(tag) = tagged.primary_tag().or_else(|| tagged.first_tag()) else {
-        return AudioTags::default();
+        return AudioTags {
+            duration_secs,
+            ..AudioTags::default()
+        };
     };
 
     let title = tag
@@ -150,6 +159,7 @@ pub fn read_tags(audio: &Path) -> AudioTags {
         disc_number,
         genre,
         year,
+        duration_secs,
         replaygain_track_gain,
         replaygain_album_gain,
     }

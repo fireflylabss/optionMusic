@@ -88,6 +88,10 @@ impl CliEq {
   msc library paths       absolute paths for scripts / xargs\n\
   msc browse              browse artists → albums → tracks & play\n\
   msc browse --favorites  browse favorites only\n\
+  msc stats               playback statistics (top tracks/artists)\n\
+  msc sleep 30            arm the sleep timer (off to clear)\n\
+  msc radio               endless queue built from your library\n\
+  msc radio \"artist\"      seed by search · --artist · --genre · --fresh\n\
 \n\
 Playback keys (press ? / h in the player for the full sidebar):\n\
   space        pause / resume          n / p        next / previous\n\
@@ -95,11 +99,12 @@ Playback keys (press ? / h in the player for the full sidebar):\n\
   + / −        volume                  m            mute\n\
   e            cycle EQ                [ ]          speed\n\
   , / .        pitch                   0            reset speed/pitch\n\
-  o            cycle loop (off→list→track)\n\
-  l            playlist sidebar        r            shuffle\n\
-  f            filename line           v            cava on/off\n\
-  c            settings sidebar        ? / h        help\n\
-  q / Esc      quit\n\
+  o            cycle repeat (off→all→one)\n\
+  l            playlist sidebar        r            shuffle one-shot\n\
+  x            smart shuffle           y            lyrics panel\n\
+  z            sleep timer             f            filename line\n\
+  v            cava on/off             c            settings sidebar\n\
+  ? / h        help                    q / Esc      quit\n\
 \n\
 Examples:\n\
   msc p song.mp3\n\
@@ -161,27 +166,26 @@ pub enum Command {
         #[arg(required = false, value_name = "PATH")]
         paths: Vec<PathBuf>,
 
-        /// Volume 0–100
+        /// Volume 0–100 (default: last used, else 80)
         #[arg(
             short,
             long,
-            default_value_t = 80,
             value_parser = clap::value_parser!(u8).range(0..=100),
             value_name = "PCT"
         )]
-        volume: u8,
+        volume: Option<u8>,
 
-        /// Playback speed factor
-        #[arg(short = 'f', long, default_value_t = 1.0, value_name = "FACTOR")]
-        speed: f64,
+        /// Playback speed factor (default: last used, else 1.0)
+        #[arg(short = 'f', long, value_name = "FACTOR")]
+        speed: Option<f64>,
 
-        /// Pitch factor (1.0 = normal)
-        #[arg(long, default_value_t = 1.0, value_name = "FACTOR")]
-        pitch: f64,
+        /// Pitch factor (default: last used, else 1.0)
+        #[arg(long, value_name = "FACTOR")]
+        pitch: Option<f64>,
 
-        /// Starting EQ preset
-        #[arg(long = "eq", value_enum, default_value_t = CliEq::Off)]
-        eq: CliEq,
+        /// Starting EQ preset (default: last used, else off)
+        #[arg(long = "eq", value_enum)]
+        eq: Option<CliEq>,
 
         /// Crossfade / audio-fade duration in seconds
         #[arg(short = 'c', long, default_value_t = 0.0, value_name = "SECONDS")]
@@ -266,6 +270,14 @@ pub enum Command {
             help = "Wizard UI: arrows (default) or type"
         )]
         ui: Option<CliDlUi>,
+
+        /// Auto-retry 403/PO-token failures with mweb player client (no prompt)
+        #[arg(long = "fallback-mweb", conflicts_with = "no_fallback")]
+        fallback_mweb: bool,
+
+        /// Never retry with the mweb fallback
+        #[arg(long = "no-fallback", conflicts_with = "fallback_mweb")]
+        no_fallback: bool,
     },
 
     /// Manage local playlists (save / import M3U)
@@ -288,6 +300,74 @@ pub enum Command {
         /// Restrict the whole tree to favorites only
         #[arg(short, long)]
         favorites: bool,
+    },
+
+    /// Show playback statistics (top tracks/artists, totals)
+    #[command(visible_aliases = ["stat", "st"])]
+    Stats {
+        /// How many entries per list
+        #[arg(short = 'n', long = "limit", default_value_t = 10, value_name = "N")]
+        limit: usize,
+    },
+
+    /// Sleep timer: `msc sleep 30` arms 30 min, `msc sleep off` clears
+    Sleep {
+        /// Minutes (15/30/60 typical) or `off`
+        #[arg(value_name = "MINUTES|off")]
+        arg: Option<String>,
+    },
+
+    /// Radio: endless queue generated from your library by similarity
+    #[command(visible_aliases = ["rd", "mix"])]
+    Radio {
+        /// Seed search (matches title / artist / album / genre)
+        #[arg(value_name = "QUERY")]
+        seed: Option<String>,
+
+        /// Seed the radio from an artist
+        #[arg(long, value_name = "NAME")]
+        artist: Option<String>,
+
+        /// Seed the radio from a genre tag
+        #[arg(long, value_name = "GENRE")]
+        genre: Option<String>,
+
+        /// Prefer rarely/never-played tracks (rediscovery mode)
+        #[arg(long)]
+        fresh: bool,
+
+        /// Volume 0–100 (default: last used, else 80)
+        #[arg(
+            short,
+            long,
+            value_parser = clap::value_parser!(u8).range(0..=100),
+            value_name = "PCT"
+        )]
+        volume: Option<u8>,
+
+        /// Playback speed factor (default: last used, else 1.0)
+        #[arg(short = 'f', long, value_name = "FACTOR")]
+        speed: Option<f64>,
+
+        /// Pitch factor (default: last used, else 1.0)
+        #[arg(long, value_name = "FACTOR")]
+        pitch: Option<f64>,
+
+        /// Starting EQ preset (default: last used, else off)
+        #[arg(long = "eq", value_enum)]
+        eq: Option<CliEq>,
+
+        /// Crossfade / audio-fade seconds between loads
+        #[arg(short = 'c', long, default_value_t = 0.0, value_name = "SECONDS")]
+        crossfade: f64,
+
+        /// Restart the radio when the queue ends (alias: --repeat)
+        #[arg(short = 'l', long = "loop", visible_alias = "repeat")]
+        loop_playlist: bool,
+
+        /// Repeat the current track only
+        #[arg(long = "loop-file", visible_alias = "repeat-one")]
+        loop_file: bool,
     },
 
     /// Print version
@@ -357,7 +437,7 @@ mod tests {
         match cli.command {
             Some(Command::Play { paths, volume, .. }) => {
                 assert_eq!(paths, vec![PathBuf::from("song.mp3")]);
-                assert_eq!(volume, 80);
+                assert_eq!(volume, None);
             }
             _ => panic!("expected play"),
         }
@@ -378,8 +458,8 @@ mod tests {
                 ..
             }) => {
                 assert!(paths.is_empty());
-                assert_eq!(volume, 50);
-                assert!((speed - 1.25).abs() < f64::EPSILON);
+                assert_eq!(volume, Some(50));
+                assert!((speed.unwrap() - 1.25).abs() < f64::EPSILON);
                 assert!((crossfade - 2.5).abs() < f64::EPSILON);
             }
             _ => panic!("expected play"),
@@ -413,8 +493,8 @@ mod tests {
             }) => {
                 assert!(loop_playlist);
                 assert!(!loop_file);
-                assert!(matches!(eq, CliEq::Bass));
-                assert!((pitch - 1.1).abs() < f64::EPSILON);
+                assert!(matches!(eq, Some(CliEq::Bass)));
+                assert!((pitch.unwrap() - 1.1).abs() < f64::EPSILON);
             }
             _ => panic!("expected play"),
         }
@@ -551,6 +631,73 @@ mod tests {
         match cli.command {
             Some(Command::Browse { favorites }) => assert!(favorites),
             _ => panic!("expected browse"),
+        }
+    }
+
+    #[test]
+    fn parses_stats_limit() {
+        let cli = Cli::parse_from(["msc", "stats", "-n", "5"]);
+        match cli.command {
+            Some(Command::Stats { limit }) => assert_eq!(limit, 5),
+            _ => panic!("expected stats"),
+        }
+    }
+
+    #[test]
+    fn parses_sleep_arg() {
+        let cli = Cli::parse_from(["msc", "sleep", "30"]);
+        match cli.command {
+            Some(Command::Sleep { arg }) => assert_eq!(arg.as_deref(), Some("30")),
+            _ => panic!("expected sleep"),
+        }
+        let cli = Cli::parse_from(["msc", "sleep", "off"]);
+        match cli.command {
+            Some(Command::Sleep { arg }) => assert_eq!(arg.as_deref(), Some("off")),
+            _ => panic!("expected sleep off"),
+        }
+    }
+
+    #[test]
+    fn parses_radio_defaults() {
+        let cli = Cli::parse_from(["msc", "radio"]);
+        match cli.command {
+            Some(Command::Radio {
+                seed,
+                artist,
+                genre,
+                fresh,
+                ..
+            }) => {
+                assert!(seed.is_none() && artist.is_none() && genre.is_none());
+                assert!(!fresh);
+            }
+            _ => panic!("expected radio"),
+        }
+    }
+
+    #[test]
+    fn parses_radio_seed_and_fresh() {
+        let cli = Cli::parse_from(["msc", "radio", "daft punk", "--fresh"]);
+        match cli.command {
+            Some(Command::Radio { seed, fresh, .. }) => {
+                assert_eq!(seed.as_deref(), Some("daft punk"));
+                assert!(fresh);
+            }
+            _ => panic!("expected radio with seed"),
+        }
+    }
+
+    #[test]
+    fn parses_radio_alias_and_genre() {
+        let cli = Cli::parse_from(["msc", "rd", "--genre", "trip-hop", "-v", "60"]);
+        match cli.command {
+            Some(Command::Radio {
+                genre, volume, ..
+            }) => {
+                assert_eq!(genre.as_deref(), Some("trip-hop"));
+                assert_eq!(volume, Some(60));
+            }
+            _ => panic!("expected radio via alias rd"),
         }
     }
 }

@@ -1,0 +1,32 @@
+[package]
+name = "optionmusic-gpui"
+version = "0.1.7"
+edition = "2024"
+rust-version = "1.97"
+description = "optionMusic — minimal black & white GPUI music player"
+authors = ["AEFireflyLabs"]
+license = "Apache-2.0"
+publish = false
+
+[[bin]]
+name = "optionmusic-gpui"
+path = "src/main.rs"
+
+[dependencies]
+optionmusic = { path = ".." }
+gpui = { git = "https://github.com/zed-industries/zed", rev = "7733b9922665f103abda7c6a3fde6b9dfdc8eba9", default-features = false }
+unicode-segmentation = "1.13.3"
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.150"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+gpui_platform = { git = "https://github.com/zed-industries/zed", rev = "7733b9922665f103abda7c6a3fde6b9dfdc8eba9", features = ["font-kit"] }
+
+[target.'cfg(any(target_os = "linux", target_os = "freebsd"))'.dependencies]
+gpui_platform = { git = "https://github.com/zed-industries/zed", rev = "7733b9922665f103abda7c6a3fde6b9dfdc8eba9", features = ["wayland", "x11"] }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+gpui_platform = { git = "https://github.com/zed-industries/zed", rev = "7733b9922665f103abda7c6a3fde6b9dfdc8eba9" }
+
+[dev-dependencies]
+gpui = { git = "https://github.com/zed-industries/zed", rev = "7733b9922665f103abda7c6a3fde6b9dfdc8eba9", default-features = false, features = ["test-support"] }

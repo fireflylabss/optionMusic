@@ -1,6 +1,7 @@
-//! In-player settings sidebar (`c`) — left overlay, persisted to config.toml.
+//! In-player settings card (`c`) — floating overlay, persisted to config.toml.
 
 use std::io::{self, Write};
+use std::time::Instant;
 
 use crossterm::{
     cursor::MoveTo,
@@ -8,7 +9,7 @@ use crossterm::{
     style::{Color, Print, ResetColor, SetBackgroundColor, SetForegroundColor},
 };
 
-use crate::config::{Accent, AppConfig, ArtistSource, DlUiMode};
+use crate::config::{Accent, AppConfig, ArtistSource, DlFallbackMode, DlUiMode, LyricsPos, ToastPos};
 use crate::ui::{DARK, DIM, GRAY};
 
 pub const SETTINGS_SIDEBAR_W: usize = 30;
@@ -50,12 +51,22 @@ impl RowHit {
     }
 }
 
+/// One painted row inside the card: a section label, a hairline, or an
+/// option row (`id` = cursor index handled by activate/nudge/reset).
+enum Line {
+    Head(&'static str),
+    Rule,
+    Opt(usize, &'static str, String),
+}
+
 pub struct SettingsUi {
     open: bool,
     screen: SettingsScreen,
     cursor: usize,
     hits: Vec<RowHit>,
     pane: Option<RowHit>,
+    opened_at: Option<Instant>,
+    closed_at: Option<Instant>,
 }
 
 impl Default for SettingsUi {
@@ -66,6 +77,8 @@ impl Default for SettingsUi {
             cursor: 0,
             hits: Vec::new(),
             pane: None,
+            opened_at: None,
+            closed_at: None,
         }
     }
 }
@@ -88,10 +101,15 @@ impl SettingsUi {
             self.cursor = 0;
             self.hits.clear();
             self.pane = None;
+            self.opened_at = Some(Instant::now());
+            self.closed_at = None;
         }
     }
 
     pub fn close(&mut self) {
+        if self.open {
+            self.closed_at = Some(Instant::now());
+        }
         self.open = false;
         self.screen = SettingsScreen::Main;
         self.cursor = 0;
@@ -99,9 +117,40 @@ impl SettingsUi {
         self.pane = None;
     }
 
+    /// Card pop progress 0..=1 — geometry only, never blocks input.
+    /// Open: ~140ms ease-out. Close: ~120ms shrink. LDM: instant.
+    pub fn anim_progress(&self, ldm: bool) -> f64 {
+        if self.open {
+            match self.opened_at {
+                Some(t) if !ldm => ease_out_cubic(t.elapsed().as_secs_f64() / 0.14),
+                _ => 1.0,
+            }
+        } else if ldm {
+            0.0
+        } else {
+            match self.closed_at {
+                Some(t) => {
+                    let e = t.elapsed().as_secs_f64() / 0.12;
+                    if e >= 1.0 {
+                        0.0
+                    } else {
+                        1.0 - ease_out_cubic(e)
+                    }
+                }
+                None => 0.0,
+            }
+        }
+    }
+
+    /// Floating card rect (x, y, w, h) from the last paint, if any.
+    pub fn pane_rect(&self) -> Option<(usize, usize, usize, usize)> {
+        self.pane
+            .map(|r| (r.x as usize, r.y as usize, r.w as usize, r.h as usize))
+    }
+
     fn len(&self) -> usize {
         match self.screen {
-            SettingsScreen::Main => 7,
+            SettingsScreen::Main => 13,
             SettingsScreen::Cava => 3,
         }
     }
@@ -119,6 +168,36 @@ impl SettingsUi {
         }
     }
 
+    /// True when the open card consumes this key itself (nav / edit / close).
+    /// Anything else (`v l n p s m e f r o …`) must fall through to the
+    /// global player shortcuts — the card has no text inputs to protect.
+    pub fn wants_key(&self, code: crossterm::event::KeyCode) -> bool {
+        use crossterm::event::KeyCode;
+        if !self.open {
+            return false;
+        }
+        matches!(
+            code,
+            KeyCode::Esc
+                | KeyCode::Enter
+                | KeyCode::Up
+                | KeyCode::Down
+                | KeyCode::Left
+                | KeyCode::Right
+                | KeyCode::Char('c')
+                | KeyCode::Char('q')
+                | KeyCode::Char('k')
+                | KeyCode::Char('j')
+                | KeyCode::Char('h')
+                | KeyCode::Char('-')
+                | KeyCode::Char('_')
+                | KeyCode::Char('+')
+                | KeyCode::Char('=')
+                | KeyCode::Char(' ')
+                | KeyCode::Char('d')
+        )
+    }
+
     pub fn handle_key(
         &mut self,
         code: crossterm::event::KeyCode,
@@ -134,7 +213,7 @@ impl SettingsUi {
             KeyCode::Esc | KeyCode::Char('c') | KeyCode::Char('q') => {
                 if self.screen == SettingsScreen::Cava {
                     self.screen = SettingsScreen::Main;
-                    self.cursor = 1;
+                    self.cursor = 5;
                     return SettingsAction::None;
                 }
                 self.close();
@@ -186,7 +265,7 @@ impl SettingsUi {
                 if hit.id == usize::MAX {
                     if self.screen == SettingsScreen::Cava {
                         self.screen = SettingsScreen::Main;
-                        self.cursor = 1;
+                        self.cursor = 5;
                         return SettingsAction::None;
                     }
                     self.close();
@@ -207,6 +286,12 @@ impl SettingsUi {
         self.open && self.pane.map(|r| r.contains(col, row)).unwrap_or(false)
     }
 
+    /// Clear paint-only state (hits/pane) without touching open/anim clocks.
+    pub fn close_paint_state(&mut self) {
+        self.hits.clear();
+        self.pane = None;
+    }
+
     fn activate(&mut self, cfg: &mut AppConfig) -> SettingsAction {
         match self.screen {
             SettingsScreen::Main => match self.cursor {
@@ -224,14 +309,35 @@ impl SettingsUi {
                     )
                 }
                 1 => {
-                    self.screen = SettingsScreen::Cava;
-                    self.cursor = 0;
-                    applied("cava styles", false, false)
+                    cfg.resume = !cfg.resume;
+                    if !cfg.resume {
+                        cfg.resume_track.clear();
+                        cfg.resume_position = 0.0;
+                        cfg.resume_queue.clear();
+                    }
+                    let _ = cfg.save();
+                    applied(
+                        if cfg.resume {
+                            "resume · on"
+                        } else {
+                            "resume · off"
+                        },
+                        false,
+                        false,
+                    )
                 }
                 2 => {
-                    cfg.ldm = !cfg.ldm;
+                    cfg.discord_rpc = !cfg.discord_rpc;
                     let _ = cfg.save();
-                    applied(if cfg.ldm { "ldm · on" } else { "ldm · off" }, false, false)
+                    applied(
+                        if cfg.discord_rpc {
+                            "discord rpc · on"
+                        } else {
+                            "discord rpc · off"
+                        },
+                        false,
+                        false,
+                    )
                 }
                 3 => {
                     cfg.accent = cfg.accent.next_preset();
@@ -239,11 +345,39 @@ impl SettingsUi {
                     applied(format!("accent · {}", cfg.accent.label()), false, false)
                 }
                 4 => {
-                    cfg.dl_ui = cfg.dl_ui.next();
+                    cfg.ldm = !cfg.ldm;
                     let _ = cfg.save();
-                    applied(format!("dl ui · {}", cfg.dl_ui.label()), false, false)
+                    applied(if cfg.ldm { "ldm · on" } else { "ldm · off" }, false, false)
                 }
                 5 => {
+                    self.screen = SettingsScreen::Cava;
+                    self.cursor = 0;
+                    applied("cava styles", false, false)
+                }
+                6 => {
+                    cfg.lyrics_pos = cfg.lyrics_pos.next();
+                    let _ = cfg.save();
+                    applied(format!("lyrics · {}", cfg.lyrics_pos.label()), false, false)
+                }
+                7 => {
+                    cfg.toast_pos = cfg.toast_pos.next();
+                    let _ = cfg.save();
+                    applied(format!("toast · {}", cfg.toast_pos.label()), false, false)
+                }
+                8 => {
+                    cfg.toast_stack = !cfg.toast_stack;
+                    let _ = cfg.save();
+                    applied(
+                        if cfg.toast_stack {
+                            "toast stack · on (up to 3)"
+                        } else {
+                            "toast stack · off (newest only)"
+                        },
+                        false,
+                        false,
+                    )
+                }
+                9 => {
                     cfg.artist_source = cfg.artist_source.next();
                     let _ = cfg.save();
                     applied(
@@ -252,7 +386,17 @@ impl SettingsUi {
                         false,
                     )
                 }
-                6 => {
+                10 => {
+                    cfg.dl_ui = cfg.dl_ui.next();
+                    let _ = cfg.save();
+                    applied(format!("dl ui · {}", cfg.dl_ui.label()), false, false)
+                }
+                11 => {
+                    cfg.dl_fallback = cfg.dl_fallback.next();
+                    let _ = cfg.save();
+                    applied(format!("dl fallback · {}", cfg.dl_fallback.label()), false, false)
+                }
+                12 => {
                     cfg.reset_all();
                     let _ = cfg.save();
                     applied("settings · reset defaults", true, true)
@@ -295,7 +439,7 @@ impl SettingsUi {
                 let _ = cfg.save();
                 applied(format!("accent · {}", cfg.accent.label()), false, false)
             }
-            SettingsScreen::Main if self.cursor == 4 => {
+            SettingsScreen::Main if self.cursor == 10 => {
                 cfg.dl_ui = if dir < 0 {
                     cfg.dl_ui.prev()
                 } else {
@@ -304,7 +448,7 @@ impl SettingsUi {
                 let _ = cfg.save();
                 applied(format!("dl ui · {}", cfg.dl_ui.label()), false, false)
             }
-            SettingsScreen::Main if self.cursor == 5 => {
+            SettingsScreen::Main if self.cursor == 9 => {
                 cfg.artist_source = if dir < 0 {
                     cfg.artist_source.prev()
                 } else {
@@ -317,8 +461,43 @@ impl SettingsUi {
                     false,
                 )
             }
-            SettingsScreen::Main if self.cursor == 0 || self.cursor == 2 => self.activate(cfg),
-            SettingsScreen::Main if self.cursor == 1 && dir > 0 => {
+            SettingsScreen::Main if self.cursor == 11 => {
+                cfg.dl_fallback = if dir < 0 {
+                    cfg.dl_fallback.prev()
+                } else {
+                    cfg.dl_fallback.next()
+                };
+                let _ = cfg.save();
+                applied(format!("dl fallback · {}", cfg.dl_fallback.label()), false, false)
+            }
+            SettingsScreen::Main if self.cursor == 7 => {
+                cfg.toast_pos = if dir < 0 {
+                    cfg.toast_pos.prev()
+                } else {
+                    cfg.toast_pos.next()
+                };
+                let _ = cfg.save();
+                applied(format!("toast · {}", cfg.toast_pos.label()), false, false)
+            }
+            SettingsScreen::Main
+                if self.cursor == 0
+                    || self.cursor == 1
+                    || self.cursor == 2
+                    || self.cursor == 4
+                    || self.cursor == 8 =>
+            {
+                self.activate(cfg)
+            }
+            SettingsScreen::Main if self.cursor == 6 => {
+                cfg.lyrics_pos = if dir < 0 {
+                    cfg.lyrics_pos.prev()
+                } else {
+                    cfg.lyrics_pos.next()
+                };
+                let _ = cfg.save();
+                applied(format!("lyrics · {}", cfg.lyrics_pos.label()), false, false)
+            }
+            SettingsScreen::Main if self.cursor == 5 && dir > 0 => {
                 self.screen = SettingsScreen::Cava;
                 self.cursor = 0;
                 applied("cava styles", false, false)
@@ -358,14 +537,14 @@ impl SettingsUi {
                     applied("excess volume · off", true, false)
                 }
                 1 => {
-                    cfg.cava.reset_defaults();
+                    cfg.resume = true;
                     let _ = cfg.save();
-                    applied("cava · reset defaults", false, true)
+                    applied("resume · on", false, false)
                 }
                 2 => {
-                    cfg.ldm = false;
+                    cfg.discord_rpc = false;
                     let _ = cfg.save();
-                    applied("ldm · off", false, false)
+                    applied("discord rpc · off", false, false)
                 }
                 3 => {
                     cfg.accent = Accent::Default;
@@ -373,16 +552,46 @@ impl SettingsUi {
                     applied("accent · default", false, false)
                 }
                 4 => {
-                    cfg.dl_ui = DlUiMode::Arrows;
+                    cfg.ldm = false;
                     let _ = cfg.save();
-                    applied("dl ui · arrows", false, false)
+                    applied("ldm · off", false, false)
                 }
                 5 => {
+                    cfg.cava.reset_defaults();
+                    let _ = cfg.save();
+                    applied("cava · reset defaults", false, true)
+                }
+                6 => {
+                    cfg.lyrics_pos = LyricsPos::Above;
+                    let _ = cfg.save();
+                    applied("lyrics · above", false, false)
+                }
+                7 => {
+                    cfg.toast_pos = ToastPos::BottomCenter;
+                    let _ = cfg.save();
+                    applied("toast · bottom-center", false, false)
+                }
+                8 => {
+                    cfg.toast_stack = false;
+                    let _ = cfg.save();
+                    applied("toast stack · off (newest only)", false, false)
+                }
+                9 => {
                     cfg.artist_source = ArtistSource::Metadata;
                     let _ = cfg.save();
                     applied("artists · metadata", false, false)
                 }
-                6 => {
+                10 => {
+                    cfg.dl_ui = DlUiMode::Arrows;
+                    let _ = cfg.save();
+                    applied("dl ui · arrows", false, false)
+                }
+                11 => {
+                    cfg.dl_fallback = DlFallbackMode::Ask;
+                    let _ = cfg.save();
+                    applied("dl fallback · ask", false, false)
+                }
+                12 => {
                     cfg.reset_all();
                     let _ = cfg.save();
                     applied("settings · reset defaults", true, true)
@@ -406,7 +615,10 @@ fn applied(message: impl Into<String>, sync_volume: bool, refresh_cava: bool) ->
     }
 }
 
-/// Solid left settings panel with inverted focus row (live values).
+/// Floating settings card — same overlay language as the `?` help card:
+/// solid panel, DARK hairline border, 1-col inner padding, DIM titles,
+/// inverted focus row, DARK footer hint. Anchors left by default; docks
+/// right when the playlist occupies the left slot (`anchor_right`).
 pub fn paint_settings_sidebar(
     out: &mut impl Write,
     cols: usize,
@@ -414,17 +626,78 @@ pub fn paint_settings_sidebar(
     ui: &mut SettingsUi,
     cfg: &AppConfig,
     accent: Color,
+    anchor_right: bool,
 ) -> io::Result<usize> {
-    if !ui.open {
+    let prog = ui.anim_progress(cfg.ldm).clamp(0.0, 1.0);
+    if !ui.open && prog <= 0.02 {
         ui.hits.clear();
         ui.pane = None;
         return Ok(0);
     }
+    let closing = !ui.open;
 
-    let sidebar_w = SETTINGS_SIDEBAR_W.min(cols.saturating_sub(8)).max(24);
-    let rule_x = sidebar_w.saturating_sub(1);
-    let text_x = 1usize;
-    let inner_w = sidebar_w.saturating_sub(3).max(12);
+    // Full card width (mirrors the help card's clamp language).
+    let box_w = if cols <= 24 {
+        cols.max(1)
+    } else {
+        SETTINGS_SIDEBAR_W.min(cols.saturating_sub(4)).max(24)
+    };
+
+    let title = match ui.screen {
+        SettingsScreen::Main => "settings",
+        SettingsScreen::Cava => "cava styles",
+    };
+
+    // Main screen is sectioned: Head rows group the option rows under them,
+    // Rule is a quiet divider. Cursors index Opt rows only — headers paint
+    // but never take focus or hits.
+    let lines: Vec<Line> = match ui.screen {
+        SettingsScreen::Main => vec![
+            Line::Head("player"),
+            Line::Opt(0, "Excess vol", on_off(cfg.excess_volume).into()),
+            Line::Opt(1, "Resume", on_off(cfg.resume).into()),
+            Line::Opt(2, "Discord", on_off(cfg.discord_rpc).into()),
+            Line::Head("interface"),
+            Line::Opt(3, "Accent", cfg.accent.label()),
+            Line::Opt(4, "LDM", on_off(cfg.ldm).into()),
+            Line::Opt(5, "Cava", "open ›".into()),
+            Line::Opt(6, "Lyrics", cfg.lyrics_pos.label().into()),
+            Line::Opt(7, "Toast pos", cfg.toast_pos.label().into()),
+            Line::Opt(8, "Toast stack", on_off(cfg.toast_stack).into()),
+            Line::Head("library & dl"),
+            Line::Opt(9, "Artists", cfg.artist_source.label().into()),
+            Line::Opt(10, "Dl UI", cfg.dl_ui.label().into()),
+            Line::Opt(11, "Dl fallbk", cfg.dl_fallback.label().into()),
+            Line::Rule,
+            Line::Opt(12, "Reset all", "defaults".into()),
+        ],
+        SettingsScreen::Cava => vec![
+            Line::Opt(0, "Style", cfg.cava.style.label().into()),
+            Line::Opt(1, "Height", cfg.cava.rows.to_string()),
+            Line::Opt(2, "Reset", "defaults".into()),
+        ],
+    };
+
+    let hint = match ui.screen {
+        SettingsScreen::Main => "↑↓ focus  enter set  c",
+        SettingsScreen::Cava => "↑↓ focus  ←→ set  esc",
+    };
+
+    // Borders (2) + inner pads (2) + title + hairline + rows + gap + hint.
+    let need = 4 + 1 + 1 + lines.len() + 1 + 1;
+    let box_h = need.min(rows.saturating_sub(1).max(5)).max(5);
+
+    // Pop geometry: left edge pinned, width/height ease to full.
+    let e = prog;
+    let (render_w, render_h) = if e >= 0.999 {
+        (box_w, box_h)
+    } else {
+        (
+            ((box_w as f64 * (0.55 + 0.45 * e)) as usize).max(16).min(box_w),
+            ((box_h as f64 * (0.6 + 0.4 * e)) as usize).max(5).min(box_h),
+        )
+    };
+
     let panel_bg = Color::Rgb {
         r: 22,
         g: 22,
@@ -433,21 +706,35 @@ pub fn paint_settings_sidebar(
     let focus_bg = accent;
     let focus_fg = Color::Black;
 
-    ui.hits.clear();
-    ui.pane = Some(RowHit {
-        x: 0,
-        y: 0,
-        w: sidebar_w as u16,
-        h: rows as u16,
-        id: 0,
-    });
+    // Pinned edge stable while popping; right side clears the list slot.
+    let x0 = if anchor_right {
+        cols.saturating_sub(render_w + 1)
+    } else {
+        1usize
+    };
+    let y0 = rows.saturating_sub(box_h) / 2;
+    let ry0 = y0 + (box_h - render_h) / 2;
+    let ry1 = ry0 + render_h - 1;
 
-    // Solid panel fill so options actually read as a sidebar.
-    let fill = " ".repeat(sidebar_w.saturating_sub(1));
-    for row in 0..rows {
+    ui.hits.clear();
+    ui.pane = if closing {
+        None
+    } else {
+        Some(RowHit {
+            x: x0 as u16,
+            y: ry0 as u16,
+            w: render_w as u16,
+            h: render_h as u16,
+            id: 0,
+        })
+    };
+
+    // Solid fill so the player never shows through.
+    let fill = " ".repeat(render_w);
+    for row in ry0..=ry1 {
         queue!(
             out,
-            MoveTo(0, row as u16),
+            MoveTo(x0 as u16, row as u16),
             SetBackgroundColor(panel_bg),
             SetForegroundColor(panel_bg),
             Print(&fill),
@@ -455,11 +742,38 @@ pub fn paint_settings_sidebar(
         )?;
     }
 
-    // Vertical rule
-    for row in 0..rows {
+    // Thin border — same DARK hairline language as the help card.
+    let edge = "─".repeat(render_w.saturating_sub(2));
+    let top = format!("┌{edge}┐");
+    let bot = format!("└{edge}┘");
+    queue!(
+        out,
+        MoveTo(x0 as u16, ry0 as u16),
+        SetBackgroundColor(panel_bg),
+        SetForegroundColor(DARK),
+        Print(&top),
+        ResetColor
+    )?;
+    queue!(
+        out,
+        MoveTo(x0 as u16, ry1 as u16),
+        SetBackgroundColor(panel_bg),
+        SetForegroundColor(DARK),
+        Print(&bot),
+        ResetColor
+    )?;
+    for row in (ry0 + 1)..ry1 {
         queue!(
             out,
-            MoveTo(rule_x as u16, row as u16),
+            MoveTo(x0 as u16, row as u16),
+            SetBackgroundColor(panel_bg),
+            SetForegroundColor(DARK),
+            Print("│"),
+            ResetColor
+        )?;
+        queue!(
+            out,
+            MoveTo((x0 + render_w - 1) as u16, row as u16),
             SetBackgroundColor(panel_bg),
             SetForegroundColor(DARK),
             Print("│"),
@@ -467,32 +781,13 @@ pub fn paint_settings_sidebar(
         )?;
     }
 
-    let title = match ui.screen {
-        SettingsScreen::Main => "settings",
-        SettingsScreen::Cava => "cava styles",
-    };
-
-    let lines: Vec<(usize, &'static str, String)> = match ui.screen {
-        SettingsScreen::Main => vec![
-            (0, "Excess vol", on_off(cfg.excess_volume).into()),
-            (1, "Cava", "open ›".into()),
-            (2, "LDM", on_off(cfg.ldm).into()),
-            (3, "Accent", cfg.accent.label()),
-            (4, "Dl UI", cfg.dl_ui.label().into()),
-            (5, "Artists", cfg.artist_source.label().into()),
-            (6, "Reset all", "defaults".into()),
-        ],
-        SettingsScreen::Cava => vec![
-            (0, "Style", cfg.cava.style.label().into()),
-            (1, "Height", cfg.cava.rows.to_string()),
-            (2, "Reset", "defaults".into()),
-        ],
-    };
-
-    let content_h = 3 + lines.len() + 3; // title + blank + rows + preview + hint
-    let mut y = rows.saturating_sub(content_h) / 2;
-    if y < 1 {
-        y = 1;
+    // Body with 1-col padding inside the border; clipped while popping.
+    let text_x = x0 + 2;
+    let inner_w = render_w.saturating_sub(4).max(8);
+    let last = ry1.saturating_sub(1);
+    let mut y = ry0 + 2;
+    if y > last {
+        return Ok(render_w);
     }
 
     paint_panel_line(
@@ -501,90 +796,115 @@ pub fn paint_settings_sidebar(
         y,
         inner_w,
         panel_bg,
-        accent,
-        &format!(" {title}"),
+        DIM,
+        title,
         "",
         false,
         focus_bg,
         focus_fg,
     )?;
-    y += 2;
+    y += 1;
+    if y > last {
+        return Ok(render_w);
+    }
 
-    for (id, label, value) in &lines {
-        if y >= rows.saturating_sub(3) {
+    // Quiet hairline under the title — separates chrome from options.
+    queue!(
+        out,
+        MoveTo(text_x as u16, y as u16),
+        SetBackgroundColor(panel_bg),
+        SetForegroundColor(DARK),
+        Print(&"─".repeat(inner_w)),
+        ResetColor
+    )?;
+    y += 1;
+    if y > last {
+        return Ok(render_w);
+    }
+
+    for line in &lines {
+        if y > last.saturating_sub(3) {
             break;
         }
-        let selected = ui.cursor == *id;
-        paint_panel_line(
-            out,
-            text_x,
-            y,
-            inner_w,
-            panel_bg,
-            if selected { focus_fg } else { GRAY },
-            label,
-            value,
-            selected,
-            focus_bg,
-            focus_fg,
-        )?;
-        ui.hits.push(RowHit {
-            x: 0,
-            y: y as u16,
-            w: rule_x as u16,
-            h: 1,
-            id: *id,
-        });
-        y += 1;
-    }
-
-    // Live preview strip — always reflects current config.
-    y += 1;
-    if y < rows.saturating_sub(2) {
-        let preview = format!(
-            " live {} · ldm {} · {}",
-            cfg.accent.label(),
-            on_off(cfg.ldm),
-            if cfg.excess_volume {
-                "vol≤200"
-            } else {
-                "vol≤100"
+        match line {
+            Line::Head(name) => {
+                // `name ──────────` hairline label in the dimmest ink.
+                let rule = "─".repeat(inner_w.saturating_sub(name.len() + 3));
+                paint_panel_line(
+                    out,
+                    text_x,
+                    y,
+                    inner_w,
+                    panel_bg,
+                    DARK,
+                    &format!("{name} {rule}"),
+                    "",
+                    false,
+                    focus_bg,
+                    focus_fg,
+                )?;
             }
-        );
-        paint_panel_line(
-            out,
-            text_x,
-            y,
-            inner_w,
-            panel_bg,
-            accent,
-            &truncate_fit(&preview, inner_w),
-            "",
-            false,
-            focus_bg,
-            focus_fg,
-        )?;
+            Line::Rule => {
+                queue!(
+                    out,
+                    MoveTo(text_x as u16, y as u16),
+                    SetBackgroundColor(panel_bg),
+                    SetForegroundColor(DARK),
+                    Print(&"─".repeat(inner_w)),
+                    ResetColor
+                )?;
+            }
+            Line::Opt(id, label, value) => {
+                let selected = ui.cursor == *id && !closing;
+                paint_panel_line(
+                    out,
+                    text_x,
+                    y,
+                    inner_w,
+                    panel_bg,
+                    if selected { focus_fg } else { GRAY },
+                    label,
+                    value,
+                    selected,
+                    focus_bg,
+                    focus_fg,
+                )?;
+                if !closing {
+                    ui.hits.push(RowHit {
+                        x: x0 as u16,
+                        y: y as u16,
+                        w: render_w as u16,
+                        h: 1,
+                        id: *id,
+                    });
+                }
+            }
+        }
         y += 1;
     }
 
-    if y < rows.saturating_sub(1) {
-        let hint = match ui.screen {
-            SettingsScreen::Main => "↑↓ focus  enter set  c",
-            SettingsScreen::Cava => "↑↓ focus  ←→ set  esc",
-        };
+    y += 1;
+    if y <= last {
         paint_panel_line(
-            out, text_x, y, inner_w, panel_bg, DIM, hint, "", false, focus_bg, focus_fg,
+            out, text_x, y, inner_w, panel_bg, DARK, hint, "", false, focus_bg, focus_fg,
         )?;
-        ui.hits.push(RowHit {
-            x: 0,
-            y: y as u16,
-            w: rule_x as u16,
-            h: 1,
-            id: usize::MAX,
-        });
+        if !closing {
+            ui.hits.push(RowHit {
+                x: x0 as u16,
+                y: y as u16,
+                w: render_w as u16,
+                h: 1,
+                id: usize::MAX,
+            });
+        }
     }
 
-    Ok(sidebar_w)
+    Ok(render_w)
+}
+
+fn ease_out_cubic(t: f64) -> f64 {
+    let t = t.clamp(0.0, 1.0);
+    1.0 - (1.0 - t).powi(3)
 }
 
 fn paint_panel_line(
@@ -602,10 +922,13 @@ fn paint_panel_line(
 ) -> io::Result<()> {
     let marker = if selected { "▌ " } else { "  " };
     let left = format!("{marker}{label}");
+    // Value column: fit whatever space the label leaves (was a fixed 10,
+    // which clipped "bottom-center").
+    let right_max = inner_w.saturating_sub(left.chars().count() + 1).max(6);
     let right = if value.is_empty() {
         String::new()
     } else {
-        truncate_fit(value, 10)
+        truncate_fit(value, right_max)
     };
     let used = left.chars().count() + right.chars().count();
     let gap_n = inner_w

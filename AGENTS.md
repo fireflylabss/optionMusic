@@ -55,7 +55,7 @@ See [VERSIONING.md](VERSIONING.md) and the blurb in [CHANGELOG.md](CHANGELOG.md)
 - Desktop and CLI are **independent** version lines; changelog headings use Option style (`## v0.1.2-beta · DD/MM/YYYY`, or `## v0.2.12m-beta · …` when both surfaces change).
 - Mixed releases: insert `m` before the channel, heavier surface section first.
 - Do **not** label something `stable` unless it is actually release-ready.
-- Prefer **beta** for desktop while the Tauri shell is still maturing; use **alpha** only for brand-new / half-built surfaces.
+- Prefer **beta** for desktop while the GPUI shell is still maturing; use **alpha** only for brand-new / half-built surfaces.
 - Alpha/beta desktop builds are normally changelog + local/dev artifacts — not GitHub Release / AUR — unless the user explicitly promotes a **stable** cut.
 
 When documenting uncommitted desktop work, prepend or expand the matching `vX.Y.Z[-m]-<channel>` entry rather than inventing a parallel scheme.

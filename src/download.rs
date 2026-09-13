@@ -16,8 +16,84 @@ use crossterm::style::Stylize;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::config::config_dir;
+use crate::config::{DlFallbackMode, cache_dir};
 use crate::ui::{BRIGHT, DIM, GRAY, print_info, print_success, print_warn};
+
+/// Extra extractor-args value used for the 403/PO-token fallback retry.
+pub const MWEB_FALLBACK_EXTRACTOR_ARG: &str = "youtube:player_client=mweb";
+
+/// True when yt-dlp stderr/status looks like a YouTube 403 / SABR / PO-token
+/// failure worth retrying with the mweb player client.
+pub fn is_retryable_download_error(output: &str) -> bool {
+    let lower = output.to_ascii_lowercase();
+    const NEEDLES: &[&str] = &[
+        "403",
+        "forbidden",
+        "po token",
+        "po_token",
+        "sabr",
+        "requested format is not available",
+        "unable to download video data",
+    ];
+    NEEDLES.iter().any(|n| lower.contains(n))
+}
+
+/// Append a second `--extractor-args youtube:player_client=mweb` pair.
+/// yt-dlp accepts repeated `--extractor-args`, so we never merge with the
+/// existing `youtube:skip=translated_subs` flag.
+pub fn with_mweb_fallback(args: &[String]) -> Vec<String> {
+    let mut out = args.to_vec();
+    out.insert(
+        out.len().saturating_sub(1),
+        "--extractor-args".to_string(),
+    );
+    out.insert(
+        out.len().saturating_sub(1),
+        MWEB_FALLBACK_EXTRACTOR_ARG.to_string(),
+    );
+    out
+}
+
+/// CLI flags win over config: `--fallback-mweb` → Auto, `--no-fallback` → Off.
+pub fn resolve_fallback_policy(
+    fallback_mweb: bool,
+    no_fallback: bool,
+    cfg: DlFallbackMode,
+) -> DlFallbackMode {
+    if fallback_mweb {
+        DlFallbackMode::Auto
+    } else if no_fallback {
+        DlFallbackMode::Off
+    } else {
+        cfg
+    }
+}
+
+fn stdin_is_tty() -> bool {
+    use std::io::IsTerminal;
+    std::io::stdin().is_terminal()
+}
+
+/// Ask `[s/N]` on interactive TTYs. Returns true when the user opts in.
+fn ask_mweb_retry() -> bool {
+    use std::io::IsTerminal;
+    if !std::io::stdin().is_terminal() {
+        return false;
+    }
+    let mut stdout = io::stdout();
+    let _ = write!(
+        stdout,
+        "  {} {} ",
+        "?".with(DIM),
+        "403/blocked? retry with mweb fallback? [y/N]".with(GRAY)
+    );
+    let _ = stdout.flush();
+    let mut line = String::new();
+    if io::stdin().read_line(&mut line).is_err() {
+        return false;
+    }
+    matches!(line.trim().to_ascii_lowercase().as_str(), "s" | "sim" | "y" | "yes")
+}
 
 pub(crate) const PAGE_SIZE: usize = 8;
 const SEARCH_FETCH: usize = 40; // up to 5 pages
@@ -343,7 +419,7 @@ struct SearchCacheFile {
 }
 
 fn cache_root() -> PathBuf {
-    config_dir().join("cache").join("dl")
+    cache_dir().join("dl")
 }
 
 fn now_unix() -> u64 {
@@ -411,7 +487,8 @@ fn save_search_cache(provider: Provider, query: &str, results: &[SearchHit]) -> 
     };
     let path = root.join(format!("{}.json", cache_key(provider, query)));
     let body = serde_json::to_string_pretty(&file).context("serialize search cache")?;
-    fs::write(&path, body).with_context(|| format!("write {}", path.display()))?;
+    option_sdk::atomic_write(&path, body.as_bytes())
+        .with_context(|| format!("write {}", path.display()))?;
     Ok(())
 }
 
@@ -582,7 +659,7 @@ pub(crate) fn probe_items(items: &mut [MediaItem]) -> Result<()> {
 }
 
 fn preview_cache_dir() -> PathBuf {
-    config_dir().join("cache").join("preview")
+    cache_dir().join("preview")
 }
 
 /// Download best audio (no remux) into the preview cache; return the local file path.
@@ -757,23 +834,91 @@ pub fn build_args(req: &DownloadRequest) -> Vec<String> {
     build_args_for_url(&input, &opts)
 }
 
-fn run_one_pass(yt: &str, url: &str, opts: &DownloadOptions, pass: Pass) -> Result<()> {
+fn run_one_pass(
+    yt: &str,
+    url: &str,
+    opts: &DownloadOptions,
+    pass: Pass,
+    fallback: DlFallbackMode,
+) -> Result<()> {
     let args = build_args_pass(url, opts, pass);
-    let status = Command::new(yt)
-        .args(&args)
-        .stdin(Stdio::null())
-        .stdout(Stdio::inherit())
-        .stderr(Stdio::inherit())
-        .status()
-        .with_context(|| format!("failed to spawn {yt}"))?;
-    if !status.success() {
-        let code = status.code().unwrap_or(-1);
-        bail!("yt-dlp exited with status {code}");
+    match run_captured(yt, &args) {
+        Ok(()) => Ok(()),
+        Err(first_err) => {
+            if !is_retryable_download_error(&first_err) {
+                bail!("{first_err}");
+            }
+            match fallback {
+                DlFallbackMode::Off => {
+                    print_warn(
+                        "retryable 403/block detected (fallback off: --fallback-mweb or dl_fallback=auto)",
+                    );
+                    bail!("{first_err}");
+                }
+                DlFallbackMode::Auto => {
+                    print_info("retry      trying mweb fallback (auto)…");
+                }
+                DlFallbackMode::Ask => {
+                    if !stdin_is_tty() {
+                        print_warn(
+                            "retryable 403/block detected (non-TTY: use --fallback-mweb to retry)",
+                        );
+                        bail!("{first_err}");
+                    }
+                    if !ask_mweb_retry() {
+                        bail!("{first_err}");
+                    }
+                }
+            }
+            let retry_args = with_mweb_fallback(&args);
+            print_info("retry      yt-dlp with youtube:player_client=mweb…");
+            match run_captured(yt, &retry_args) {
+                Ok(()) => {
+                    print_success("fallback mweb ok");
+                    Ok(())
+                }
+                Err(retry_err) => {
+                    bail!("{first_err}\nfallback mweb also failed: {retry_err}");
+                }
+            }
+        }
     }
-    Ok(())
 }
 
-pub fn run_batch(items: &[MediaItem], opts: &DownloadOptions) -> Result<()> {
+/// Spawn yt-dlp with piped output, forward it to the inherited stdio so
+/// `--newline` progress still shows, and return the combined output text
+/// on failure for retryable-error detection.
+fn run_captured(yt: &str, args: &[String]) -> std::result::Result<(), String> {
+    let output = Command::new(yt)
+        .args(args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .map_err(|e| format!("failed to spawn {yt}: {e:#}"))?;
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    if !stdout.is_empty() {
+        print!("{stdout}");
+        let _ = io::stdout().flush();
+    }
+    if !stderr.is_empty() {
+        eprint!("{stderr}");
+        let _ = io::stderr().flush();
+    }
+    if output.status.success() {
+        return Ok(());
+    }
+    let code = output.status.code().unwrap_or(-1);
+    let combined = format!("yt-dlp exited with status {code}\n{stdout}\n{stderr}");
+    Err(combined)
+}
+
+pub fn run_batch(
+    items: &[MediaItem],
+    opts: &DownloadOptions,
+    fallback: DlFallbackMode,
+) -> Result<()> {
     let yt = ensure_yt_dlp()?;
     if opts.kind.wants_audio() && !ffmpeg_available() {
         print_warn("ffmpeg not found — audio extract/convert may fail");
@@ -807,14 +952,14 @@ pub fn run_batch(items: &[MediaItem], opts: &DownloadOptions) -> Result<()> {
         let mut ok = true;
         if opts.kind.wants_video() {
             print_info("pass      video");
-            if let Err(e) = run_one_pass(&yt, &item.url, opts, Pass::Video) {
+            if let Err(e) = run_one_pass(&yt, &item.url, opts, Pass::Video, fallback) {
                 print_warn(&format!("video failed: {e:#}"));
                 ok = false;
             }
         }
         if opts.kind.wants_audio() {
             print_info("pass      audio");
-            if let Err(e) = run_one_pass(&yt, &item.url, opts, Pass::Audio) {
+            if let Err(e) = run_one_pass(&yt, &item.url, opts, Pass::Audio, fallback) {
                 print_warn(&format!("audio failed: {e:#}"));
                 ok = false;
             }
@@ -837,7 +982,7 @@ pub fn run_batch(items: &[MediaItem], opts: &DownloadOptions) -> Result<()> {
     Ok(())
 }
 
-pub fn run_download(req: &DownloadRequest) -> Result<()> {
+pub fn run_download(req: &DownloadRequest, fallback: DlFallbackMode) -> Result<()> {
     let url = resolve_input(&req.query, req.provider);
     let item = MediaItem {
         title: url.clone(),
@@ -856,7 +1001,7 @@ pub fn run_download(req: &DownloadRequest) -> Result<()> {
         embed_subs: false,
         output_dir: req.output_dir.clone(),
     };
-    run_batch(std::slice::from_ref(&item), &opts)
+    run_batch(std::slice::from_ref(&item), &opts, fallback)
 }
 
 /// Output dir: explicit → else cwd. (`music_dir_flag` kept for CLI `-m` override).
@@ -894,6 +1039,7 @@ pub fn run_interactive(
     prefill_output: Option<&Path>,
     audio_format: &str,
     ui_mode: crate::config::DlUiMode,
+    fallback: DlFallbackMode,
 ) -> Result<()> {
     match ui_mode {
         crate::config::DlUiMode::Arrows => crate::dl_ui::run_interactive_arrows(
@@ -903,6 +1049,7 @@ pub fn run_interactive(
             prefill_kind,
             prefill_output,
             audio_format,
+            fallback,
         ),
         crate::config::DlUiMode::Type => run_interactive_type(
             music_dir_flag,
@@ -911,6 +1058,7 @@ pub fn run_interactive(
             prefill_kind,
             prefill_output,
             audio_format,
+            fallback,
         ),
     }
 }
@@ -922,6 +1070,7 @@ fn run_interactive_type(
     prefill_kind: Option<MediaKind>,
     prefill_output: Option<&Path>,
     _audio_format: &str,
+    fallback: DlFallbackMode,
 ) -> Result<()> {
     ensure_yt_dlp()?;
     purge_expired_cache();
@@ -1027,7 +1176,7 @@ fn run_interactive_type(
         bail!("cancelled");
     }
     println!();
-    run_batch(&items, &opts)
+    run_batch(&items, &opts, fallback)
 }
 
 pub(crate) fn yn(v: bool) -> &'static str {
@@ -1635,5 +1784,70 @@ mod tests {
     fn both_kind_wants_audio_and_video() {
         assert!(MediaKind::Both.wants_audio());
         assert!(MediaKind::Both.wants_video());
+    }
+
+    #[test]
+    fn retryable_errors_detected() {
+        assert!(is_retryable_download_error("ERROR: 403 Forbidden"));
+        assert!(is_retryable_download_error("Sign in to confirm… PO Token missing"));
+        assert!(is_retryable_download_error("po_token refresh failed"));
+        assert!(is_retryable_download_error("SABR streaming failed"));
+        assert!(is_retryable_download_error(
+            "ERROR: Requested format is not available"
+        ));
+        assert!(is_retryable_download_error(
+            "ERROR: unable to download video data"
+        ));
+        assert!(!is_retryable_download_error(
+            "ERROR: Video unavailable — private video"
+        ));
+        assert!(!is_retryable_download_error("yt-dlp exited with status 1"));
+    }
+
+    #[test]
+    fn mweb_fallback_appends_repeated_extractor_args() {
+        let opts = DownloadOptions {
+            kind: MediaKind::Video,
+            format_selector: "bv*+ba/b".into(),
+            container: "mp4".into(),
+            audio_format: "m4a".into(),
+            audio_quality: "0".into(),
+            embed_thumbnail: false,
+            embed_metadata: false,
+            embed_subs: true,
+            output_dir: PathBuf::from("/tmp"),
+        };
+        let base = build_args_for_url("https://youtu.be/abc", &opts);
+        // base already carries the subs skip flag
+        assert!(base.iter().any(|a| a == "youtube:skip=translated_subs"));
+        let retry = with_mweb_fallback(&base);
+        assert!(retry.iter().any(|a| a == "youtube:player_client=mweb"));
+        // repeated flag (original kept) + url still last
+        assert_eq!(
+            retry.iter().filter(|a| *a == "--extractor-args").count(),
+            base.iter().filter(|a| *a == "--extractor-args").count() + 1
+        );
+        assert_eq!(retry.last().map(String::as_str), Some("https://youtu.be/abc"));
+    }
+
+    #[test]
+    fn fallback_policy_cli_wins_over_config() {
+        use crate::config::DlFallbackMode;
+        assert_eq!(
+            resolve_fallback_policy(true, false, DlFallbackMode::Off),
+            DlFallbackMode::Auto
+        );
+        assert_eq!(
+            resolve_fallback_policy(false, true, DlFallbackMode::Auto),
+            DlFallbackMode::Off
+        );
+        assert_eq!(
+            resolve_fallback_policy(false, false, DlFallbackMode::Auto),
+            DlFallbackMode::Auto
+        );
+        assert_eq!(
+            resolve_fallback_policy(false, false, DlFallbackMode::Ask),
+            DlFallbackMode::Ask
+        );
     }
 }

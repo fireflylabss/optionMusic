@@ -1,6 +1,6 @@
 [package]
 name = "optionmusic"
-version = "0.2.14"
+version = "0.2.17"
 edition = "2024"
 rust-version = "1.85"
 description = "optionMusic — minimal black & white CLI music player"
@@ -32,6 +32,7 @@ toml = "0.8"
 serde_json = "1.0.150"
 lofty = "0.24"
 base64 = "0.22"
+discord-rich-presence = "1.1.0"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

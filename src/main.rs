@@ -15,15 +15,19 @@ use crossterm::event::{
 use crossterm::style::Stylize;
 
 use optionmusic::cli::{Cli, Command, LibraryCmd, PlaylistCmd};
-use optionmusic::config::resolve_music_dir;
+use optionmusic::config::{AppConfig, RepeatMode, resolve_music_dir};
 use optionmusic::download::{self, DownloadRequest, MediaKind};
 use optionmusic::library::Library;
+use optionmusic::lyrics::{ResolvedLyrics, resolve_lyrics};
 use optionmusic::player::Player;
 use optionmusic::playlist::Playlist;
 use optionmusic::settings::SettingsAction;
+use optionmusic::sleep::SleepTimer;
+use optionmusic::smart_shuffle::RecentWindow;
+use optionmusic::stats::{StatsStore, should_count_play};
 use optionmusic::ui::{
-    APP_NAME, BRIGHT, DIM, FrameState, GRAY, HitTarget, SessionUi, WHITE, banner, bin_name,
-    print_info, print_success, print_warn,
+    APP_NAME, BRIGHT, DIM, BarClick, FrameState, GRAY, HitTarget, SessionUi, WHITE, banner,
+    bin_name, print_info, print_success, print_warn,
 };
 
 fn main() {
@@ -43,7 +47,8 @@ fn parse_cli() -> Cli {
         let first = raw[1].as_str();
         const CMDS: &[&str] = &[
             "play", "p", "pl", "info", "i", "list", "ls", "download", "dl", "d", "library", "lib",
-            "browse", "br", "version", "ver", "help",
+            "browse", "br", "stats", "stat", "st", "sleep", "radio", "rd", "mix", "version", "ver",
+            "help",
         ];
         if !first.starts_with('-') && !CMDS.iter().any(|c| *c == first) {
             let mut rewritten = Vec::with_capacity(raw.len() + 1);
@@ -74,25 +79,36 @@ fn run() -> Result<()> {
             loop_file,
             interactive: _,
         }) => {
-            let paths = resolve_play_paths(paths, &cli.music_dir)?;
-            let loop_mode = if loop_file {
-                LoopMode::Track
+            // Bare `play` (no paths, no playback flags) may resume the saved
+            // session instead of starting a fresh library scan.
+            let bare = paths.is_empty()
+                && volume.is_none()
+                && speed.is_none()
+                && pitch.is_none()
+                && eq.is_none()
+                && !shuffle
+                && !loop_playlist
+                && !loop_file;
+            let loop_flag = if loop_file {
+                Some(LoopMode::Track)
             } else if loop_playlist {
-                LoopMode::Playlist
+                Some(LoopMode::Playlist)
             } else {
-                LoopMode::Off
+                None
             };
+            let paths = resolve_play_paths(paths, &cli.music_dir)?;
             cmd_play(
                 paths,
                 volume,
                 speed,
                 pitch,
-                eq.to_preset(),
+                eq.map(|e| e.to_preset()),
                 crossfade,
                 shuffle,
-                loop_mode,
+                loop_flag,
                 cli.cava,
                 quiet,
+                bare,
             )?;
         }
         Some(Command::Info { path }) => {
@@ -122,6 +138,8 @@ fn run() -> Result<()> {
             audio_format,
             interactive,
             ui,
+            fallback_mweb,
+            no_fallback,
         }) => {
             if !quiet {
                 banner();
@@ -136,6 +154,8 @@ fn run() -> Result<()> {
                 &audio_format,
                 interactive,
                 ui.map(|u| u.to_mode()),
+                fallback_mweb,
+                no_fallback,
                 &cli.music_dir,
             )?;
         }
@@ -156,6 +176,54 @@ fn run() -> Result<()> {
                 banner();
             }
             cmd_browse(favorites, &cli.music_dir, cli.cava)?;
+        }
+        Some(Command::Stats { limit }) => {
+            if !quiet {
+                banner();
+            }
+            cmd_stats(limit)?
+        }
+        Some(Command::Sleep { arg }) => {
+            if !quiet {
+                banner();
+            }
+            cmd_sleep(arg.as_deref())?
+        }
+        Some(Command::Radio {
+            seed,
+            artist,
+            genre,
+            fresh,
+            volume,
+            speed,
+            pitch,
+            eq,
+            crossfade,
+            loop_playlist,
+            loop_file,
+        }) => {
+            let loop_flag = if loop_file {
+                Some(LoopMode::Track)
+            } else if loop_playlist {
+                Some(LoopMode::Playlist)
+            } else {
+                None
+            };
+            cmd_radio(
+                seed,
+                artist,
+                genre,
+                fresh,
+                volume,
+                speed,
+                pitch,
+                eq.map(|e| e.to_preset()),
+                crossfade,
+                loop_flag,
+                &cli.music_dir,
+                cli.cava,
+                quiet,
+            )?;
         }
         Some(Command::Version) => {
             println!(
@@ -198,21 +266,35 @@ fn resolve_play_paths(paths: Vec<PathBuf>, music_dir_flag: &str) -> Result<Vec<P
     Ok(vec![dir])
 }
 
+#[allow(clippy::too_many_arguments)]
 fn cmd_play(
     paths: Vec<PathBuf>,
-    volume: u8,
-    speed: f64,
-    pitch: f64,
-    eq: optionmusic::eq::EqPreset,
+    volume: Option<u8>,
+    speed: Option<f64>,
+    pitch: Option<f64>,
+    eq: Option<optionmusic::eq::EqPreset>,
     crossfade: f64,
     shuffle: bool,
-    loop_mode: LoopMode,
+    loop_flag: Option<LoopMode>,
     enable_cava: bool,
     quiet: bool,
+    bare: bool,
 ) -> Result<()> {
     if paths.is_empty() {
         anyhow::bail!("pass at least one file or directory to play");
     }
+
+    // Saved playback prefs are the defaults; explicit CLI flags always win.
+    let prefs = AppConfig::load();
+    let volume = volume.unwrap_or(prefs.volume);
+    let speed = speed.unwrap_or(prefs.speed);
+    let pitch = pitch.unwrap_or(prefs.pitch);
+    let eq = eq.unwrap_or(prefs.eq);
+    let loop_mode = loop_flag.unwrap_or(match prefs.repeat {
+        RepeatMode::Off => LoopMode::Off,
+        RepeatMode::All => LoopMode::Playlist,
+        RepeatMode::One => LoopMode::Track,
+    });
 
     let mut playlist = Playlist::from_paths(&paths)?;
     if playlist.is_empty() {
@@ -223,13 +305,37 @@ fn cmd_play(
         playlist.shuffle();
     }
 
-    let mut player = Player::new(volume, speed, crossfade)?;
+    // Session resume: bare `play` restores the saved queue order and seeks
+    // back to the saved track/position, paused (same idea as the old desktop).
+    let mut resume_at: Option<(usize, f64)> = None;
+    if bare && prefs.resume && !prefs.resume_track.is_empty() {
+        resume_at = playlist
+            .resume_order(&prefs.resume_queue, &prefs.resume_track)
+            .map(|i| (i, prefs.resume_position));
+    }
+
+    let mut player = Player::new(
+        volume.min(optionmusic::config::VOLUME_MAX_EXCESS),
+        speed,
+        crossfade,
+    )?;
+    player.set_volume_max(prefs.volume_max());
+    player.set_volume(volume);
     player.set_pitch(pitch);
     player.set_eq(eq);
     player.set_loop_track(loop_mode == LoopMode::Track);
 
     if io::stdin().is_terminal() && io::stdout().is_terminal() {
-        run_session(&mut player, &mut playlist, loop_mode, shuffle, enable_cava)?;
+        run_session(
+            &mut player,
+            &mut playlist,
+            loop_mode,
+            shuffle,
+            enable_cava,
+            resume_at,
+            prefs.smart_shuffle,
+            None,
+        )?;
     } else {
         if !quiet {
             banner();
@@ -246,6 +352,9 @@ fn cmd_play(
 }
 
 fn run_plain(player: &mut Player, playlist: &mut Playlist, loop_playlist: bool) -> Result<()> {
+    let mut rpc = optionmusic::rpc::Rpc::new();
+    let cfg = AppConfig::load();
+    let _ = rpc.sync(cfg.discord_rpc, &cfg.discord_rpc_id);
     loop {
         for (idx, track) in playlist.tracks().iter().enumerate() {
             print_info(&format!(
@@ -256,6 +365,14 @@ fn run_plain(player: &mut Player, playlist: &mut Playlist, loop_playlist: bool) 
             ));
             player.play_file(&track.path)?;
             while !player.is_idle() {
+                rpc.update(
+                    &track.display_name(),
+                    &track.artist_album(),
+                    track.thumb_url().as_deref(),
+                    player.position(),
+                    player.duration(),
+                    false,
+                );
                 std::thread::sleep(Duration::from_millis(100));
             }
         }
@@ -263,16 +380,68 @@ fn run_plain(player: &mut Player, playlist: &mut Playlist, loop_playlist: bool) 
             break;
         }
     }
+    rpc.clear();
     print_success("Done. Thanks for listening ♪");
     Ok(())
 }
 
+/// Persist playback prefs + session (track/pos/queue) into shared config.toml.
+/// One switch (`resume`) gates everything; called on quit and periodically.
+/// `session_alive=false` (playlist finished naturally) clears the resume fields
+/// so a completed queue doesn't reopen next launch.
+#[allow(clippy::too_many_arguments)]
+fn save_session(
+    ui: &mut SessionUi,
+    player: &Player,
+    playlist: &Playlist,
+    index: usize,
+    loop_mode: LoopMode,
+    smart: bool,
+    session_alive: bool,
+) {
+    let cfg = ui.config_mut();
+    if !cfg.resume {
+        return;
+    }
+    cfg.volume = player.volume();
+    cfg.eq = player.eq();
+    cfg.repeat = match loop_mode {
+        LoopMode::Off => RepeatMode::Off,
+        LoopMode::Playlist => RepeatMode::All,
+        LoopMode::Track => RepeatMode::One,
+    };
+    cfg.speed = player.speed();
+    cfg.pitch = player.pitch();
+    cfg.smart_shuffle = smart;
+    if session_alive {
+        cfg.resume_track = playlist
+            .get(index)
+            .map(|t| t.path.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        cfg.resume_position = player.resume_position().as_secs_f64();
+        cfg.resume_queue = playlist
+            .tracks()
+            .iter()
+            .map(|t| t.path.to_string_lossy().into_owned())
+            .collect();
+    } else {
+        cfg.resume_track.clear();
+        cfg.resume_position = 0.0;
+        cfg.resume_queue.clear();
+    }
+    let _ = cfg.save();
+}
+
+#[allow(clippy::too_many_arguments)]
 fn run_session(
     player: &mut Player,
     playlist: &mut Playlist,
     mut loop_mode: LoopMode,
     shuffled: bool,
     enable_cava: bool,
+    resume_at: Option<(usize, f64)>,
+    initial_smart: bool,
+    intro: Option<String>,
 ) -> Result<()> {
     let mut ui = SessionUi::enter(enable_cava).context("failed to open player UI")?;
     player.set_volume_max(ui.volume_max());
@@ -291,38 +460,115 @@ fn run_session(
             if ui.cava_active() { " · cava" } else { "" }
         )
     };
-    if loop_mode != LoopMode::Off {
-        start_toast.push_str(&format!(" · loop {}", loop_mode.label()));
+    if let Some(label) = intro {
+        start_toast.push_str(&format!(" · {label}"));
     }
-    ui.toast(start_toast);
+    if loop_mode != LoopMode::Off {
+        start_toast.push_str(&format!(" · repeat {}", loop_mode.label()));
+    }
+    ui.toast_info(start_toast);
 
-    let mut index: usize = 0;
+    let mut index: usize = resume_at.map(|(i, _)| i).unwrap_or(0);
     let mut held = false;
     let mut dragging_progress = false;
-    let mut dragging_list_scroll = false;
+    // Scrollbar thumb drag: (grab row, scroll at grab) for 1:1 tracking.
+    let mut list_drag: Option<(u16, usize)> = None;
     let mut quitting = false;
     let mut done_msg = "done — thanks for listening ♪";
 
+    // Discord Rich Presence (opt-in) + session persistence throttle.
+    let mut rpc = optionmusic::rpc::Rpc::new();
+    let mut last_save = std::time::Instant::now();
+
+    // Smart shuffle (history-aware advance), sleep timer, stats + lyrics.
+    let mut smart = initial_smart;
+    let mut recent = RecentWindow::new(playlist.len());
+    recent.push(index);
+    let mut sleep = SleepTimer::new();
+    if let Some(mins) = optionmusic::sleep::take_request() {
+        if mins > 0 {
+            ui.toast_config(sleep.set_minutes(mins));
+        }
+    }
+    let mut stats_store = StatsStore::load();
+    let mut stats_max_pos = Duration::ZERO;
+    let mut stats_dur: Option<Duration> = None;
+    let mut stats_counted = false;
+    let mut lyrics_cache: Option<(String, ResolvedLyrics)> = None;
+
     if let Some(track) = playlist.get(index) {
-        player.play_file(&track.path)?;
+        match resume_at {
+            Some((_, pos)) => {
+                player.play_file_paused_at(&track.path, pos)?;
+                ui.toast_info(format!("resumed · {}", track.display_name()));
+            }
+            None => player.play_file(&track.path)?,
+        }
     }
 
     loop {
         if !held && player.is_idle() && !player.loop_track() {
-            if index + 1 < playlist.len() {
-                index += 1;
-                if let Some(t) = playlist.get(index) {
-                    player.play_file(&t.path)?;
-                }
-            } else if loop_mode == LoopMode::Playlist {
-                index = 0;
-                ui.toast("looping list…");
-                if let Some(t) = playlist.get(index) {
-                    player.play_file(&t.path)?;
-                }
-            } else {
+            // Repeat-one is handled by mpv (`loop-file`); here the current
+            // track restarts itself, so idle only means "advance or end".
+            if !go_next(
+                player,
+                playlist,
+                &mut ui,
+                &mut index,
+                loop_mode,
+                smart,
+                &mut recent,
+                &mut stats_store,
+                &mut stats_max_pos,
+                &mut stats_dur,
+                &mut stats_counted,
+                &mut lyrics_cache,
+            )? {
                 break;
             }
+        }
+
+        if !held {
+            let pos = player.position();
+            if pos > stats_max_pos {
+                stats_max_pos = pos;
+            }
+            if stats_dur.is_none() {
+                stats_dur = player.duration();
+            }
+        }
+        if sleep.is_expired() {
+            sleep.clear();
+            player.set_paused(true);
+            ui.toast_config("sleep timer · stopped");
+        }
+
+        // Discord presence: follows the settings toggle live; deduped inside.
+        if let Some(warn) = rpc.sync(ui.config().discord_rpc, &ui.config().discord_rpc_id)
+        {
+            ui.toast_config(warn);
+        }
+        if let Some(t) = playlist.get(index) {
+            if held {
+                // Stopped via `s`: nothing playing — drop the presence
+                // instead of lingering on the last track.
+                rpc.clear();
+            } else {
+                rpc.update(
+                    &t.display_name(),
+                    &t.artist_album(),
+                    t.thumb_url().as_deref(),
+                    player.position(),
+                    player.duration(),
+                    player.is_paused(),
+                );
+            }
+        }
+
+        // Session persistence: throttle writes while playing; final save on quit.
+        if last_save.elapsed() >= Duration::from_secs(5) {
+            save_session(&mut ui, player, playlist, index, loop_mode, smart, true);
+            last_save = std::time::Instant::now();
         }
 
         let list_names: Vec<String> = if ui.list_panel_active() {
@@ -340,6 +586,64 @@ fn run_session(
             .unwrap_or_default();
         let toast_owned = ui.toast_text().map(|s| s.to_string());
         let eq_label = player.eq_label();
+        let sleep_owned = sleep.countdown_label();
+
+        // Lyrics dock content (resolved lazily per track, then cached).
+        // Synced lines carry word timings for karaoke; plain falls back
+        // to a static scrollable list; empty stays `no lyrics found`.
+        let empty_synced: Vec<optionmusic::lyrics::LrcLine> = Vec::new();
+        let empty_plain: Vec<String> = Vec::new();
+        let lyric_now = if held {
+            Duration::ZERO
+        } else {
+            player.position()
+        };
+        let (lyric_synced, lyric_plain, lyric_active, lyric_status): (
+            &[optionmusic::lyrics::LrcLine],
+            &[String],
+            Option<usize>,
+            Option<String>,
+        ) = if ui.lyrics_open() {
+            if let Some(track) = playlist.get(index) {
+                let key = track.path.to_string_lossy().into_owned();
+                let stale = match &lyrics_cache {
+                    Some((k, _)) => k != &key,
+                    None => true,
+                };
+                if stale {
+                    let dur = if held { None } else { player.duration() };
+                    lyrics_cache = Some((key, resolve_lyrics_for(track, dur)));
+                }
+                match &lyrics_cache {
+                    Some((_, r)) if !r.lines.is_empty() => {
+                        (&r.lines, &empty_plain, r.active_index(lyric_now), None)
+                    }
+                    Some((_, r)) if !r.plain.is_empty() => {
+                        (&empty_synced, &r.plain, None, None)
+                    }
+                    _ => (
+                        &empty_synced,
+                        &empty_plain,
+                        None,
+                        Some("no lyrics found".into()),
+                    ),
+                }
+            } else {
+                (
+                    &empty_synced,
+                    &empty_plain,
+                    None,
+                    Some("no lyrics found".into()),
+                )
+            }
+        } else {
+            (&empty_synced, &empty_plain, None, None)
+        };
+        let lyric_total = if lyric_synced.is_empty() {
+            lyric_plain.len()
+        } else {
+            lyric_synced.len()
+        };
 
         let frame = FrameState {
             track_name: &name,
@@ -360,6 +664,15 @@ fn run_session(
             paused: held || player.is_paused(),
             stopped: held,
             loop_label: loop_mode.label(),
+            sleep_label: sleep_owned.as_deref(),
+            smart_shuffle: smart,
+            lyrics_open: ui.lyrics_open(),
+            lyrics_title: &name,
+            lyrics_synced: lyric_synced,
+            lyrics_plain: lyric_plain,
+            lyrics_active: lyric_active,
+            lyrics_status: lyric_status.as_deref(),
+            lyrics_now: lyric_now,
             list_names: &list_names,
             toast: toast_owned.as_deref(),
         };
@@ -372,7 +685,14 @@ fn run_session(
                 match event::read() {
                     Ok(Event::Key(key)) => {
                         if key.kind == KeyEventKind::Press {
-                            // Settings popup captures navigation first.
+                            // Focus order, top card first: Esc closes lyrics,
+                            // then help, then the list — settings only gets
+                            // Esc when nothing floats above it. The open list
+                            // owns its cursor keys even with settings open
+                            // (single clear owner); every other
+                            // settings-owned key stays with the settings
+                            // card per `wants_key`. All remaining keys fall
+                            // through to the global shortcuts.
                             if ui.settings_open() {
                                 if key.modifiers.contains(KeyModifiers::CONTROL)
                                     && key.code == KeyCode::Char('c')
@@ -380,57 +700,138 @@ fn run_session(
                                     player.stop();
                                     done_msg = "bye — thanks for listening ♪";
                                     dragging_progress = false;
-                                    dragging_list_scroll = false;
+                                    list_drag = None;
                                     quitting = true;
                                     continue;
                                 }
-                                match ui.handle_settings_key(key.code) {
-                                    SettingsAction::None | SettingsAction::Closed => {}
-                                    SettingsAction::Applied {
-                                        message,
-                                        sync_volume,
-                                        refresh_cava,
-                                    } => {
-                                        if sync_volume {
-                                            player.set_volume_max(ui.volume_max());
-                                        }
-                                        if refresh_cava {
-                                            ui.refresh_cava_if_active();
-                                        }
-                                        ui.toast(message);
+                                // Top-of-stack close first: Esc closes the
+                                // lyrics card, then help, then the list —
+                                // settings only gets Esc when nothing floats.
+                                if key.code == KeyCode::Esc {
+                                    if ui.lyrics_open() {
+                                        ui.close_lyrics();
+                                        break;
+                                    }
+                                    if ui.show_help() {
+                                        ui.toggle_help();
+                                        break;
+                                    }
+                                    if ui.show_list() {
+                                        ui.toggle_list();
+                                        break;
                                     }
                                 }
+                                match key.code {
+                                    KeyCode::Char('?') => {
+                                        if !ui.try_toggle_help() {
+                                            ui.toast_info("no room — close a panel");
+                                        }
+                                        break;
+                                    }
+                                    // The help card owns `h` only while it is
+                                    // open (top card). Otherwise `h` belongs
+                                    // to the list cursor / global shortcuts.
+                                    KeyCode::Char('h') if ui.show_help() => {
+                                        ui.toggle_help();
+                                        break;
+                                    }
+                                    KeyCode::Char('q') => {
+                                        if ui.show_help() {
+                                            ui.toggle_help();
+                                            break;
+                                        }
+                                    }
+                                    _ => {}
+                                }
+                                // Single clear owner: the open list wins its
+                                // navigation keys even with settings open.
+                                // Every other settings-owned key
+                                // (`c`/`q`/enter/space/`d`/`+`/`-`…) stays
+                                // with the settings card per `wants_key`.
+                                if ui.settings_wants_key(key.code)
+                                    && !(ui.show_list() && list_nav_key(key.code))
+                                {
+                                    match ui.handle_settings_key(key.code) {
+                                        SettingsAction::None | SettingsAction::Closed => {}
+                                        SettingsAction::Applied {
+                                            message,
+                                            sync_volume,
+                                            refresh_cava,
+                                        } => {
+                                            if sync_volume {
+                                                player.set_volume_max(ui.volume_max());
+                                            }
+                                            if refresh_cava {
+                                                ui.refresh_cava_if_active();
+                                            }
+                                            ui.toast_config(message);
+                                        }
+                                    }
+                                    break;
+                                }
+                            }
+                            // The open playlist owns its cursor keys so it never
+                            // loses focus to the settings/help cards behind
+                            // it. `l`/Esc close the list (handled globally
+                            // in top-of-stack order), so they are not moves.
+                            // `h` closes the top help card first when open.
+                            if key.code == KeyCode::Char('h') && ui.show_help() {
+                                ui.toggle_help();
                                 break;
                             }
-                            // The open playlist owns navigation keys so the sidebar can
-                            // be scrolled without triggering player shortcuts.
                             if ui.show_list() {
                                 match key.code {
                                     KeyCode::Left
                                     | KeyCode::Up
                                     | KeyCode::Char('h')
                                     | KeyCode::Char('k') => {
-                                        ui.list_scroll_by(-1);
+                                        ui.list_move_cursor(-1);
                                         continue;
                                     }
                                     KeyCode::Right | KeyCode::Down | KeyCode::Char('j') => {
-                                        ui.list_scroll_by(1);
+                                        ui.list_move_cursor(1);
                                         continue;
                                     }
                                     KeyCode::PageUp => {
-                                        ui.list_scroll_by(-4);
+                                        ui.list_page_by(-1);
                                         continue;
                                     }
                                     KeyCode::PageDown => {
-                                        ui.list_scroll_by(4);
+                                        ui.list_page_by(1);
                                         continue;
                                     }
                                     KeyCode::Home => {
-                                        ui.list_scroll_ratio(0.0);
+                                        ui.list_cursor_home();
                                         continue;
                                     }
                                     KeyCode::End => {
-                                        ui.list_scroll_ratio(1.0);
+                                        ui.list_cursor_end();
+                                        continue;
+                                    }
+                                    _ => {}
+                                }
+                            }
+                            // Docked lyrics strip owns Up/Down for manual scroll
+                            // (auto-follow resumes on track change / Enter /
+                            // pressing the active line). The open list wins
+                            // first (above); settings wins via `wants_key`
+                            // before this point, so this only runs with both
+                            // closed. `n`/`p` still change tracks.
+                            if ui.lyrics_visible()
+                                && !ui.show_list()
+                                && !ui.settings_open()
+                            {
+                                match key.code {
+                                    KeyCode::Up => {
+                                        ui.lyrics_scroll_by(-1, lyric_total, 3);
+                                        continue;
+                                    }
+                                    KeyCode::Down => {
+                                        ui.lyrics_scroll_by(1, lyric_total, 3);
+                                        continue;
+                                    }
+                                    KeyCode::Enter => {
+                                        ui.lyrics_resume_follow();
                                         continue;
                                     }
                                     _ => {}
@@ -438,44 +839,59 @@ fn run_session(
                             }
                             match handle_key(key, player) {
                                 Action::None => {}
-                                Action::List => ui.toggle_list(),
-                                Action::Help => ui.toggle_help(),
+                                Action::List => {
+                                    if !ui.try_toggle_list() {
+                                        ui.toast_info("no room — close a panel");
+                                    }
+                                }
+                                Action::Help => {
+                                    if !ui.try_toggle_help() {
+                                        ui.toast_info("no room — close a panel");
+                                    }
+                                }
                                 Action::Settings => {
                                     ui.toggle_settings();
                                 }
                                 Action::TogglePath => {
                                     let on = ui.toggle_path();
-                                    ui.toast(if on { "filename on" } else { "filename off" });
+                                    ui.toast_config(if on { "filename on" } else { "filename off" });
                                 }
                                 Action::Quit => {
-                                    if ui.settings_open() {
-                                        ui.close_settings();
+                                    // Top-of-stack close order: lyrics, then
+                                    // help, then the list, then settings.
+                                    if ui.lyrics_open() {
+                                        ui.close_lyrics();
                                     } else if ui.show_help() {
                                         ui.toggle_help();
                                     } else if ui.show_list() {
                                         ui.toggle_list();
+                                    } else if ui.settings_open() {
+                                        ui.close_settings();
                                     } else {
                                         player.stop();
                                         done_msg = "bye — thanks for listening ♪";
                                         dragging_progress = false;
-                                        dragging_list_scroll = false;
+                                        list_drag = None;
                                         quitting = true;
                                     }
                                 }
                                 Action::Next => {
                                     held = false;
-                                    if index + 1 < playlist.len() {
-                                        index += 1;
-                                        if let Some(t) = playlist.get(index) {
-                                            player.play_file(&t.path)?;
-                                        }
-                                    } else if loop_mode == LoopMode::Playlist {
-                                        index = 0;
-                                        if let Some(t) = playlist.get(index) {
-                                            player.play_file(&t.path)?;
-                                        }
-                                    } else {
-                                        ui.toast("already at last track");
+                                    if !go_next(
+                                        player,
+                                        playlist,
+                                        &mut ui,
+                                        &mut index,
+                                        loop_mode,
+                                        smart,
+                                        &mut recent,
+                                        &mut stats_store,
+                                        &mut stats_max_pos,
+                                        &mut stats_dur,
+                                        &mut stats_counted,
+                                        &mut lyrics_cache,
+                                    )? {
+                                        ui.toast_info("already at last track");
                                     }
                                 }
                                 Action::Prev => {
@@ -484,15 +900,17 @@ fn run_session(
                                         && player.position() > Duration::from_secs(3)
                                     {
                                         let _ = player.seek(Duration::ZERO);
-                                        ui.toast("restarted");
+                                        ui.toast_info("restarted");
                                     } else if index > 0 {
                                         index -= 1;
                                         if let Some(t) = playlist.get(index) {
                                             player.play_file(&t.path)?;
+                                            ui.toast_track(t.display_name());
                                         }
                                     } else if player.is_idle() {
                                         if let Some(t) = playlist.get(index) {
                                             player.play_file(&t.path)?;
+                                            ui.toast_track(t.display_name());
                                         }
                                     } else {
                                         let _ = player.seek(Duration::ZERO);
@@ -508,23 +926,50 @@ fn run_session(
                                             index = new_idx;
                                         }
                                     }
-                                    ui.toast("shuffled");
+                                    // One-shot reorder invalidates index history.
+                                    recent = RecentWindow::new(playlist.len());
+                                    recent.push(index);
+                                    ui.toast_config("shuffled");
+                                }
+                                Action::SmartShuffle => {
+                                    smart = !smart;
+                                    if smart {
+                                        recent = RecentWindow::new(playlist.len());
+                                        recent.push(index);
+                                        ui.toast_config("shuffle · on");
+                                    } else {
+                                        ui.toast_config("shuffle · off");
+                                    }
+                                }
+                                Action::LyricsToggle => {
+                                    ui.toggle_lyrics();
+                                    ui.toast_config(if ui.lyrics_open() {
+                                        "lyrics · on"
+                                    } else {
+                                        "lyrics · off"
+                                    });
+                                }
+                                Action::SleepCycle => {
+                                    let msg = sleep.cycle();
+                                    ui.toast_config(msg);
                                 }
                                 Action::Jump(n) => {
                                     if n >= 1 && n <= playlist.len() {
                                         held = false;
                                         index = n - 1;
+                                        ui.list_set_cursor(n - 1);
                                         if let Some(t) = playlist.get(index) {
                                             player.play_file(&t.path)?;
+                                            ui.toast_track(t.display_name());
                                         }
                                     } else {
-                                        ui.toast("track out of range");
+                                        ui.toast_error("track out of range");
                                     }
                                 }
                                 Action::Stop => {
                                     player.stop();
                                     held = true;
-                                    ui.toast("stopped");
+                                    ui.toast_info("stopped");
                                 }
                                 Action::PlayPause => {
                                     if held {
@@ -537,42 +982,201 @@ fn run_session(
                                     }
                                 }
                                 Action::VolChanged(v) => {
-                                    ui.toast(format!("volume {v}%"));
+                                    ui.toast_config(format!("volume {v}%"));
                                 }
                                 Action::Muted(m) => {
-                                    ui.toast(if m { "muted" } else { "unmuted" });
+                                    ui.toast_config(if m { "muted" } else { "unmuted" });
                                 }
                                 Action::SpeedChanged(s) => {
-                                    ui.toast(format!("speed {s:.1}x"));
+                                    ui.toast_config(format!("speed {s:.1}x"));
                                 }
                                 Action::PitchChanged(p) => {
-                                    ui.toast(format!("pitch {p:.2}"));
+                                    ui.toast_config(format!("pitch {p:.2}"));
                                 }
                                 Action::EqChanged(label) => {
-                                    ui.toast(format!("eq {label}"));
+                                    ui.toast_config(format!("eq {label}"));
                                 }
                                 Action::ResetTempo => {
-                                    ui.toast("speed/pitch reset");
+                                    ui.toast_config("speed/pitch reset");
                                 }
                                 Action::CavaToggle => {
                                     let msg = ui.toggle_cava();
-                                    ui.toast(msg);
+                                    if msg == "cava unavailable" {
+                                        ui.toast_error(msg);
+                                    } else {
+                                        ui.toast_config(msg);
+                                    }
                                 }
                                 Action::LoopCycle => {
                                     loop_mode = loop_mode.next();
                                     player.set_loop_track(loop_mode == LoopMode::Track);
-                                    ui.toast(format!("loop {}", loop_mode.label()));
+                                    ui.toast_config(format!("repeat · {}", loop_mode.label()));
                                 }
                                 Action::Seeked => {}
                             }
                         }
                     }
                     Ok(Event::Mouse(m)) => {
-                        if ui.settings_open() {
+                        // Footer shortcut chips (`space n/p ←→ +/− v c ?`)
+                        // are global click targets — same action as the key,
+                        // even with the settings card open. The floating help
+                        // card still owns its own area (checked inside).
+                        if m.kind == MouseEventKind::Down(MouseButton::Left)
+                            && ui.footer_hit(m.column, m.row) != HitTarget::None
+                        {
+                            dragging_progress = false;
+                            list_drag = None;
+                            match ui.footer_hit(m.column, m.row) {
+                                HitTarget::PlayPause => {
+                                    if held {
+                                        held = false;
+                                        if let Some(t) = playlist.get(index) {
+                                            player.play_file(&t.path)?;
+                                        }
+                                    } else {
+                                        let _ = player.toggle_pause();
+                                    }
+                                }
+                                HitTarget::Prev => {
+                                    held = false;
+                                    if !player.is_idle()
+                                        && player.position() > Duration::from_secs(3)
+                                    {
+                                        let _ = player.seek(Duration::ZERO);
+                                    } else if index > 0 {
+                                        index -= 1;
+                                        if let Some(t) = playlist.get(index) {
+                                            player.play_file(&t.path)?;
+                                            ui.toast_track(t.display_name());
+                                        }
+                                    } else {
+                                        let _ = player.seek(Duration::ZERO);
+                                    }
+                                }
+                                HitTarget::Next => {
+                                    held = false;
+                                    if !go_next(
+                                        player,
+                                        playlist,
+                                        &mut ui,
+                                        &mut index,
+                                        loop_mode,
+                                        smart,
+                                        &mut recent,
+                                        &mut stats_store,
+                                        &mut stats_max_pos,
+                                        &mut stats_dur,
+                                        &mut stats_counted,
+                                        &mut lyrics_cache,
+                                    )? {
+                                        ui.toast_info("already at last track");
+                                    }
+                                }
+                                HitTarget::SeekBack => {
+                                    player.seek_short_back();
+                                }
+                                HitTarget::SeekForward => {
+                                    player.seek_short_forward();
+                                }
+                                HitTarget::Volume => {
+                                    let muted = player.toggle_mute();
+                                    ui.toast_config(if muted { "muted" } else { "unmuted" });
+                                }
+                                HitTarget::VolumeUp => {
+                                    let v = player.volume_step_up();
+                                    ui.toast_config(format!("volume {v}%"));
+                                }
+                                HitTarget::VolumeDown => {
+                                    let v = player.volume_step_down();
+                                    ui.toast_config(format!("volume {v}%"));
+                                }
+                                HitTarget::Settings => {
+                                    ui.toggle_settings();
+                                }
+                                HitTarget::Help => {
+                                    if !ui.try_toggle_help() {
+                                        ui.toast_info("no room — close a panel");
+                                    }
+                                }
+                                HitTarget::Quit => {
+                                    if ui.lyrics_open() {
+                                        ui.close_lyrics();
+                                    } else if ui.show_help() {
+                                        ui.toggle_help();
+                                    } else if ui.show_list() {
+                                        ui.toggle_list();
+                                    } else if ui.settings_open() {
+                                        ui.close_settings();
+                                    } else {
+                                        player.stop();
+                                        done_msg = "bye — thanks for listening ♪";
+                                        quitting = true;
+                                    }
+                                }
+                                _ => {}
+                            }
+                        } else if ui.settings_open() {
                             match m.kind {
                                 MouseEventKind::Down(MouseButton::Left) => {
-                                    match ui.handle_settings_click(m.column, m.row) {
-                                        SettingsAction::None | SettingsAction::Closed => {}
+                                    if ui.help_contains(m.column, m.row)
+                                        || ui.lyrics_contains(m.column, m.row)
+                                    {
+                                        // Top card consumes its own clicks —
+                                        // never leak to settings/player.
+                                    } else {
+                                        match ui.handle_settings_click(m.column, m.row) {
+                                        SettingsAction::Closed => {
+                                            // Closing click is consumed.
+                                            dragging_progress = false;
+                                            list_drag = None;
+                                        }
+                                        SettingsAction::None => {
+                                            // Click inside the settings card
+                                            // but on no widget is consumed —
+                                            // never leak to the list/player
+                                            // behind. Only a true miss falls
+                                            // through to the open list, which
+                                            // still takes clicks + scrollbar
+                                            // drags (thumb-drag, track-page).
+                                            if ui.pointer_over_settings(m.column, m.row) {
+                                                dragging_progress = false;
+                                                list_drag = None;
+                                            } else {
+                                                match ui.hit_target(m.column, m.row) {
+                                                    HitTarget::ListScroll(_) => {
+                                                        dragging_progress = false;
+                                                        match ui.list_bar_click(m.row) {
+                                                            BarClick::Above => {
+                                                                ui.list_page_by(-1);
+                                                            }
+                                                            BarClick::Below => {
+                                                                ui.list_page_by(1);
+                                                            }
+                                                            BarClick::Thumb => {}
+                                                        }
+                                                        list_drag =
+                                                            Some((m.row, ui.list_offset()));
+                                                    }
+                                                    HitTarget::Jump(n) => {
+                                                        dragging_progress = false;
+                                                        list_drag = None;
+                                                        if n >= 1 && n <= playlist.len() {
+                                                            held = false;
+                                                            index = n - 1;
+                                                            ui.list_set_cursor(n - 1);
+                                                            if let Some(t) = playlist.get(index) {
+                                                                player.play_file(&t.path)?;
+                                                                ui.toast_track(t.display_name());
+                                                            }
+                                                        }
+                                                    }
+                                                    _ => {
+                                                        dragging_progress = false;
+                                                        list_drag = None;
+                                                    }
+                                                }
+                                            }
+                                        }
                                         SettingsAction::Applied {
                                             message,
                                             sync_volume,
@@ -584,31 +1188,76 @@ fn run_session(
                                             if refresh_cava {
                                                 ui.refresh_cava_if_active();
                                             }
-                                            ui.toast(message);
+                                            ui.toast_config(message);
                                         }
+                                        }
+                                    }
+                                }
+                                MouseEventKind::Drag(MouseButton::Left) => {
+                                    // 1:1 thumb drag keeps working with the
+                                    // settings card open (same as without).
+                                    if let Some((start_row, start_scroll)) = list_drag {
+                                        ui.list_drag_to(start_row, start_scroll, m.row);
+                                    }
+                                }
+                                MouseEventKind::Up(MouseButton::Left) => {
+                                    dragging_progress = false;
+                                    list_drag = None;
+                                }
+                                MouseEventKind::ScrollUp => {
+                                    if ui.pointer_over_list(m.column, m.row) {
+                                        ui.list_scroll_by(-3);
+                                    } else if ui.lyrics_contains(m.column, m.row) {
+                                        ui.lyrics_scroll_by(-1, lyric_total, 3);
+                                    }
+                                }
+                                MouseEventKind::ScrollDown => {
+                                    if ui.pointer_over_list(m.column, m.row) {
+                                        ui.list_scroll_by(3);
+                                    } else if ui.lyrics_contains(m.column, m.row) {
+                                        ui.lyrics_scroll_by(1, lyric_total, 3);
                                     }
                                 }
                                 _ => {}
                             }
                             break;
-                        }
-                        match m.kind {
+                        } else {
+                            match m.kind {
                             MouseEventKind::Down(MouseButton::Left) => {
+                                // Pressing the active lyric line resumes
+                                // auto-follow after a manual scroll.
+                                if ui.lyrics_hit_active_row(m.row)
+                                    && ui.lyrics_contains(m.column, m.row)
+                                {
+                                    ui.lyrics_resume_follow();
+                                    dragging_progress = false;
+                                    list_drag = None;
+                                } else {
                                 match ui.hit_target(m.column, m.row) {
                                     HitTarget::Progress(ratio) => {
                                         held = false;
                                         dragging_progress = true;
-                                        dragging_list_scroll = false;
+                                        list_drag = None;
                                         let _ = player.seek_ratio(ratio);
                                     }
-                                    HitTarget::ListScroll(ratio) => {
-                                        dragging_list_scroll = true;
+                                    HitTarget::ListScroll(_) => {
+                                        // Thumb grabs drag 1:1; clicks above
+                                        // or below the thumb page a window.
                                         dragging_progress = false;
-                                        ui.list_scroll_ratio(ratio);
+                                        match ui.list_bar_click(m.row) {
+                                            BarClick::Above => {
+                                                ui.list_page_by(-1);
+                                            }
+                                            BarClick::Below => {
+                                                ui.list_page_by(1);
+                                            }
+                                            BarClick::Thumb => {}
+                                        }
+                                        list_drag = Some((m.row, ui.list_offset()));
                                     }
                                     HitTarget::PlayPause => {
                                         dragging_progress = false;
-                                        dragging_list_scroll = false;
+                                        list_drag = None;
                                         if held {
                                             held = false;
                                             if let Some(t) = playlist.get(index) {
@@ -620,7 +1269,7 @@ fn run_session(
                                     }
                                     HitTarget::Prev => {
                                         dragging_progress = false;
-                                        dragging_list_scroll = false;
+                                        list_drag = None;
                                         held = false;
                                         if !player.is_idle()
                                             && player.position() > Duration::from_secs(3)
@@ -630,6 +1279,7 @@ fn run_session(
                                             index -= 1;
                                             if let Some(t) = playlist.get(index) {
                                                 player.play_file(&t.path)?;
+                                                ui.toast_track(t.display_name());
                                             }
                                         } else {
                                             let _ = player.seek(Duration::ZERO);
@@ -637,86 +1287,142 @@ fn run_session(
                                     }
                                     HitTarget::Next => {
                                         dragging_progress = false;
-                                        dragging_list_scroll = false;
+                                        list_drag = None;
                                         held = false;
-                                        if index + 1 < playlist.len() {
-                                            index += 1;
-                                            if let Some(t) = playlist.get(index) {
-                                                player.play_file(&t.path)?;
-                                            }
-                                        } else if loop_mode == LoopMode::Playlist {
-                                            index = 0;
-                                            if let Some(t) = playlist.get(index) {
-                                                player.play_file(&t.path)?;
-                                            }
-                                        } else {
-                                            ui.toast("already at last track");
+                                        if !go_next(
+                                            player,
+                                            playlist,
+                                            &mut ui,
+                                            &mut index,
+                                            loop_mode,
+                                            smart,
+                                            &mut recent,
+                                            &mut stats_store,
+                                            &mut stats_max_pos,
+                                            &mut stats_dur,
+                                            &mut stats_counted,
+                                            &mut lyrics_cache,
+                                        )? {
+                                            ui.toast_info("already at last track");
                                         }
                                     }
                                     HitTarget::Volume => {
                                         dragging_progress = false;
-                                        dragging_list_scroll = false;
+                                        list_drag = None;
                                         let muted = player.toggle_mute();
-                                        ui.toast(if muted { "muted" } else { "unmuted" });
+                                        ui.toast_config(if muted { "muted" } else { "unmuted" });
                                     }
                                     HitTarget::VolumeUp => {
                                         dragging_progress = false;
-                                        dragging_list_scroll = false;
+                                        list_drag = None;
                                         let v = player.volume_step_up();
-                                        ui.toast(format!("volume {v}%"));
+                                        ui.toast_config(format!("volume {v}%"));
                                     }
                                     HitTarget::VolumeDown => {
                                         dragging_progress = false;
-                                        dragging_list_scroll = false;
+                                        list_drag = None;
                                         let v = player.volume_step_down();
-                                        ui.toast(format!("volume {v}%"));
+                                        ui.toast_config(format!("volume {v}%"));
                                     }
                                     HitTarget::Eq => {
                                         dragging_progress = false;
-                                        dragging_list_scroll = false;
+                                        list_drag = None;
                                         let eq = player.cycle_eq();
-                                        ui.toast(format!("eq {}", eq.label()));
+                                        ui.toast_config(format!("eq {}", eq.label()));
                                     }
                                     HitTarget::Speed => {
                                         dragging_progress = false;
-                                        dragging_list_scroll = false;
+                                        list_drag = None;
                                         let s = player.speed_up();
-                                        ui.toast(format!("speed {s:.1}x"));
+                                        ui.toast_config(format!("speed {s:.1}x"));
                                     }
                                     HitTarget::Pitch => {
                                         dragging_progress = false;
-                                        dragging_list_scroll = false;
+                                        list_drag = None;
                                         let p = player.pitch_up();
-                                        ui.toast(format!("pitch {p:.2}"));
+                                        ui.toast_config(format!("pitch {p:.2}"));
                                     }
                                     HitTarget::CavaToggle => {
                                         dragging_progress = false;
-                                        dragging_list_scroll = false;
+                                        list_drag = None;
                                         let msg = ui.toggle_cava();
-                                        ui.toast(msg);
+                                        if msg == "cava unavailable" {
+                                            ui.toast_error(msg);
+                                        } else {
+                                            ui.toast_config(msg);
+                                        }
+                                    }
+                                    // Footer chips also resolve here when the
+                                    // settings card is closed (handled globally
+                                    // above when it is open).
+                                    HitTarget::Settings => {
+                                        dragging_progress = false;
+                                        list_drag = None;
+                                        ui.toggle_settings();
+                                    }
+                                    HitTarget::Help => {
+                                        dragging_progress = false;
+                                        list_drag = None;
+                                        if !ui.try_toggle_help() {
+                                            ui.toast_info("no room — close a panel");
+                                        }
+                                    }
+                                    HitTarget::SeekBack => {
+                                        dragging_progress = false;
+                                        list_drag = None;
+                                        player.seek_short_back();
+                                    }
+                                    HitTarget::SeekForward => {
+                                        dragging_progress = false;
+                                        list_drag = None;
+                                        player.seek_short_forward();
+                                    }
+                                    HitTarget::Quit => {
+                                        dragging_progress = false;
+                                        list_drag = None;
+                                        // Top-of-stack close order: lyrics,
+                                        // then help, then the list, then settings.
+                                        if ui.lyrics_open() {
+                                            ui.close_lyrics();
+                                        } else if ui.show_help() {
+                                            ui.toggle_help();
+                                        } else if ui.show_list() {
+                                            ui.toggle_list();
+                                        } else if ui.settings_open() {
+                                            ui.close_settings();
+                                        } else {
+                                            player.stop();
+                                            done_msg = "bye — thanks for listening ♪";
+                                            quitting = true;
+                                        }
                                     }
                                     HitTarget::Jump(n) => {
                                         dragging_progress = false;
-                                        dragging_list_scroll = false;
+                                        list_drag = None;
                                         if n >= 1 && n <= playlist.len() {
                                             held = false;
                                             index = n - 1;
+                                            // Click selects AND focuses: the
+                                            // cursor follows the click.
+                                            ui.list_set_cursor(n - 1);
                                             if let Some(t) = playlist.get(index) {
                                                 player.play_file(&t.path)?;
+                                                ui.toast_track(t.display_name());
                                             }
                                         }
                                     }
                                     HitTarget::None => {
                                         dragging_progress = false;
-                                        dragging_list_scroll = false;
+                                        list_drag = None;
                                     }
+                                }
                                 }
                             }
                             MouseEventKind::Drag(MouseButton::Left) => {
-                                if dragging_list_scroll {
-                                    if let Some(ratio) = ui.list_scroll_ratio_at_row(m.row) {
-                                        ui.list_scroll_ratio(ratio);
-                                    }
+                                // 1:1 thumb drag: one row moved = one row
+                                // scrolled (grab offset preserved).
+                                if let Some((start_row, start_scroll)) = list_drag {
+                                    ui.list_drag_to(start_row, start_scroll, m.row);
                                 } else if dragging_progress {
                                     if let Some(ratio) = ui.progress_ratio_at_col(m.column) {
                                         let _ = player.seek_ratio(ratio);
@@ -725,11 +1431,13 @@ fn run_session(
                             }
                             MouseEventKind::Up(MouseButton::Left) => {
                                 dragging_progress = false;
-                                dragging_list_scroll = false;
+                                list_drag = None;
                             }
                             MouseEventKind::ScrollUp => {
                                 if ui.pointer_over_list(m.column, m.row) {
                                     ui.list_scroll_by(-3);
+                                } else if ui.lyrics_contains(m.column, m.row) {
+                                    ui.lyrics_scroll_by(-1, lyric_total, 3);
                                 } else {
                                     player.seek_short_back();
                                 }
@@ -737,11 +1445,14 @@ fn run_session(
                             MouseEventKind::ScrollDown => {
                                 if ui.pointer_over_list(m.column, m.row) {
                                     ui.list_scroll_by(3);
+                                } else if ui.lyrics_contains(m.column, m.row) {
+                                    ui.lyrics_scroll_by(1, lyric_total, 3);
                                 } else {
                                     player.seek_short_forward();
                                 }
                             }
                             _ => {}
+                            }
                         }
                     }
                     Ok(_) => {}
@@ -761,6 +1472,22 @@ fn run_session(
         }
     }
 
+    // Final stats count for the track we quit on (past ~50% / 60s).
+    if let Some(track) = playlist.get(index) {
+        maybe_count_stats(
+            &mut stats_store,
+            track,
+            stats_max_pos,
+            stats_dur,
+            &mut stats_counted,
+        );
+    }
+
+    // Persist prefs + session for the next launch (`resume` gates inside).
+    // `quitting` = user left mid-session → keep resume; natural end clears it.
+    save_session(&mut ui, player, playlist, index, loop_mode, smart, quitting);
+    rpc.clear();
+
     ui.leave()?;
     println!();
     print_success(done_msg);
@@ -768,7 +1495,128 @@ fn run_session(
     Ok(())
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+/// Nanos-based seed for smart-shuffle picks (no rng dep).
+fn nanos_seed() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos() as u64)
+        .unwrap_or(0x9e3779b97f4a7c15)
+}
+
+/// Count a stats play once the track passes ~50% or 60s.
+fn maybe_count_stats(
+    store: &mut StatsStore,
+    track: &optionmusic::playlist::Track,
+    max_pos: Duration,
+    dur: Option<Duration>,
+    counted: &mut bool,
+) {
+    if *counted {
+        return;
+    }
+    if should_count_play(max_pos.as_secs_f64(), dur.map(|d| d.as_secs_f64())) {
+        let artist = track.artist.clone().unwrap_or_default();
+        store.record_play(
+            &track.path.to_string_lossy(),
+            &track.display_name(),
+            &artist,
+            max_pos.as_secs(),
+        );
+        *counted = true;
+    }
+}
+
+/// Next index honoring smart shuffle; `None` means the playlist ended.
+fn advance_index(
+    len: usize,
+    index: usize,
+    loop_mode: LoopMode,
+    smart: bool,
+    recent: &[usize],
+    seed: u64,
+) -> Option<usize> {
+    if len == 0 {
+        return None;
+    }
+    if smart {
+        return Some(optionmusic::smart_shuffle::pick_next(
+            len, index, recent, seed,
+        ));
+    }
+    if index + 1 < len {
+        Some(index + 1)
+    } else if loop_mode == LoopMode::Playlist {
+        Some(0)
+    } else {
+        None
+    }
+}
+
+/// Advance to the next track (counts stats for the old one, resets per-track
+/// state). Returns `false` when the playlist ended.
+#[allow(clippy::too_many_arguments)]
+fn go_next(
+    player: &mut Player,
+    playlist: &Playlist,
+    ui: &mut SessionUi,
+    index: &mut usize,
+    loop_mode: LoopMode,
+    smart: bool,
+    recent: &mut RecentWindow,
+    stats_store: &mut StatsStore,
+    stats_max_pos: &mut Duration,
+    stats_dur: &mut Option<Duration>,
+    stats_counted: &mut bool,
+    lyrics_cache: &mut Option<(String, ResolvedLyrics)>,
+) -> Result<bool> {
+    if let Some(track) = playlist.get(*index) {
+        maybe_count_stats(stats_store, track, *stats_max_pos, *stats_dur, stats_counted);
+    }
+    let Some(next) = advance_index(
+        playlist.len(),
+        *index,
+        loop_mode,
+        smart,
+        &recent.as_slice(),
+        nanos_seed(),
+    ) else {
+        return Ok(false);
+    };
+    recent.push(*index);
+    *index = next;
+    *stats_max_pos = Duration::ZERO;
+    *stats_dur = None;
+    *stats_counted = false;
+    *lyrics_cache = None;
+    if let Some(t) = playlist.get(*index) {
+        player.play_file(&t.path)?;
+        ui.toast_track(t.display_name());
+    }
+    Ok(true)
+}
+
+/// Lyrics lookup context from track tags (filename title fallback).
+fn resolve_lyrics_for(
+    track: &optionmusic::playlist::Track,
+    duration: Option<Duration>,
+) -> ResolvedLyrics {
+    let title = track
+        .title
+        .clone()
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| track.display_name());
+    let artist = track.artist.clone().unwrap_or_default();
+    let album = track.album.clone().unwrap_or_default();
+    resolve_lyrics(
+        &track.path,
+        &artist,
+        &title,
+        &album,
+        duration.map(|d| d.as_secs_f64()),
+    )
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum LoopMode {
     Off,
     Playlist,
@@ -787,8 +1635,8 @@ impl LoopMode {
     fn label(self) -> &'static str {
         match self {
             Self::Off => "off",
-            Self::Playlist => "list",
-            Self::Track => "track",
+            Self::Playlist => "all",
+            Self::Track => "one",
         }
     }
 }
@@ -814,7 +1662,32 @@ enum Action {
     ResetTempo,
     CavaToggle,
     LoopCycle,
+    SmartShuffle,
+    LyricsToggle,
+    SleepCycle,
     Seeked,
+}
+
+/// Keys the open playlist owns for cursor movement. Single clear owner:
+/// the list wins these even with the settings card open — every other
+/// settings-owned key (`c`/`q`/enter/space/`d`/`+`/`-`…) stays with the
+/// settings card per `wants_key`. `l` and Esc are excluded: they close
+/// the list in top-of-stack order instead of moving.
+fn list_nav_key(code: KeyCode) -> bool {
+    matches!(
+        code,
+        KeyCode::Up
+            | KeyCode::Down
+            | KeyCode::Left
+            | KeyCode::Right
+            | KeyCode::PageUp
+            | KeyCode::PageDown
+            | KeyCode::Home
+            | KeyCode::End
+            | KeyCode::Char('h')
+            | KeyCode::Char('j')
+            | KeyCode::Char('k')
+    )
 }
 
 fn handle_key(key: KeyEvent, player: &mut Player) -> Action {
@@ -882,6 +1755,9 @@ fn handle_key(key: KeyEvent, player: &mut Player) -> Action {
         KeyCode::Char('l') => Action::List,
         KeyCode::Char('r') => Action::Shuffle,
         KeyCode::Char('o') => Action::LoopCycle,
+        KeyCode::Char('x') => Action::SmartShuffle,
+        KeyCode::Char('y') => Action::LyricsToggle,
+        KeyCode::Char('z') => Action::SleepCycle,
         KeyCode::Char('f') => Action::TogglePath,
         KeyCode::Char('v') => Action::CavaToggle,
         KeyCode::Char('c') => Action::Settings,
@@ -904,6 +1780,8 @@ fn cmd_download(
     audio_format: &str,
     interactive: bool,
     ui_override: Option<optionmusic::config::DlUiMode>,
+    fallback_mweb: bool,
+    no_fallback: bool,
     music_dir_flag: &str,
 ) -> Result<()> {
     let kind_flag = if both {
@@ -917,8 +1795,11 @@ fn cmd_download(
     };
 
     let use_wizard = interactive || query.is_none_or(|q| q.trim().is_empty());
+    let cfg = optionmusic::config::AppConfig::load();
+    let fallback =
+        download::resolve_fallback_policy(fallback_mweb, no_fallback, cfg.dl_fallback);
     if use_wizard {
-        let ui_mode = ui_override.unwrap_or_else(|| optionmusic::config::AppConfig::load().dl_ui);
+        let ui_mode = ui_override.unwrap_or(cfg.dl_ui);
         return download::run_interactive(
             music_dir_flag,
             query,
@@ -927,6 +1808,7 @@ fn cmd_download(
             output,
             audio_format,
             ui_mode,
+            fallback,
         );
     }
 
@@ -944,7 +1826,7 @@ fn cmd_download(
         output_dir,
         audio_format: audio_format.to_string(),
     };
-    download::run_download(&req)
+    download::run_download(&req, fallback)
 }
 
 fn cmd_info(path: &std::path::Path) -> Result<()> {
@@ -1084,6 +1966,213 @@ fn cmd_browse(favorites: bool, music_dir_flag: &str, enable_cava: bool) -> Resul
     optionmusic::browse::run(library, favorites, enable_cava)
 }
 
+/// `msc radio` — order the whole library as a similarity walk and play it
+/// through the normal session UI. See `src/radio.rs` for the scoring.
+#[allow(clippy::too_many_arguments)]
+fn cmd_radio(
+    seed_query: Option<String>,
+    artist: Option<String>,
+    genre: Option<String>,
+    fresh: bool,
+    volume: Option<u8>,
+    speed: Option<f64>,
+    pitch: Option<f64>,
+    eq: Option<optionmusic::eq::EqPreset>,
+    crossfade: f64,
+    loop_flag: Option<LoopMode>,
+    music_dir_flag: &str,
+    enable_cava: bool,
+    quiet: bool,
+) -> Result<()> {
+    let prefs = AppConfig::load();
+    let root = resolve_music_dir(music_dir_flag)?;
+    let library = Library::scan(root.clone())?;
+    if !library.walk_errors.is_empty() {
+        print_warn(&format!(
+            "{} path(s) could not be read",
+            library.walk_errors.len()
+        ));
+    }
+    if library.is_empty() {
+        anyhow::bail!(
+            "no tracks found in {} — add audio files or pass -m / --music-dir",
+            root.display()
+        );
+    }
+
+    let stats = StatsStore::load();
+    let recent: std::collections::HashSet<String> =
+        optionmusic::history::played_this_week().into_iter().collect();
+    let rng_seed = nanos_seed();
+    let Some(seed_idx) = optionmusic::radio::resolve_seed(
+        &library,
+        seed_query.as_deref(),
+        artist.as_deref(),
+        genre.as_deref(),
+        &stats,
+        rng_seed,
+    ) else {
+        let desc = [
+            artist.as_deref().map(|a| format!("artist \"{a}\"")),
+            genre.as_deref().map(|g| format!("genre \"{g}\"")),
+            seed_query.as_deref().map(|q| format!("\"{q}\"")),
+        ]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>()
+        .join(" + ");
+        anyhow::bail!("no match for {desc} — try an artist, album, track or genre name");
+    };
+
+    let order = optionmusic::radio::build_order(
+        library.tracks(),
+        |t| library.artist_name(t),
+        &stats,
+        &recent,
+        seed_idx,
+        &optionmusic::radio::RadioOpts {
+            fresh,
+            seed: rng_seed,
+            ..Default::default()
+        },
+    );
+    let seed_track = &library.tracks()[seed_idx];
+    let seed_label = format!(
+        "{} — {}",
+        seed_track.display_name(),
+        library.artist_name(seed_track)
+    );
+    let tracks: Vec<optionmusic::playlist::Track> = order
+        .iter()
+        .map(|&i| library.tracks()[i].clone())
+        .collect();
+    let mut playlist = Playlist::from_tracks(tracks);
+
+    // Saved playback prefs are the defaults; explicit CLI flags always win.
+    let volume = volume.unwrap_or(prefs.volume);
+    let speed = speed.unwrap_or(prefs.speed);
+    let pitch = pitch.unwrap_or(prefs.pitch);
+    let eq = eq.unwrap_or(prefs.eq);
+    let loop_mode = loop_flag.unwrap_or(match prefs.repeat {
+        RepeatMode::Off => LoopMode::Off,
+        RepeatMode::All => LoopMode::Playlist,
+        RepeatMode::One => LoopMode::Track,
+    });
+
+    let mut player = Player::new(
+        volume.min(optionmusic::config::VOLUME_MAX_EXCESS),
+        speed,
+        crossfade,
+    )?;
+    player.set_volume_max(prefs.volume_max());
+    player.set_volume(volume);
+    player.set_pitch(pitch);
+    player.set_eq(eq);
+    player.set_loop_track(loop_mode == LoopMode::Track);
+
+    let label = format!("radio · {seed_label}");
+    if io::stdin().is_terminal() && io::stdout().is_terminal() {
+        run_session(
+            &mut player,
+            &mut playlist,
+            loop_mode,
+            false,
+            enable_cava,
+            None,
+            prefs.smart_shuffle,
+            Some(label),
+        )?;
+    } else {
+        if !quiet {
+            banner();
+            print_success(&format!(
+                "Radio · {} tracks · seed {}",
+                playlist.len(),
+                seed_label
+            ));
+        }
+        run_plain(&mut player, &mut playlist, loop_mode == LoopMode::Playlist)?;
+    }
+    Ok(())
+}
+
+fn cmd_stats(limit: usize) -> Result<()> {
+    let store = StatsStore::load();
+    if store.total_plays == 0 {
+        print_warn("no plays recorded yet — play something past halfway");
+        return Ok(());
+    }
+    let limit = limit.max(1).min(100);
+    println!(
+        "  {} {}  {} {}",
+        format!("{}", store.total_plays).with(BRIGHT),
+        if store.total_plays == 1 {
+            "play".with(DIM)
+        } else {
+            "plays".with(DIM)
+        },
+        optionmusic::ui::fmt_time(Duration::from_secs(store.total_secs)).with(BRIGHT),
+        "listened".with(DIM)
+    );
+    println!();
+    println!("  {}", "top tracks".with(BRIGHT));
+    for (i, t) in store.top_tracks(limit).iter().enumerate() {
+        let plays = if t.plays == 1 {
+            "1 play".to_owned()
+        } else {
+            format!("{} plays", t.plays)
+        };
+        println!(
+            "  {}  {}  {}",
+            format!("{:>2}", i + 1).with(DIM),
+            t.name.as_str().with(BRIGHT),
+            plays.with(GRAY)
+        );
+    }
+    println!();
+    println!("  {}", "top artists".with(BRIGHT));
+    for (i, (artist, plays)) in store.top_artists(limit).iter().enumerate() {
+        let label = if *plays == 1 {
+            "1 play".to_owned()
+        } else {
+            format!("{plays} plays")
+        };
+        println!(
+            "  {}  {}  {}",
+            format!("{:>2}", i + 1).with(DIM),
+            artist.as_str().with(BRIGHT),
+            label.with(GRAY)
+        );
+    }
+    Ok(())
+}
+
+fn cmd_sleep(arg: Option<&str>) -> Result<()> {
+    match arg.map(str::trim) {
+        None | Some("") => match optionmusic::sleep::peek_request() {
+            Some(m) => print_info(&format!("sleep timer · {m} min (next session)")),
+            None => print_info("sleep timer · off"),
+        },
+        Some(s) if s.eq_ignore_ascii_case("off") => {
+            optionmusic::sleep::write_request(None)?;
+            print_success("sleep timer · off");
+        }
+        Some(s) => {
+            let mins: u64 = s
+                .parse()
+                .with_context(|| format!("expected minutes or `off`, got `{s}`"))?;
+            if mins == 0 {
+                optionmusic::sleep::write_request(None)?;
+                print_success("sleep timer · off");
+            } else {
+                optionmusic::sleep::write_request(Some(mins))?;
+                print_success(&format!("sleep timer · {mins} min (next session)"));
+            }
+        }
+    }
+    Ok(())
+}
+
 fn cmd_playlist(action: PlaylistCmd) -> Result<()> {
     match action {
         PlaylistCmd::List => {
@@ -1163,5 +2252,37 @@ mod tests {
     fn resolve_play_paths_keeps_explicit() {
         let paths = resolve_play_paths(vec![PathBuf::from("a.mp3")], "").unwrap();
         assert_eq!(paths, vec![PathBuf::from("a.mp3")]);
+    }
+
+    #[test]
+    fn repeat_mode_cycles_off_all_one() {
+        assert_eq!(LoopMode::Off.next(), LoopMode::Playlist);
+        assert_eq!(LoopMode::Playlist.label(), "all");
+        assert_eq!(LoopMode::Track.label(), "one");
+        assert_eq!(LoopMode::Track.next(), LoopMode::Off);
+        assert_eq!(LoopMode::Off.label(), "off");
+    }
+
+    #[test]
+    fn advance_index_sequential_and_loop() {
+        assert_eq!(
+            advance_index(5, 1, LoopMode::Off, false, &[], 0),
+            Some(2)
+        );
+        assert_eq!(advance_index(5, 4, LoopMode::Off, false, &[], 0), None);
+        assert_eq!(
+            advance_index(5, 4, LoopMode::Playlist, false, &[], 0),
+            Some(0)
+        );
+        assert_eq!(advance_index(0, 0, LoopMode::Off, false, &[], 0), None);
+    }
+
+    #[test]
+    fn advance_index_smart_avoids_recent() {
+        let recent: Vec<usize> = (1..=8).collect();
+        for seed in 0..30 {
+            let next = advance_index(12, 8, LoopMode::Off, true, &recent, seed).unwrap();
+            assert!([0, 9, 10, 11].contains(&next));
+        }
     }
 }

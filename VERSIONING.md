@@ -8,8 +8,8 @@ The public changelog is the source of truth for headings, mixed releases, and ch
 
 | Surface | What you install | Artifact version today |
 | --- | --- | --- |
-| **CLI** | `optionmusic` / alias `msc` | `0.2.14` (`Cargo.toml`) |
-| **Desktop** | Tauri visual app | `0.1.6` (`package.json` / `tauri.conf.json`) |
+| **CLI** | `optionmusic` / alias `msc` | `0.2.17` (`Cargo.toml`) |
+| **Desktop** | GPUI native app | `0.1.7` (`src-gpui/Cargo.toml`) |
 
 Changelog tags always include the leading `v`. Mixed cuts that change both surfaces use an `m` before the channel (e.g. `v0.2.12m-beta`).
 
@@ -21,4 +21,4 @@ Changelog tags always include the leading `v`. Mixed cuts that change both surfa
 | **-beta** | Mostly there, but still rough. Not the official install. |
 | **-stable** | Ready for daily use — GitHub Releases / AUR. |
 
-Do **not** label something `stable` unless it is release-ready. Prefer **beta** for Desktop while the Tauri shell is maturing. Older Desktop builds (`v0.1.0`, `v0.1.1`) had no channel suffix; from `v0.1.2-beta` on, every Desktop (and mixed) version includes one.
+Do **not** label something `stable` unless it is release-ready. Prefer **beta** for Desktop while the GPUI shell is maturing. Older Desktop builds (`v0.1.0`, `v0.1.1`) had no channel suffix; from `v0.1.2-beta` on, every Desktop (and mixed) version includes one.

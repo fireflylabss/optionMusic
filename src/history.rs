@@ -8,7 +8,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
-use crate::config::{self, stable_cache_key};
+use crate::config;
 
 const MAX_ENTRIES: usize = 5_000;
 const WEEK_SECS: u64 = 7 * 24 * 60 * 60;
@@ -73,14 +73,12 @@ pub fn load_entries() -> Vec<HistoryEntry> {
 
 fn rewrite_trimmed(entries: &[HistoryEntry]) -> Result<()> {
     let path = history_path();
-    let tmp = path.with_extension(format!("tmp-{}", stable_cache_key(&[b"history-rewrite"])));
-    {
-        let mut file = fs::File::create(&tmp)?;
-        for entry in entries {
-            writeln!(file, "{}", serde_json::to_string(entry)?)?;
-        }
+    let mut body = String::new();
+    for entry in entries {
+        body.push_str(&serde_json::to_string(entry)?);
+        body.push('\n');
     }
-    fs::rename(tmp, path)?;
+    option_sdk::atomic_write(path, body.as_bytes())?;
     Ok(())
 }
 

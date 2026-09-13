@@ -11,7 +11,7 @@ use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct TrackDto {
     pub id: String,
     pub name: String,
@@ -23,10 +23,19 @@ pub struct TrackDto {
     pub album: String,
     /// Track number from tags when known.
     pub track_number: Option<u32>,
+    /// Disc number from tags when known.
+    pub disc_number: Option<u32>,
     /// Whether cover art was found (`None` until enrichment).
     pub has_cover: Option<bool>,
+    /// Public art URL for remote-derived tracks (YouTube thumbs) — the only
+    /// image Discord Rich Presence can render for local playback.
+    pub thumb_url: Option<String>,
+    /// Track length in seconds (`None` until enrichment probes the file).
+    pub duration_secs: Option<f64>,
     /// Unix seconds of file mtime; `0` when metadata is unavailable.
     pub mtime: u64,
+    /// File size in bytes; `0` when metadata is unavailable.
+    pub size: u64,
 }
 impl From<&Track> for TrackDto {
     fn from(t: &Track) -> Self {
@@ -42,9 +51,13 @@ impl From<&Track> for TrackDto {
             artist: t.artist.clone().unwrap_or_default(),
             album: t.album.clone().unwrap_or_default(),
             track_number: t.track_number,
+            disc_number: t.disc_number,
             has_cover: t.has_cover,
+            thumb_url: t.thumb_url(),
             path,
+            duration_secs: t.duration_secs,
             mtime: t.mtime,
+            size: t.size,
         }
     }
 }
@@ -72,13 +85,13 @@ impl LoopMode {
     pub fn label(self) -> &'static str {
         match self {
             Self::Off => "off",
-            Self::List => "list",
-            Self::Track => "track",
+            Self::List => "all",
+            Self::Track => "one",
         }
     }
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct PlaybackState {
     pub queue: Vec<String>,
     pub current: Option<TrackDto>,
@@ -135,6 +148,9 @@ pub struct CoreController {
     manually_stopped: bool,
     loop_mode: LoopMode,
     shuffled: bool,
+    /// History-aware shuffle: advance avoids recently played tracks.
+    smart_shuffle: bool,
+    recent: VecDeque<String>,
     desktop_preferences: String,
     /// Wall-clock of last resume write (throttle disk I/O while playing).
     last_resume_save: std::time::Instant,
@@ -159,6 +175,8 @@ impl CoreController {
             manually_stopped: true,
             loop_mode: LoopMode::Off,
             shuffled: false,
+            smart_shuffle: false,
+            recent: VecDeque::new(),
             desktop_preferences: Self::load_desktop_preferences(),
             last_resume_save: std::time::Instant::now()
                 .checked_sub(std::time::Duration::from_secs(60))
@@ -188,7 +206,7 @@ impl CoreController {
             toml::Value::String(self.desktop_preferences.clone()),
         );
         let doc = toml::Value::Table(table);
-        std::fs::write(path, toml::to_string_pretty(&doc)?)?;
+        option_sdk::atomic_write(path, toml::to_string_pretty(&doc)?.as_bytes())?;
         Ok(())
     }
     pub fn set_desktop_preferences(&mut self, preferences: String) -> Result<()> {
@@ -268,10 +286,7 @@ impl CoreController {
             track.enrich_tags();
             processed += 1;
             let after = TrackDto::from(&*track);
-            if before.artist != after.artist
-                || before.album != after.album
-                || before.name != after.name
-            {
+            if dto_visible_fields_changed(&before, &after) {
                 updated.push(after);
             }
         }
@@ -280,6 +295,53 @@ impl CoreController {
             tracks: updated,
             done,
         }
+    }
+
+    /// Up to `limit` not-yet-enriched tracks as `(id, path, mtime, size)`
+    /// tuples, in library order. Non-mutating: the caller reads tags and
+    /// cover art on a background executor (e.g. `meta::read_tags_cached` +
+    /// `cover::resolve_cover_file`), then hands results to
+    /// [`Self::enrich_apply`] back on the app thread.
+    pub fn enrich_prepare(&self, limit: usize) -> Vec<(String, PathBuf, u64, u64)> {
+        self.library
+            .iter()
+            .filter(|t| !t.tags_enriched)
+            .take(limit)
+            .map(|t| {
+                (
+                    t.path.to_string_lossy().into_owned(),
+                    t.path.clone(),
+                    t.mtime,
+                    t.size,
+                )
+            })
+            .collect()
+    }
+
+    /// Apply tag reads produced off-thread for [`Self::enrich_prepare`] ids.
+    /// Each item is `(id, tags, has_cover)`; unknown ids are skipped.
+    /// Returns DTOs for tracks whose visible fields changed (same diff rule
+    /// as [`Self::enrich_tags_batch`]).
+    pub fn enrich_apply(
+        &mut self,
+        results: Vec<(String, crate::meta::AudioTags, bool)>,
+    ) -> Vec<TrackDto> {
+        let mut updated = Vec::new();
+        for (id, tags, has_cover) in results {
+            let Some(&i) = self.path_index.get(&id) else {
+                continue;
+            };
+            let Some(track) = self.library.get_mut(i) else {
+                continue;
+            };
+            let before = TrackDto::from(&*track);
+            track.apply_tags(tags, has_cover);
+            let after = TrackDto::from(&*track);
+            if dto_visible_fields_changed(&before, &after) {
+                updated.push(after);
+            }
+        }
+        updated
     }
 
     pub fn tags_enrichment_pending(&self) -> bool {
@@ -319,6 +381,7 @@ impl CoreController {
         self.current = Some(id.into());
         self.manually_stopped = false;
         self.queue.retain(|x| x != id);
+        self.push_recent(id);
         let _ = crate::history::record_play(id);
         let _ = self.persist_resume(true);
         Ok(())
@@ -354,6 +417,7 @@ impl CoreController {
         let id = self
             .queue
             .pop_front()
+            .or_else(|| self.smart_pick())
             .or_else(|| self.next_id())
             .or_else(|| {
                 if self.loop_mode == LoopMode::List {
@@ -403,7 +467,56 @@ impl CoreController {
             .get(i)
             .map(|t| t.path.to_string_lossy().into_owned())
     }
-    pub fn seek(&mut self, s: f64) -> Result<()> {
+    /// Toggle history-aware shuffle. Returns the new state.
+    pub fn toggle_smart_shuffle(&mut self) -> bool {
+        self.smart_shuffle = !self.smart_shuffle;
+        self.smart_shuffle
+    }
+    pub fn smart_shuffle(&self) -> bool {
+        self.smart_shuffle
+    }
+    fn push_recent(&mut self, id: &str) {
+        let cap = crate::smart_shuffle::window_for_len(self.library.len()).max(1);
+        self.recent.push_back(id.to_owned());
+        while self.recent.len() > cap {
+            self.recent.pop_front();
+        }
+    }
+    /// Next track outside the recent window when smart shuffle is on.
+    fn smart_pick(&self) -> Option<String> {
+        if !self.smart_shuffle || self.library.is_empty() {
+            return None;
+        }
+        let window = crate::smart_shuffle::window_for_len(self.library.len());
+        let skip: std::collections::HashSet<&str> = self
+            .recent
+            .iter()
+            .rev()
+            .take(window)
+            .map(|s| s.as_str())
+            .collect();
+        let candidates: Vec<usize> = self
+            .library
+            .iter()
+            .enumerate()
+            .filter(|(_, t)| !skip.contains(t.path.to_string_lossy().as_ref()))
+            .map(|(i, _)| i)
+            .collect();
+        if candidates.is_empty() {
+            return None;
+        }
+        let seed = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos() as u64)
+            .unwrap_or(0x9e3779b97f4a7c15);
+        let mut state = seed ^ 0x9e3779b97f4a7c15;
+        state ^= state << 13;
+        state ^= state >> 7;
+        state ^= state << 17;
+        self.library
+            .get(candidates[(state as usize) % candidates.len()])
+            .map(|t| t.path.to_string_lossy().into_owned())
+    }    pub fn seek(&mut self, s: f64) -> Result<()> {
         self.player()?.seek(Duration::from_secs_f64(s.max(0.0)))?;
         let _ = self.persist_resume(true);
         Ok(())
@@ -426,6 +539,10 @@ impl CoreController {
     }
     pub fn set_ldm(&mut self, enabled: bool) -> Result<()> {
         self.config.ldm = enabled;
+        self.save_config()
+    }
+    pub fn set_discord_rpc(&mut self, enabled: bool) -> Result<()> {
+        self.config.discord_rpc = enabled;
         self.save_config()
     }
     pub fn set_artist_source(&mut self, source: crate::config::ArtistSource) -> Result<()> {
@@ -549,6 +666,29 @@ impl CoreController {
     }
     pub fn remove_queue(&mut self, id: &str) {
         self.queue.retain(|x| x != id)
+    }
+    /// Empty the play queue (the current track keeps playing).
+    pub fn clear_queue(&mut self) {
+        self.queue.clear();
+    }
+    /// Move the queued item at `from` to index `to` (clamped to the tail).
+    /// Returns false when `from` is out of bounds.
+    pub fn queue_move(&mut self, from: usize, to: usize) -> bool {
+        if from >= self.queue.len() {
+            return false;
+        }
+        let to = to.min(self.queue.len() - 1);
+        if from == to {
+            return true;
+        }
+        if let Some(item) = self.queue.remove(from) {
+            self.queue.insert(to, item);
+        }
+        true
+    }
+    /// Position of `id` in the queue, if present.
+    pub fn queue_index_of(&self, id: &str) -> Option<usize> {
+        self.queue.iter().position(|x| x == id)
     }
     pub fn play_next(&mut self, id: &str) -> Result<()> {
         self.track(id)?;
@@ -836,6 +976,15 @@ fn incomplete_album_tracks(library: &[Track]) -> Vec<TrackDto> {
     out
 }
 
+/// Whether enrichment changed a field the UI renders (name/artist/album or
+/// the freshly probed duration). Shared by `enrich_tags_batch`/`enrich_apply`.
+fn dto_visible_fields_changed(before: &TrackDto, after: &TrackDto) -> bool {
+    before.artist != after.artist
+        || before.album != after.album
+        || before.name != after.name
+        || before.duration_secs != after.duration_secs
+}
+
 fn paths_equivalent(a: &Path, b: &Path) -> bool {
     if a == b {
         return true;
@@ -902,11 +1051,105 @@ mod tests {
             has_cover: Some(true),
             mtime: 12_345,
             size: 999,
+            duration_secs: Some(61.5),
             tags_enriched: true,
         };
         let dto = TrackDto::from(&track);
         assert_eq!(dto.mtime, 12_345);
+        assert_eq!(dto.size, 999);
+        assert_eq!(dto.duration_secs, Some(61.5));
         assert_eq!(dto.name, "Song");
+    }
+
+    fn controller_with_tracks(paths: &[&str]) -> CoreController {
+        let mut c = CoreController::with_config(AppConfig::default());
+        c.library = paths
+            .iter()
+            .map(|p| Track::from_path(PathBuf::from(p)))
+            .collect();
+        c.rebuild_path_index();
+        c
+    }
+
+    #[test]
+    fn enrich_prepare_returns_only_unenriched() {
+        let mut c = controller_with_tracks(&["/m/a.mp3", "/m/b.mp3", "/m/c.mp3"]);
+        c.library[1].tags_enriched = true;
+        let prep = c.enrich_prepare(8);
+        assert_eq!(prep.len(), 2);
+        assert_eq!(prep[0].0, "/m/a.mp3");
+        assert_eq!(prep[0].1, PathBuf::from("/m/a.mp3"));
+        assert_eq!(prep[1].0, "/m/c.mp3");
+        // Honors the limit and does not mark anything enriched.
+        let prep = c.enrich_prepare(1);
+        assert_eq!(prep.len(), 1);
+        assert_eq!(prep[0].0, "/m/a.mp3");
+        assert!(c.tags_enrichment_pending());
+    }
+
+    #[test]
+    fn enrich_apply_marks_and_updates() {
+        let mut c = controller_with_tracks(&["/m/a.mp3", "/m/b.mp3"]);
+        let tags = crate::meta::AudioTags {
+            title: Some("Title A".into()),
+            artist: Some("Artist A".into()),
+            album: Some("Album A".into()),
+            track_number: Some(3),
+            duration_secs: Some(123.5),
+            ..Default::default()
+        };
+        let updated = c.enrich_apply(vec![
+            ("/m/a.mp3".into(), tags, true),
+            ("/m/missing.mp3".into(), Default::default(), false),
+        ]);
+        // Only the known, visibly changed track is reported.
+        assert_eq!(updated.len(), 1);
+        assert_eq!(updated[0].id, "/m/a.mp3");
+        assert_eq!(updated[0].name, "Title A");
+        assert_eq!(updated[0].artist, "Artist A");
+        assert_eq!(updated[0].album, "Album A");
+        assert_eq!(updated[0].duration_secs, Some(123.5));
+        assert_eq!(updated[0].has_cover, Some(true));
+        let t = &c.library[0];
+        assert!(t.tags_enriched);
+        assert_eq!(t.title.as_deref(), Some("Title A"));
+        assert_eq!(t.track_number, Some(3));
+        assert_eq!(t.duration_secs, Some(123.5));
+        assert_eq!(t.has_cover, Some(true));
+        assert!(c.tags_enrichment_pending());
+        // Empty tags still mark the track done but produce no visible diff.
+        let updated = c.enrich_apply(vec![("/m/b.mp3".into(), Default::default(), false)]);
+        assert!(updated.is_empty());
+        assert!(c.library[1].tags_enriched);
+        assert_eq!(c.library[1].has_cover, Some(false));
+        assert!(!c.tags_enrichment_pending());
+    }
+
+    #[test]
+    fn queue_move_and_clear() {
+        let mut c = controller_with_tracks(&["/m/a.mp3", "/m/b.mp3", "/m/c.mp3"]);
+        for id in ["/m/a.mp3", "/m/b.mp3", "/m/c.mp3"] {
+            c.add_queue(id).unwrap();
+        }
+        assert_eq!(c.queue_index_of("/m/b.mp3"), Some(1));
+        assert!(c.queue_move(0, 2));
+        assert_eq!(
+            c.queue.iter().cloned().collect::<Vec<_>>(),
+            vec!["/m/b.mp3", "/m/c.mp3", "/m/a.mp3"]
+        );
+        assert!(c.queue_move(1, 1)); // same index is a valid no-op
+        assert!(!c.queue_move(3, 0)); // out of bounds
+        assert!(!c.queue_move(9, 9));
+        assert!(c.queue_move(0, 99)); // `to` clamps to the tail
+        assert_eq!(
+            c.queue.iter().cloned().collect::<Vec<_>>(),
+            vec!["/m/c.mp3", "/m/a.mp3", "/m/b.mp3"]
+        );
+        assert_eq!(c.queue_index_of("/m/b.mp3"), Some(2));
+        c.clear_queue();
+        assert!(c.queue.is_empty());
+        assert_eq!(c.queue_index_of("/m/a.mp3"), None);
+        assert!(!c.queue_move(0, 0)); // empty queue: nothing to move
     }
 
     #[test]
@@ -917,5 +1160,41 @@ mod tests {
         let update = c.enrich_tags_batch(8);
         assert!(update.done);
         assert!(c.library[0].tags_enriched);
+    }
+
+    #[test]
+    fn loop_mode_cycles_off_all_one() {
+        let mut m = LoopMode::Off;
+        m = m.next();
+        assert_eq!(m, LoopMode::List);
+        assert_eq!(m.label(), "all");
+        m = m.next();
+        assert_eq!(m, LoopMode::Track);
+        assert_eq!(m.label(), "one");
+        m = m.next();
+        assert_eq!(m, LoopMode::Off);
+        assert_eq!(m.label(), "off");
+    }
+
+    #[test]
+    fn smart_shuffle_avoids_recent() {
+        let mut c = CoreController::with_config(AppConfig::default());
+        c.library = (0..12)
+            .map(|i| Track::from_path(PathBuf::from(format!("/m/t{i}.mp3"))))
+            .collect();
+        c.rebuild_path_index();
+        assert!(c.toggle_smart_shuffle());
+        for i in 1..=8 {
+            c.push_recent(&format!("/m/t{i}.mp3"));
+        }
+        for _ in 0..20 {
+            let pick = c.smart_pick().expect("pick");
+            assert!(
+                ["/m/t0.mp3", "/m/t9.mp3", "/m/t10.mp3", "/m/t11.mp3"].contains(&pick.as_str()),
+                "picked recent {pick}"
+            );
+        }
+        c.smart_shuffle = false;
+        assert!(c.smart_pick().is_none());
     }
 }

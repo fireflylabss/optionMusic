@@ -16,8 +16,10 @@ use crossterm::terminal::{
 };
 use crossterm::{execute, queue};
 
+use crate::config::AppConfig;
 use crate::library::{AlbumGroup, ArtistGroup, Library};
 use crate::player::Player;
+use crate::rpc::Rpc;
 use crate::ui::fmt_time;
 
 // ── Palette (compact B&W, same family as the player) ─────────
@@ -56,7 +58,14 @@ enum Level {
 /// Running browse session: owns the player so `enter` can start playback and
 /// the tree can keep reacting while music plays.
 pub fn run(library: Library, favorites_only: bool, enable_cava: bool) -> Result<()> {
-    let player = Player::new(80, 1.0, 0.0).context("cannot open player")?;
+    // Saved playback prefs are the defaults here too (same as `play`).
+    let prefs = AppConfig::load();
+    let mut player = Player::new(prefs.volume, prefs.speed, 0.0)
+        .context("cannot open player")?;
+    player.set_volume_max(prefs.volume_max());
+    player.set_volume(prefs.volume);
+    player.set_eq(prefs.eq);
+    player.set_pitch(prefs.pitch);
 
     let mut session = Session::new(library, favorites_only, player, enable_cava);
     session.enter()?;
@@ -437,9 +446,26 @@ impl Session {
 
     fn run(&mut self) -> Result<()> {
         let mut quit = false;
+        let mut rpc = Rpc::new();
+        let cfg = AppConfig::load();
+        let _ = rpc.sync(cfg.discord_rpc, &cfg.discord_rpc_id);
         loop {
             self.paint()?;
             self.auto_advance();
+
+            // Discord presence (deduped inside; no-op when disabled).
+            if let Some(i) = self.queue_cursor {
+                if let Some(t) = self.library.get(i) {
+                    rpc.update(
+                        &t.display_name(),
+                        &t.artist_album(),
+                        t.thumb_url().as_deref(),
+                        self.player.position(),
+                        self.player.duration(),
+                        self.player.is_paused(),
+                    );
+                }
+            }
 
             if event::poll(Duration::from_millis(40)).unwrap_or(false) {
                 loop {

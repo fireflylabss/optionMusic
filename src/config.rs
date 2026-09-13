@@ -17,22 +17,34 @@ pub fn config_dir() -> PathBuf {
 
 /// `~/.option/music/config.toml`
 pub fn config_path() -> PathBuf {
-    config_dir().join("config.toml")
+    let _ = option_sdk::App::MUSIC.ensure();
+    option_sdk::App::MUSIC.config_toml()
 }
 
-/// `~/.option/music/cache`
+/// Raw `desktop_preferences` string from config.toml, without a controller.
+/// The desktop app stores its UI state blob (JSON) there.
+pub fn desktop_preferences_raw() -> Option<String> {
+    let raw = fs::read_to_string(config_path()).ok()?;
+    let doc = raw.parse::<toml::Value>().ok()?;
+    doc.get("desktop_preferences")?.as_str().map(String::from)
+}
+
+/// `~/.option/music/cache` (ensures the whole `~/.option/music` + `cache/` tree)
 pub fn cache_dir() -> PathBuf {
-    config_dir().join("cache")
+    let _ = option_sdk::App::MUSIC.ensure_cache();
+    option_sdk::App::MUSIC.cache_dir()
 }
 
 /// `~/.option/music/cache/tags`
 pub fn tags_cache_dir() -> PathBuf {
-    cache_dir().join("tags")
+    let _ = cache_dir();
+    option_sdk::App::MUSIC.path("cache/tags")
 }
 
 /// `~/.option/music/cache/covers`
 pub fn covers_cache_dir() -> PathBuf {
-    cache_dir().join("covers")
+    let _ = cache_dir();
+    option_sdk::App::MUSIC.path("cache/covers")
 }
 
 /// Stable FNV-1a 64-bit digest for on-disk cache filenames.
@@ -372,6 +384,139 @@ impl DlUiMode {
     }
 }
 
+/// Toast anchor (`toast_pos` in config.toml).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum ToastPos {
+    /// Bottom-center (default).
+    #[default]
+    #[serde(alias = "bottom_center", alias = "bottomcenter", alias = "bottom", alias = "center")]
+    BottomCenter,
+    #[serde(alias = "bottom_left", alias = "bottomleft", alias = "left")]
+    BottomLeft,
+    #[serde(alias = "bottom_right", alias = "bottomright", alias = "right")]
+    BottomRight,
+    #[serde(alias = "top_center", alias = "topcenter", alias = "top")]
+    TopCenter,
+    #[serde(alias = "top_left", alias = "topleft")]
+    TopLeft,
+    #[serde(alias = "top_right", alias = "topright")]
+    TopRight,
+}
+
+impl ToastPos {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::BottomCenter => "bottom-center",
+            Self::BottomLeft => "bottom-left",
+            Self::BottomRight => "bottom-right",
+            Self::TopCenter => "top-center",
+            Self::TopLeft => "top-left",
+            Self::TopRight => "top-right",
+        }
+    }
+
+    pub fn next(self) -> Self {
+        match self {
+            Self::BottomCenter => Self::BottomLeft,
+            Self::BottomLeft => Self::BottomRight,
+            Self::BottomRight => Self::TopCenter,
+            Self::TopCenter => Self::TopLeft,
+            Self::TopLeft => Self::TopRight,
+            Self::TopRight => Self::BottomCenter,
+        }
+    }
+
+    pub fn prev(self) -> Self {
+        match self {
+            Self::BottomCenter => Self::TopRight,
+            Self::BottomLeft => Self::BottomCenter,
+            Self::BottomRight => Self::BottomLeft,
+            Self::TopCenter => Self::BottomRight,
+            Self::TopLeft => Self::TopCenter,
+            Self::TopRight => Self::TopLeft,
+        }
+    }
+}
+
+/// yt-dlp 403/PO-token fallback (`youtube:player_client=mweb` retry).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum DlFallbackMode {
+    /// Ask on TTY (`[s/N]`), never auto-retry off-TTY.
+    #[default]
+    Ask,
+    /// Retry automatically without asking.
+    Auto,
+    /// Never retry with the mweb fallback.
+    Off,
+}
+
+impl DlFallbackMode {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Ask => "ask",
+            Self::Auto => "auto",
+            Self::Off => "off",
+        }
+    }
+
+    pub fn next(self) -> Self {
+        match self {
+            Self::Ask => Self::Auto,
+            Self::Auto => Self::Off,
+            Self::Off => Self::Ask,
+        }
+    }
+
+    pub fn prev(self) -> Self {
+        match self {
+            Self::Ask => Self::Off,
+            Self::Auto => Self::Ask,
+            Self::Off => Self::Auto,
+        }
+    }
+}
+
+/// Docked lyrics strip position (`lyrics_pos` in config.toml).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum LyricsPos {
+    /// Strip above the "option MUSIC" header block (top of player area).
+    #[default]
+    Above,
+    /// Strip below the footer shortcut chip row (bottom of screen area).
+    Below,
+    /// Strip hidden — `y` re-opens below.
+    Hidden,
+}
+
+impl LyricsPos {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Above => "above",
+            Self::Below => "below",
+            Self::Hidden => "hidden",
+        }
+    }
+
+    pub fn next(self) -> Self {
+        match self {
+            Self::Above => Self::Below,
+            Self::Below => Self::Hidden,
+            Self::Hidden => Self::Above,
+        }
+    }
+
+    pub fn prev(self) -> Self {
+        match self {
+            Self::Above => Self::Hidden,
+            Self::Below => Self::Above,
+            Self::Hidden => Self::Below,
+        }
+    }
+}
+
 /// ReplayGain application mode (MPV `replaygain` property).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
@@ -409,6 +554,39 @@ impl ReplayGainMode {
     }
 }
 
+/// Repeat mode persisted across sessions (`o` cycles off → all → one).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum RepeatMode {
+    #[default]
+    Off,
+    All,
+    One,
+}
+
+impl RepeatMode {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Off => "off",
+            Self::All => "all",
+            Self::One => "one",
+        }
+    }
+}
+
+fn default_volume() -> u8 {
+    80
+}
+fn default_speed() -> f64 {
+    1.0
+}
+fn default_pitch() -> f64 {
+    1.0
+}
+fn default_true() -> bool {
+    true
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct AppConfig {
@@ -421,12 +599,24 @@ pub struct AppConfig {
     /// Download wizard UI: `arrows` (default) or `type`.
     #[serde(default)]
     pub dl_ui: DlUiMode,
+    /// 403 fallback: `ask` (default) · `auto` · `off`.
+    #[serde(default)]
+    pub dl_fallback: DlFallbackMode,
+    /// Toast anchor: `bottom-center` (default) · `bottom-left` · `bottom-right` · `top-center` · `top-left` · `top-right`.
+    #[serde(default)]
+    pub toast_pos: ToastPos,
+    /// Stack up to 3 toasts; when off (default) only the newest toast shows.
+    #[serde(default)]
+    pub toast_stack: bool,
     /// Artists browser: metadata tags (default) or folder names.
     #[serde(default)]
     pub artist_source: ArtistSource,
     /// ReplayGain mode applied via MPV.
     #[serde(default)]
     pub replaygain: ReplayGainMode,
+    /// Docked lyrics strip: `above` (default) · `below` · `hidden`.
+    #[serde(default)]
+    pub lyrics_pos: LyricsPos,
     #[serde(default, rename = "folders")]
     pub music_dirs: Vec<PathBuf>,
     #[serde(default)]
@@ -440,6 +630,28 @@ pub struct AppConfig {
     /// Queue ids restored with the session.
     #[serde(default)]
     pub resume_queue: Vec<String>,
+    /// Persist playback prefs + session on quit; `msc play` bare resumes (on by default).
+    #[serde(default = "default_true")]
+    pub resume: bool,
+    /// Discord Rich Presence via local IPC (off by default).
+    #[serde(default)]
+    pub discord_rpc: bool,
+    /// Discord application client id override (empty = built-in).
+    #[serde(default)]
+    pub discord_rpc_id: String,
+    /// Persisted playback prefs (restored on next launch; CLI flags win).
+    #[serde(default = "default_volume")]
+    pub volume: u8,
+    #[serde(default)]
+    pub eq: crate::eq::EqPreset,
+    #[serde(default)]
+    pub repeat: RepeatMode,
+    #[serde(default = "default_speed")]
+    pub speed: f64,
+    #[serde(default = "default_pitch")]
+    pub pitch: f64,
+    #[serde(default)]
+    pub smart_shuffle: bool,
 }
 
 impl Default for AppConfig {
@@ -450,13 +662,26 @@ impl Default for AppConfig {
             accent: Accent::Default,
             cava: CavaConfig::default(),
             dl_ui: DlUiMode::Arrows,
+            dl_fallback: DlFallbackMode::Ask,
+            toast_pos: ToastPos::BottomCenter,
+            toast_stack: false,
             artist_source: ArtistSource::Metadata,
             replaygain: ReplayGainMode::Off,
+            lyrics_pos: LyricsPos::Above,
             music_dirs: Vec::new(),
             favorites: Vec::new(),
             resume_track: String::new(),
             resume_position: 0.0,
             resume_queue: Vec::new(),
+            resume: true,
+            discord_rpc: false,
+            discord_rpc_id: String::new(),
+            volume: 80,
+            eq: crate::eq::EqPreset::Off,
+            repeat: RepeatMode::Off,
+            speed: 1.0,
+            pitch: 1.0,
+            smart_shuffle: false,
         }
     }
 }
@@ -513,6 +738,30 @@ mod tests {
     fn config_dir_ends_with_option_music() {
         let dir = config_dir();
         assert!(dir.ends_with(std::path::Path::new(".option").join("music")));
+    }
+
+    #[test]
+    fn sdk_paths_stay_under_option_music() {
+        use std::path::Path;
+        // Resolved paths must match the SDK surface exactly and keep the
+        // historical `~/.option/music/...` layout (old TOMLs stay valid).
+        assert_eq!(config_dir(), option_sdk::App::MUSIC.dir());
+        assert_eq!(config_path(), option_sdk::App::MUSIC.config_toml());
+        assert_eq!(cache_dir(), option_sdk::App::MUSIC.cache_dir());
+        assert_eq!(
+            tags_cache_dir(),
+            option_sdk::App::MUSIC.path("cache/tags")
+        );
+        assert_eq!(
+            covers_cache_dir(),
+            option_sdk::App::MUSIC.path("cache/covers")
+        );
+        let root = Path::new(".option").join("music");
+        assert!(config_dir().ends_with(&root));
+        assert!(config_path().ends_with(root.join("config.toml")));
+        assert!(cache_dir().ends_with(root.join("cache")));
+        assert!(tags_cache_dir().ends_with(root.join("cache").join("tags")));
+        assert!(covers_cache_dir().ends_with(root.join("cache").join("covers")));
     }
 
     #[test]
@@ -592,5 +841,73 @@ mod tests {
         assert_eq!(t.dl_ui, DlUiMode::Type);
         let a: AppConfig = toml::from_str("dl_ui = \"arrow\"").unwrap();
         assert_eq!(a.dl_ui, DlUiMode::Arrows);
+    }
+
+    #[test]
+    fn dl_fallback_defaults_to_ask() {
+        use super::DlFallbackMode;
+        assert_eq!(AppConfig::default().dl_fallback, DlFallbackMode::Ask);
+        let back: AppConfig = toml::from_str("ldm = false").unwrap();
+        assert_eq!(back.dl_fallback, DlFallbackMode::Ask);
+        let auto: AppConfig = toml::from_str("dl_fallback = \"auto\"").unwrap();
+        assert_eq!(auto.dl_fallback, DlFallbackMode::Auto);
+    }
+
+    #[test]
+    fn toast_pos_defaults_to_bottom_center() {
+        assert_eq!(
+            AppConfig::default().toast_pos,
+            ToastPos::BottomCenter
+        );
+        let back: AppConfig = toml::from_str("ldm = false").unwrap();
+        assert_eq!(back.toast_pos, ToastPos::BottomCenter);
+        let tl: AppConfig = toml::from_str("toast_pos = \"bottom-left\"").unwrap();
+        assert_eq!(tl.toast_pos, ToastPos::BottomLeft);
+        let top: AppConfig = toml::from_str("toast_pos = \"top-center\"").unwrap();
+        assert_eq!(top.toast_pos, ToastPos::TopCenter);
+    }
+
+    #[test]
+    fn toast_pos_cycles() {
+        assert_eq!(ToastPos::BottomCenter.next(), ToastPos::BottomLeft);
+        assert_eq!(ToastPos::BottomLeft.prev(), ToastPos::BottomCenter);
+    }
+
+    #[test]
+    fn toast_pos_covers_all_six() {
+        // next() walks the full ring, prev() walks it back.
+        let mut p = ToastPos::BottomCenter;
+        for _ in 0..5 {
+            p = p.next();
+        }
+        assert_eq!(p, ToastPos::TopRight);
+        assert_eq!(p.next(), ToastPos::BottomCenter);
+        let mut q = ToastPos::BottomCenter;
+        for _ in 0..5 {
+            q = q.prev();
+        }
+        assert_eq!(q, ToastPos::BottomLeft);
+        assert_eq!(q.prev(), ToastPos::BottomCenter);
+        assert_eq!(ToastPos::TopLeft.label(), "top-left");
+        assert_eq!(ToastPos::TopRight.label(), "top-right");
+    }
+
+    #[test]
+    fn toast_pos_parses_new_aliases() {
+        let tl: AppConfig = toml::from_str("toast_pos = \"top-left\"").unwrap();
+        assert_eq!(tl.toast_pos, ToastPos::TopLeft);
+        let tr: AppConfig = toml::from_str("toast_pos = \"topright\"").unwrap();
+        assert_eq!(tr.toast_pos, ToastPos::TopRight);
+        let tl2: AppConfig = toml::from_str("toast_pos = \"topleft\"").unwrap();
+        assert_eq!(tl2.toast_pos, ToastPos::TopLeft);
+    }
+
+    #[test]
+    fn toast_stack_defaults_to_off() {
+        assert!(!AppConfig::default().toast_stack);
+        let back: AppConfig = toml::from_str("ldm = false").unwrap();
+        assert!(!back.toast_stack);
+        let on: AppConfig = toml::from_str("toast_stack = true").unwrap();
+        assert!(on.toast_stack);
     }
 }

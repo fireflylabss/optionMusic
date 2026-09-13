@@ -85,7 +85,7 @@ impl Baseline {
             let _ = std::fs::create_dir_all(dir);
         }
         if let Ok(body) = toml::to_string(self) {
-            let _ = std::fs::write(path, body);
+            let _ = option_sdk::atomic_write(path, body.as_bytes());
         }
     }
 

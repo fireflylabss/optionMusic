@@ -30,6 +30,9 @@ pub struct Player {
     eq: EqPreset,
     /// Soft stop (no active file / held).
     stopped: bool,
+    /// Position captured when `stop()` ran — `position()` zeroes on stop, but
+    /// session resume still needs where we were.
+    stopped_pos: Duration,
     /// Track finished naturally (eof) — cleared on next load.
     finished: bool,
     /// MPV loop-file (repeat current track).
@@ -52,6 +55,7 @@ impl Player {
             pitch: 1.0,
             eq: EqPreset::Off,
             stopped: true,
+            stopped_pos: Duration::ZERO,
             finished: false,
             loop_track: false,
         })
@@ -71,6 +75,10 @@ impl Player {
 
     pub fn pitch(&self) -> f64 {
         self.pitch
+    }
+
+    pub fn eq(&self) -> EqPreset {
+        self.eq
     }
 
     pub fn eq_label(&self) -> &'static str {
@@ -206,8 +214,16 @@ impl Player {
         // GTK may flip LC_NUMERIC after init; keep C for libmpv property I/O.
         crate::mpv::ensure_c_numeric_locale();
         self.drain_events();
+        // `start=` must ride on loadfile: a seek sent before the demuxer is
+        // ready is dropped and the position is lost.
+        let start_opt = format!("start={position:.3}");
+        let args: Vec<&str> = if position > 0.05 {
+            vec![uri, "replace", "-1", &start_opt]
+        } else {
+            vec![uri, "replace"]
+        };
         self.mpv
-            .command("loadfile", &[uri, "replace"])
+            .command("loadfile", &args)
             .map_err(|e| anyhow::anyhow!("cannot load {uri}: {e:?}"))?;
         // Drop EndFile(Stop) from the replace so next/prev aren't treated as eof.
         self.drain_events();
@@ -221,10 +237,6 @@ impl Player {
             .mpv
             .set_property("loop-file", if self.loop_track { "inf" } else { "no" });
         let _ = self.mpv.set_property("pause", paused);
-        if position > 0.05 {
-            let pos = format!("{position:.3}");
-            let _ = self.mpv.command("seek", &[&pos, "absolute"]);
-        }
 
         self.stopped = false;
         self.finished = false;
@@ -256,9 +268,19 @@ impl Player {
     }
 
     pub fn stop(&mut self) {
+        self.stopped_pos = self.position();
         let _ = self.mpv.command("stop", &[]);
         self.stopped = true;
         self.finished = false;
+    }
+
+    /// Position for session resume — stays valid after `stop()`.
+    pub fn resume_position(&self) -> Duration {
+        if self.stopped {
+            self.stopped_pos
+        } else {
+            self.position()
+        }
     }
 
     /// True when nothing is playing (stopped or track ended).
