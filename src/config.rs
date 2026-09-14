@@ -390,7 +390,12 @@ impl DlUiMode {
 pub enum ToastPos {
     /// Bottom-center (default).
     #[default]
-    #[serde(alias = "bottom_center", alias = "bottomcenter", alias = "bottom", alias = "center")]
+    #[serde(
+        alias = "bottom_center",
+        alias = "bottomcenter",
+        alias = "bottom",
+        alias = "center"
+    )]
     BottomCenter,
     #[serde(alias = "bottom_left", alias = "bottomleft", alias = "left")]
     BottomLeft,
@@ -748,10 +753,7 @@ mod tests {
         assert_eq!(config_dir(), option_sdk::App::MUSIC.dir());
         assert_eq!(config_path(), option_sdk::App::MUSIC.config_toml());
         assert_eq!(cache_dir(), option_sdk::App::MUSIC.cache_dir());
-        assert_eq!(
-            tags_cache_dir(),
-            option_sdk::App::MUSIC.path("cache/tags")
-        );
+        assert_eq!(tags_cache_dir(), option_sdk::App::MUSIC.path("cache/tags"));
         assert_eq!(
             covers_cache_dir(),
             option_sdk::App::MUSIC.path("cache/covers")
@@ -855,10 +857,7 @@ mod tests {
 
     #[test]
     fn toast_pos_defaults_to_bottom_center() {
-        assert_eq!(
-            AppConfig::default().toast_pos,
-            ToastPos::BottomCenter
-        );
+        assert_eq!(AppConfig::default().toast_pos, ToastPos::BottomCenter);
         let back: AppConfig = toml::from_str("ldm = false").unwrap();
         assert_eq!(back.toast_pos, ToastPos::BottomCenter);
         let tl: AppConfig = toml::from_str("toast_pos = \"bottom-left\"").unwrap();

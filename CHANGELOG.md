@@ -34,6 +34,14 @@ Older desktop builds (`v0.1.0`, `v0.1.1`) had no channel suffix. From `v0.1.2-be
 
 </details>
 
+## v0.2.18-beta · 13/09/2026
+
+Windows support for the CLI. This version was made for CLI with a beta release channel on 13/09/2026 (v0.2.18-beta).
+
+- Builds and links on `x86_64-pc-windows-gnu` against the libmpv dev package (`libmpv-2.dll`); new `windows` CI job uploads `optionmusic.exe` / `msc.exe` artifacts.
+- `msc dl` no longer shells out to `sh` to locate `yt-dlp` / `ffmpeg` — PATH (and `PATHEXT` on Windows) is searched directly.
+- README: Windows build instructions; cava spectrum strip documented as Linux-only.
+
 ## v0.1.7-beta · 12/09/2026
 
 The native GPUI desktop app grows up: albums page, full playlist flows, sound controls, lyrics, tag edit, queue tools, and real keyboard/accessibility coverage. This version was made for desktop with a beta release channel on 12/09/2026 (v0.1.7-beta).
