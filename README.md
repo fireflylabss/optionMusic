@@ -107,6 +107,7 @@ msc playlist ls                                     # saved playlists
 msc radio                                           # endless radio from your library
 msc radio "daft punk"                               # seed by search
 msc rd --genre trip-hop --fresh                     # seed by genre, rediscovery mode
+msc doctor                                          # check yt-dlp / ffmpeg / cava on PATH
 msc --help
 ```
 
@@ -169,6 +170,7 @@ Uses system **yt-dlp**. Interactive wizard (`msc dl`):
 | `msc sleep MIN\|off` | Sleep timer — fades playback after N minutes |
 | `msc playlist` / `pls` | `ls` · `create` · `import`/`export` M3U · `add` · `delete` |
 | `msc library` / `lib` | `refresh` (incremental index) · `ls` · `paths` (script-friendly) |
+| `msc doctor` / `check` | Which external tools were found on `PATH`, what each one is for, and whether `msc dl` is ready |
 
 ### Keyboard
 

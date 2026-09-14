@@ -25,7 +25,7 @@ pub struct LrcLine {
     pub words: Vec<LyricWord>,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct ResolvedLyrics {
     /// Synced lines (empty when only plain text / none).
     pub lines: Vec<LrcLine>,
@@ -377,8 +377,8 @@ fn cache_key(artist: &str, title: &str, album: &str, duration: Option<f64>) -> S
     ])
 }
 
-/// Fetch lrclib JSON via `curl` (short timeout, no new deps). Returns the raw body.
-fn fetch_lrclib(artist: &str, title: &str, album: &str, duration: Option<f64>) -> Option<String> {
+/// lrclib `GET /api/get` URL for a track.
+fn lrclib_url(artist: &str, title: &str, album: &str, duration: Option<f64>) -> String {
     let mut url = format!(
         "https://lrclib.net/api/get?artist_name={}&track_name={}",
         percent_encode(artist),
@@ -392,23 +392,25 @@ fn fetch_lrclib(artist: &str, title: &str, album: &str, duration: Option<f64>) -
     {
         url.push_str(&format!("&duration={}", d.round() as u64));
     }
-    let probe = std::process::Command::new("curl")
-        .args([
-            "-sS",
-            "--max-time",
-            "6",
-            "--connect-timeout",
-            "4",
-            "-H",
-            "User-Agent: optionmusic",
-            &url,
-        ])
-        .output()
+    url
+}
+
+/// Fetch lrclib JSON over HTTPS. Returns the raw body.
+fn fetch_lrclib(artist: &str, title: &str, album: &str, duration: Option<f64>) -> Option<String> {
+    let url = lrclib_url(artist, title, album, duration);
+    let agent: ureq::Agent = ureq::Agent::config_builder()
+        .timeout_connect(Some(Duration::from_secs(4)))
+        .timeout_global(Some(Duration::from_secs(6)))
+        .user_agent(concat!("optionmusic/", env!("CARGO_PKG_VERSION")))
+        .build()
+        .into();
+    let body = agent
+        .get(&url)
+        .call()
+        .ok()?
+        .body_mut()
+        .read_to_string()
         .ok()?;
-    if !probe.status.success() {
-        return None;
-    }
-    let body = String::from_utf8(probe.stdout).ok()?;
     if body.trim().is_empty() || body.contains("\"statusCode\":404") {
         return None;
     }
@@ -450,6 +452,9 @@ fn from_lrclib_body(body: &str) -> ResolvedLyrics {
 
 /// Resolve lyrics for a track: sidecar `.lrc` → cache → embedded → lrclib.
 /// Sidecar `.txt` and embedded text surface as plain lines.
+///
+/// Blocks on the network when only lrclib can answer; interactive callers
+/// should use [`LyricsLoader`] instead.
 pub fn resolve_lyrics(
     path: &Path,
     artist: &str,
@@ -457,36 +462,49 @@ pub fn resolve_lyrics(
     album: &str,
     duration: Option<f64>,
 ) -> ResolvedLyrics {
+    match resolve_local(path, artist, title, album, duration) {
+        Some(r) => r,
+        None => fetch_remote(artist, title, album, duration).unwrap_or_else(ResolvedLyrics::empty),
+    }
+}
+
+/// Lyrics reachable without network I/O: sidecar → cache → embedded tags.
+/// `None` means only lrclib can still answer.
+pub fn resolve_local(
+    path: &Path,
+    artist: &str,
+    title: &str,
+    album: &str,
+    duration: Option<f64>,
+) -> Option<ResolvedLyrics> {
     // 1. Local `.lrc` sidecar next to the file.
     let stem = path.with_extension("");
     let sidecar = stem.with_extension("lrc");
     if let Ok(text) = fs::read_to_string(&sidecar) {
         let lines = parse_lrc(&text);
         if !lines.is_empty() {
-            return ResolvedLyrics {
+            return Some(ResolvedLyrics {
                 lines,
                 plain: Vec::new(),
                 source: "sidecar".into(),
-            };
+            });
         }
         let plain = split_plain(&text);
         if !plain.is_empty() {
-            return ResolvedLyrics {
+            return Some(ResolvedLyrics {
                 lines: Vec::new(),
                 plain,
                 source: "sidecar".into(),
-            };
+            });
         }
     }
     // 2. Cached lrclib response.
-    let dir = lyrics_cache_dir();
-    let key = cache_key(artist, title, album, duration);
-    let cached = dir.join(format!("{key}.json"));
+    let cached = cache_path(artist, title, album, duration);
     if let Ok(body) = fs::read_to_string(&cached) {
         let mut r = from_lrclib_body(&body);
         if !r.is_empty() {
             r.source = "cache".into();
-            return r;
+            return Some(r);
         }
     }
     // 3. Embedded / `.txt` via existing tag reader.
@@ -494,31 +512,132 @@ pub fn resolve_lyrics(
     if !local.text.trim().is_empty() {
         let lines = parse_lrc(&local.text);
         if !lines.is_empty() {
-            return ResolvedLyrics {
+            return Some(ResolvedLyrics {
                 lines,
                 plain: Vec::new(),
                 source: "embedded".into(),
-            };
+            });
         }
-        return ResolvedLyrics {
+        return Some(ResolvedLyrics {
             lines: Vec::new(),
             plain: split_plain(&local.text),
             source: "embedded".into(),
-        };
+        });
     }
-    // 4. lrclib network (needs artist + title).
+    None
+}
+
+fn cache_path(artist: &str, title: &str, album: &str, duration: Option<f64>) -> std::path::PathBuf {
+    let key = cache_key(artist, title, album, duration);
+    lyrics_cache_dir().join(format!("{key}.json"))
+}
+
+/// lrclib lookup (needs artist + title); caches the raw body on a hit.
+pub fn fetch_remote(
+    artist: &str,
+    title: &str,
+    album: &str,
+    duration: Option<f64>,
+) -> Option<ResolvedLyrics> {
     if artist.trim().is_empty() || title.trim().is_empty() {
-        return ResolvedLyrics::empty();
+        return None;
     }
-    if let Some(body) = fetch_lrclib(artist, title, album, duration) {
-        let r = from_lrclib_body(&body);
-        if !r.is_empty() {
-            let _ = fs::create_dir_all(&dir);
-            let _ = option_sdk::atomic_write(&cached, body.as_bytes());
-            return r;
+    let body = fetch_lrclib(artist, title, album, duration)?;
+    let r = from_lrclib_body(&body);
+    if r.is_empty() {
+        return None;
+    }
+    let cached = cache_path(artist, title, album, duration);
+    if let Some(dir) = cached.parent() {
+        let _ = fs::create_dir_all(dir);
+    }
+    let _ = option_sdk::atomic_write(&cached, body.as_bytes());
+    Some(r)
+}
+
+/// What to look up for a track. Owned so it can cross into a worker thread.
+#[derive(Debug, Clone, PartialEq)]
+pub struct LyricsQuery {
+    pub path: std::path::PathBuf,
+    pub artist: String,
+    pub title: String,
+    pub album: String,
+    pub duration: Option<f64>,
+}
+
+/// Resolution state of the lyrics panel.
+#[derive(Debug, Clone, PartialEq)]
+pub enum LyricsState {
+    /// A worker thread is talking to lrclib.
+    Loading,
+    Ready(ResolvedLyrics),
+    Missing,
+}
+
+/// Non-blocking lyrics resolution for interactive surfaces: local sources are
+/// read inline, lrclib runs on a worker thread while the UI keeps drawing.
+#[derive(Debug, Default)]
+pub struct LyricsLoader {
+    key: Option<String>,
+    state: Option<LyricsState>,
+    rx: Option<std::sync::mpsc::Receiver<Option<ResolvedLyrics>>>,
+}
+
+impl LyricsLoader {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Forget the current track (e.g. after a skip).
+    pub fn clear(&mut self) {
+        self.key = None;
+        self.state = None;
+        self.rx = None;
+    }
+
+    /// State for `query`, starting or polling the lrclib worker as needed.
+    /// Never blocks on the network.
+    pub fn state(&mut self, key: &str, query: impl FnOnce() -> LyricsQuery) -> &LyricsState {
+        if self.key.as_deref() != Some(key) {
+            self.clear();
+            self.key = Some(key.to_string());
+            let q = query();
+            match resolve_local(&q.path, &q.artist, &q.title, &q.album, q.duration) {
+                Some(r) => self.state = Some(LyricsState::Ready(r)),
+                None => self.spawn(q),
+            }
+        }
+        self.poll();
+        self.state.as_ref().unwrap_or(&LyricsState::Missing)
+    }
+
+    fn spawn(&mut self, q: LyricsQuery) {
+        if q.artist.trim().is_empty() || q.title.trim().is_empty() {
+            self.state = Some(LyricsState::Missing);
+            return;
+        }
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = tx.send(fetch_remote(&q.artist, &q.title, &q.album, q.duration));
+        });
+        self.rx = Some(rx);
+        self.state = Some(LyricsState::Loading);
+    }
+
+    fn poll(&mut self) {
+        let Some(rx) = &self.rx else { return };
+        match rx.try_recv() {
+            Ok(Some(r)) => {
+                self.state = Some(LyricsState::Ready(r));
+                self.rx = None;
+            }
+            Ok(None) | Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                self.state = Some(LyricsState::Missing);
+                self.rx = None;
+            }
+            Err(std::sync::mpsc::TryRecvError::Empty) => {}
         }
     }
-    ResolvedLyrics::empty()
 }
 
 #[cfg(test)]
@@ -551,6 +670,59 @@ mod tests {
         assert_eq!(active_line_index(&lines, Duration::from_secs(10)), Some(0));
         assert_eq!(active_line_index(&lines, Duration::from_secs(25)), Some(1));
         assert_eq!(active_line_index(&lines, Duration::from_secs(99)), Some(2));
+    }
+
+    #[test]
+    fn loader_resolves_sidecar_without_network() {
+        let dir = std::env::temp_dir().join(format!("optmusic-lyrics-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let audio = dir.join("track.mp3");
+        fs::write(&audio, b"x").unwrap();
+        fs::write(dir.join("track.lrc"), "[00:01.00] hi\n").unwrap();
+
+        let mut loader = LyricsLoader::new();
+        let query = LyricsQuery {
+            path: audio.clone(),
+            artist: "A".into(),
+            title: "T".into(),
+            album: String::new(),
+            duration: None,
+        };
+        let state = loader.state("track", || query.clone());
+        match state {
+            LyricsState::Ready(r) => {
+                assert_eq!(r.source, "sidecar");
+                assert_eq!(r.lines.len(), 1);
+            }
+            other => panic!("expected sidecar hit, got {other:?}"),
+        }
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn loader_skips_network_without_artist_or_title() {
+        let mut loader = LyricsLoader::new();
+        let query = LyricsQuery {
+            path: std::path::PathBuf::from("/nonexistent/track.mp3"),
+            artist: String::new(),
+            title: String::new(),
+            album: String::new(),
+            duration: None,
+        };
+        assert_eq!(
+            loader.state("k", || query.clone()),
+            &LyricsState::Missing,
+            "no lookup context must resolve immediately"
+        );
+    }
+
+    #[test]
+    fn lrclib_url_encodes_and_includes_optional_fields() {
+        let url = lrclib_url("Daft Punk", "One More Time", "Discovery", Some(320.4));
+        assert!(url.contains("artist_name=Daft%20Punk"));
+        assert!(url.contains("track_name=One%20More%20Time"));
+        assert!(url.contains("album_name=Discovery"));
+        assert!(url.ends_with("&duration=320"));
     }
 
     #[test]
