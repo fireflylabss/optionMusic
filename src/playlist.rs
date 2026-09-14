@@ -139,9 +139,7 @@ fn yt_video_id(text: &str) -> Option<&str> {
     for marker in ["youtu.be/", "watch?v="] {
         if let Some(i) = text.find(marker) {
             let rest = &text[i + marker.len()..];
-            let end = rest
-                .find(['?', '&', '/', ' '])
-                .unwrap_or(rest.len());
+            let end = rest.find(['?', '&', '/', ' ']).unwrap_or(rest.len());
             let cand = &rest[..end];
             if is_id(cand) {
                 return Some(cand);

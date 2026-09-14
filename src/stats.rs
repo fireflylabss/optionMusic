@@ -77,8 +77,7 @@ impl StatsStore {
 
     pub fn save(&self) -> Result<()> {
         let dir = crate::config::config_dir();
-        fs::create_dir_all(&dir)
-            .with_context(|| format!("create {}", dir.display()))?;
+        fs::create_dir_all(&dir).with_context(|| format!("create {}", dir.display()))?;
         let path = stats_path();
         let body = serde_json::to_string_pretty(self)?;
         option_sdk::atomic_write(&path, body.as_bytes())
@@ -91,14 +90,17 @@ impl StatsStore {
         if id.is_empty() {
             return;
         }
-        let entry = self.tracks.entry(id.to_owned()).or_insert_with(|| TrackStat {
-            id: id.to_owned(),
-            name: name.to_owned(),
-            artist: artist.to_owned(),
-            plays: 0,
-            total_secs: 0,
-            last_played: 0,
-        });
+        let entry = self
+            .tracks
+            .entry(id.to_owned())
+            .or_insert_with(|| TrackStat {
+                id: id.to_owned(),
+                name: name.to_owned(),
+                artist: artist.to_owned(),
+                plays: 0,
+                total_secs: 0,
+                last_played: 0,
+            });
         entry.name = name.to_owned();
         entry.artist = artist.to_owned();
         entry.plays += 1;
