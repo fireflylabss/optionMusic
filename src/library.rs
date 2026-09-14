@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
-use crate::config::{ArtistSource, AppConfig};
+use crate::config::{AppConfig, ArtistSource};
 use crate::playlist::{Playlist, Track};
 
 /// Delta reported by [`Library::refresh`] since the last scan.
@@ -203,11 +203,8 @@ impl Library {
             .baseline
             .take()
             .unwrap_or_else(|| std::mem::take(&mut self.tracks));
-        let fresh: HashMap<PathBuf, Track> = self
-            .tracks
-            .drain(..)
-            .map(|t| (t.path.clone(), t))
-            .collect();
+        let fresh: HashMap<PathBuf, Track> =
+            self.tracks.drain(..).map(|t| (t.path.clone(), t)).collect();
 
         let mut added = 0usize;
         let mut removed = 0usize;
@@ -275,7 +272,9 @@ impl Library {
     pub fn artists(&self, indices: &[usize]) -> Vec<ArtistGroup> {
         let mut groups: BTreeMap<String, (HashSet<String>, usize)> = BTreeMap::new();
         for &i in indices {
-            let Some(t) = self.tracks.get(i) else { continue };
+            let Some(t) = self.tracks.get(i) else {
+                continue;
+            };
             let name = self.artist_name(t);
             let entry = groups.entry(name).or_default();
             entry.0.insert(self.album_name(t));
@@ -295,7 +294,9 @@ impl Library {
     pub fn albums(&self, indices: &[usize]) -> Vec<AlbumGroup> {
         let mut groups: BTreeMap<String, (Option<u32>, usize)> = BTreeMap::new();
         for &i in indices {
-            let Some(t) = self.tracks.get(i) else { continue };
+            let Some(t) = self.tracks.get(i) else {
+                continue;
+            };
             let name = self.album_name(t);
             let entry = groups.entry(name).or_default();
             if entry.0.is_none() {
@@ -318,7 +319,11 @@ impl Library {
         let artist_idx: Vec<usize> = indices
             .iter()
             .copied()
-            .filter(|&i| self.tracks.get(i).is_some_and(|t| self.artist_name(t) == artist))
+            .filter(|&i| {
+                self.tracks
+                    .get(i)
+                    .is_some_and(|t| self.artist_name(t) == artist)
+            })
             .collect();
         self.albums(&artist_idx)
     }
@@ -329,9 +334,9 @@ impl Library {
             .iter()
             .copied()
             .filter(|&i| {
-                self.tracks.get(i).is_some_and(|t| {
-                    self.artist_name(t) == artist && self.album_name(t) == album
-                })
+                self.tracks
+                    .get(i)
+                    .is_some_and(|t| self.artist_name(t) == artist && self.album_name(t) == album)
             })
             .collect::<Vec<_>>();
         out.sort_by(|&a, &b| {
@@ -349,7 +354,11 @@ impl Library {
         let mut out = indices
             .iter()
             .copied()
-            .filter(|&i| self.tracks.get(i).is_some_and(|t| self.album_name(t) == album))
+            .filter(|&i| {
+                self.tracks
+                    .get(i)
+                    .is_some_and(|t| self.album_name(t) == album)
+            })
             .collect::<Vec<_>>();
         out.sort_by(|&a, &b| {
             let (a, b) = (&self.tracks[a], &self.tracks[b]);
@@ -614,10 +623,8 @@ mod tests {
     use std::fs;
 
     fn tmp_tree(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!(
-            "optionmusic-lib-{}-{name}",
-            std::process::id()
-        ));
+        let dir =
+            std::env::temp_dir().join(format!("optionmusic-lib-{}-{name}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         dir

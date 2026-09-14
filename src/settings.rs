@@ -9,7 +9,9 @@ use crossterm::{
     style::{Color, Print, ResetColor, SetBackgroundColor, SetForegroundColor},
 };
 
-use crate::config::{Accent, AppConfig, ArtistSource, DlFallbackMode, DlUiMode, LyricsPos, ToastPos};
+use crate::config::{
+    Accent, AppConfig, ArtistSource, DlFallbackMode, DlUiMode, LyricsPos, ToastPos,
+};
 use crate::ui::{DARK, DIM, GRAY};
 
 pub const SETTINGS_SIDEBAR_W: usize = 30;
@@ -394,7 +396,11 @@ impl SettingsUi {
                 11 => {
                     cfg.dl_fallback = cfg.dl_fallback.next();
                     let _ = cfg.save();
-                    applied(format!("dl fallback · {}", cfg.dl_fallback.label()), false, false)
+                    applied(
+                        format!("dl fallback · {}", cfg.dl_fallback.label()),
+                        false,
+                        false,
+                    )
                 }
                 12 => {
                     cfg.reset_all();
@@ -468,7 +474,11 @@ impl SettingsUi {
                     cfg.dl_fallback.next()
                 };
                 let _ = cfg.save();
-                applied(format!("dl fallback · {}", cfg.dl_fallback.label()), false, false)
+                applied(
+                    format!("dl fallback · {}", cfg.dl_fallback.label()),
+                    false,
+                    false,
+                )
             }
             SettingsScreen::Main if self.cursor == 7 => {
                 cfg.toast_pos = if dir < 0 {
@@ -693,8 +703,12 @@ pub fn paint_settings_sidebar(
         (box_w, box_h)
     } else {
         (
-            ((box_w as f64 * (0.55 + 0.45 * e)) as usize).max(16).min(box_w),
-            ((box_h as f64 * (0.6 + 0.4 * e)) as usize).max(5).min(box_h),
+            ((box_w as f64 * (0.55 + 0.45 * e)) as usize)
+                .max(16)
+                .min(box_w),
+            ((box_h as f64 * (0.6 + 0.4 * e)) as usize)
+                .max(5)
+                .min(box_h),
         )
     };
 
@@ -791,17 +805,7 @@ pub fn paint_settings_sidebar(
     }
 
     paint_panel_line(
-        out,
-        text_x,
-        y,
-        inner_w,
-        panel_bg,
-        DIM,
-        title,
-        "",
-        false,
-        focus_bg,
-        focus_fg,
+        out, text_x, y, inner_w, panel_bg, DIM, title, "", false, focus_bg, focus_fg,
     )?;
     y += 1;
     if y > last {
