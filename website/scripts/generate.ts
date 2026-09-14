@@ -1,4 +1,4 @@
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { NOT_FOUND_MD, PAGES, SITE } from "../src/content.ts";
 
@@ -260,7 +260,7 @@ async function main() {
   await writeFile(resolve(PUBLIC, "robots.txt"), robotsTxt());
 
   // Generate the final index.html from the template.
-  const template = await Bun.file(resolve(ROOT, "index.template.html")).text();
+  const template = await readFile(resolve(ROOT, "index.template.html"), "utf-8");
   const index = template
     .replace("<!-- INJECT:JSON_LD -->", jsonLd())
     .replace("<!-- INJECT:NOSCRIPT -->", homeHtml());
