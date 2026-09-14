@@ -156,10 +156,7 @@ pub fn build_order(
     }
     let mut rng = opts.seed ^ 0x9e3779b97f4a7c15;
 
-    let artists: Vec<Option<String>> = tracks
-        .iter()
-        .map(|t| artist_key(&artist_of(t)))
-        .collect();
+    let artists: Vec<Option<String>> = tracks.iter().map(|t| artist_key(&artist_of(t))).collect();
     let albums: Vec<Option<String>> = tracks
         .iter()
         .map(|t| {
@@ -203,8 +200,7 @@ pub fn build_order(
             .map(|i| {
                 (
                     score_candidate(
-                        i, cur, tracks, &artists, &albums, &genres, &plays, &is_recent,
-                        opts.fresh,
+                        i, cur, tracks, &artists, &albums, &genres, &plays, &is_recent, opts.fresh,
                     ),
                     i,
                 )
@@ -351,11 +347,7 @@ mod tests {
     }
 
     fn opts(seed: u64, top_k: usize, fresh: bool) -> RadioOpts {
-        RadioOpts {
-            fresh,
-            seed,
-            top_k,
-        }
+        RadioOpts { fresh, seed, top_k }
     }
 
     #[test]
@@ -383,8 +375,22 @@ mod tests {
         let tracks: Vec<Track> = (0..20)
             .map(|i| track(&format!("t{i}"), "A", "alb", "rock", 2000 + i as u32))
             .collect();
-        let a = build_order(&tracks, artist_of, &StatsStore::default(), &HashSet::new(), 0, &opts(42, 5, false));
-        let b = build_order(&tracks, artist_of, &StatsStore::default(), &HashSet::new(), 0, &opts(42, 5, false));
+        let a = build_order(
+            &tracks,
+            artist_of,
+            &StatsStore::default(),
+            &HashSet::new(),
+            0,
+            &opts(42, 5, false),
+        );
+        let b = build_order(
+            &tracks,
+            artist_of,
+            &StatsStore::default(),
+            &HashSet::new(),
+            0,
+            &opts(42, 5, false),
+        );
         assert_eq!(a, b);
     }
 
@@ -397,9 +403,20 @@ mod tests {
             track("c1", "Z", "", "", 0),
         ];
         // Seed at b1 (artist Y): with top_k=1 the next pick must be an X track.
-        let order = build_order(&tracks, artist_of, &StatsStore::default(), &HashSet::new(), 0, &opts(1, 1, false));
+        let order = build_order(
+            &tracks,
+            artist_of,
+            &StatsStore::default(),
+            &HashSet::new(),
+            0,
+            &opts(1, 1, false),
+        );
         assert_eq!(order[0], 0);
-        assert!([1, 2].contains(&order[1]), "expected an X track, got {}", order[1]);
+        assert!(
+            [1, 2].contains(&order[1]),
+            "expected an X track, got {}",
+            order[1]
+        );
     }
 
     #[test]
@@ -409,7 +426,14 @@ mod tests {
             track("kin", "B", "", "rock/indie", 2015),
             track("far", "C", "", "pop", 1980),
         ];
-        let order = build_order(&tracks, artist_of, &StatsStore::default(), &HashSet::new(), 0, &opts(1, 1, false));
+        let order = build_order(
+            &tracks,
+            artist_of,
+            &StatsStore::default(),
+            &HashSet::new(),
+            0,
+            &opts(1, 1, false),
+        );
         assert_eq!(order[1], 1, "rock/indie should follow the rock seed");
     }
 
@@ -420,10 +444,20 @@ mod tests {
             .collect();
         tracks.push(track("other", "Other", "x", "g", 2000));
         // Seed inside "Same": after 2 consecutive picks it must jump ship.
-        let order = build_order(&tracks, artist_of, &StatsStore::default(), &HashSet::new(), 0, &opts(1, 3, false));
+        let order = build_order(
+            &tracks,
+            artist_of,
+            &StatsStore::default(),
+            &HashSet::new(),
+            0,
+            &opts(1, 3, false),
+        );
         let other = 4usize;
         let pos = order.iter().position(|&i| i == other).unwrap();
-        assert!(pos <= SAME_ARTIST_RUN_CAP, "other artist came too late: {order:?}");
+        assert!(
+            pos <= SAME_ARTIST_RUN_CAP,
+            "other artist came too late: {order:?}"
+        );
     }
 
     #[test]
@@ -435,7 +469,14 @@ mod tests {
         ];
         let mut recent = HashSet::new();
         recent.insert("/music/heard.mp3".to_string());
-        let order = build_order(&tracks, artist_of, &StatsStore::default(), &recent, 0, &opts(1, 1, false));
+        let order = build_order(
+            &tracks,
+            artist_of,
+            &StatsStore::default(),
+            &recent,
+            0,
+            &opts(1, 1, false),
+        );
         assert_eq!(order[1], 2, "recently-heard track should lose the tie");
     }
 
@@ -450,19 +491,31 @@ mod tests {
         let mut stats = StatsStore::default();
         stats.record_play("/music/loved.mp3", "loved", "B", 100);
         stats.record_play("/music/loved.mp3", "loved", "B", 100);
-        let normal = build_order(&tracks, artist_of, &stats, &HashSet::new(), 0, &opts(1, 1, false));
+        let normal = build_order(
+            &tracks,
+            artist_of,
+            &stats,
+            &HashSet::new(),
+            0,
+            &opts(1, 1, false),
+        );
         assert_eq!(normal[1], 1, "familiarity should favor the played track");
-        let fresh = build_order(&tracks, artist_of, &stats, &HashSet::new(), 0, &opts(1, 1, true));
+        let fresh = build_order(
+            &tracks,
+            artist_of,
+            &stats,
+            &HashSet::new(),
+            0,
+            &opts(1, 1, true),
+        );
         assert_eq!(fresh[1], 2, "fresh mode should favor the unplayed track");
     }
 
     // ── resolve_seed (needs a real Library on a temp dir) ─────────
 
     fn tmp_lib(name: &str, files: &[&str]) -> (PathBuf, Library) {
-        let dir = std::env::temp_dir().join(format!(
-            "optionmusic-radio-{}-{name}",
-            std::process::id()
-        ));
+        let dir =
+            std::env::temp_dir().join(format!("optionmusic-radio-{}-{name}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         for f in files {
@@ -483,9 +536,7 @@ mod tests {
     #[test]
     fn seed_no_match_returns_none() {
         let (dir, lib) = tmp_lib("nomatch", &["a.mp3"]);
-        assert!(
-            resolve_seed(&lib, Some("zzz"), None, None, &StatsStore::default(), 1).is_none()
-        );
+        assert!(resolve_seed(&lib, Some("zzz"), None, None, &StatsStore::default(), 1).is_none());
         let _ = fs::remove_dir_all(&dir);
     }
 
@@ -512,8 +563,6 @@ mod tests {
     #[test]
     fn empty_library_has_no_seed() {
         let lib = Library::default();
-        assert!(
-            resolve_seed(&lib, None, None, None, &StatsStore::default(), 1).is_none()
-        );
+        assert!(resolve_seed(&lib, None, None, None, &StatsStore::default(), 1).is_none());
     }
 }
