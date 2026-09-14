@@ -11,7 +11,7 @@ use anyhow::Result;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MediaKeyCode};
 
 use crate::config::RepeatMode;
-use crate::lyrics::{ResolvedLyrics, resolve_lyrics};
+use crate::lyrics::{LyricsLoader, LyricsQuery};
 use crate::player::Player;
 use crate::playlist::{Playlist, Track};
 use crate::smart_shuffle::RecentWindow;
@@ -135,7 +135,7 @@ pub fn go_next(
     stats_max_pos: &mut Duration,
     stats_dur: &mut Option<Duration>,
     stats_counted: &mut bool,
-    lyrics_cache: &mut Option<(String, ResolvedLyrics)>,
+    lyrics: &mut LyricsLoader,
 ) -> Result<bool> {
     if let Some(track) = playlist.get(*index) {
         maybe_count_stats(
@@ -161,7 +161,7 @@ pub fn go_next(
     *stats_max_pos = Duration::ZERO;
     *stats_dur = None;
     *stats_counted = false;
-    *lyrics_cache = None;
+    lyrics.clear();
     if let Some(t) = playlist.get(*index) {
         player.play_file(&t.path)?;
         ui.toast_track(t.display_name());
@@ -198,21 +198,19 @@ pub fn go_prev(
 }
 
 /// Lyrics lookup context from track tags (filename title fallback).
-pub fn resolve_lyrics_for(track: &Track, duration: Option<Duration>) -> ResolvedLyrics {
+pub fn lyrics_query(track: &Track, duration: Option<Duration>) -> LyricsQuery {
     let title = track
         .title
         .clone()
         .filter(|s| !s.trim().is_empty())
         .unwrap_or_else(|| track.display_name());
-    let artist = track.artist.clone().unwrap_or_default();
-    let album = track.album.clone().unwrap_or_default();
-    resolve_lyrics(
-        &track.path,
-        &artist,
-        &title,
-        &album,
-        duration.map(|d| d.as_secs_f64()),
-    )
+    LyricsQuery {
+        path: track.path.clone(),
+        artist: track.artist.clone().unwrap_or_default(),
+        title,
+        album: track.album.clone().unwrap_or_default(),
+        duration: duration.map(|d| d.as_secs_f64()),
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]

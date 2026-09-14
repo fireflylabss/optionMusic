@@ -18,12 +18,12 @@ use optionmusic::cli::{Cli, Command, LibraryCmd, PlaylistCmd};
 use optionmusic::config::{AppConfig, RepeatMode, resolve_music_dir};
 use optionmusic::download::{self, DownloadRequest, MediaKind};
 use optionmusic::library::Library;
-use optionmusic::lyrics::ResolvedLyrics;
+use optionmusic::lyrics::{LyricsLoader, LyricsState};
 use optionmusic::player::Player;
 use optionmusic::playlist::Playlist;
 use optionmusic::session::{
-    Action, LoopMode, go_next, go_prev, handle_key, list_nav_key, maybe_count_stats, nanos_seed,
-    resolve_lyrics_for, save_session,
+    Action, LoopMode, go_next, go_prev, handle_key, list_nav_key, lyrics_query, maybe_count_stats,
+    nanos_seed, save_session,
 };
 use optionmusic::settings::SettingsAction;
 use optionmusic::sleep::SleepTimer;
@@ -49,12 +49,7 @@ fn parse_cli() -> Cli {
     let raw: Vec<String> = std::env::args().collect();
     if raw.len() >= 2 {
         let first = raw[1].as_str();
-        const CMDS: &[&str] = &[
-            "play", "p", "pl", "info", "i", "list", "ls", "download", "dl", "d", "library", "lib",
-            "browse", "br", "stats", "stat", "st", "sleep", "radio", "rd", "mix", "version", "ver",
-            "help",
-        ];
-        if !first.starts_with('-') && !CMDS.iter().any(|c| *c == first) {
+        if !first.starts_with('-') && !optionmusic::cli::is_subcommand(first) {
             let mut rewritten = Vec::with_capacity(raw.len() + 1);
             rewritten.push(raw[0].clone());
             rewritten.push("play".into());
@@ -228,6 +223,9 @@ fn run() -> Result<()> {
                 cli.cava,
                 quiet,
             )?;
+        }
+        Some(Command::Doctor) => {
+            cmd_doctor();
         }
         Some(Command::Version) => {
             println!(
@@ -453,7 +451,7 @@ fn run_session(
     let mut stats_max_pos = Duration::ZERO;
     let mut stats_dur: Option<Duration> = None;
     let mut stats_counted = false;
-    let mut lyrics_cache: Option<(String, ResolvedLyrics)> = None;
+    let mut lyrics = LyricsLoader::new();
 
     if let Some(track) = playlist.get(index) {
         match resume_at {
@@ -481,7 +479,7 @@ fn run_session(
                 &mut stats_max_pos,
                 &mut stats_dur,
                 &mut stats_counted,
-                &mut lyrics_cache,
+                &mut lyrics,
             )? {
                 break;
             }
@@ -563,7 +561,7 @@ fn run_session(
                         &mut stats_max_pos,
                         &mut stats_dur,
                         &mut stats_counted,
-                        &mut lyrics_cache,
+                        &mut lyrics,
                     )? {
                         ui.toast_info("already at last track");
                     }
@@ -660,23 +658,27 @@ fn run_session(
             Option<String>,
         ) = if ui.lyrics_open() {
             if let Some(track) = playlist.get(index) {
-                let key = track.path.to_string_lossy().into_owned();
-                let stale = match &lyrics_cache {
-                    Some((k, _)) => k != &key,
-                    None => true,
-                };
-                if stale {
-                    let dur = if held { None } else { player.duration() };
-                    lyrics_cache = Some((key, resolve_lyrics_for(track, dur)));
-                }
-                match &lyrics_cache {
-                    Some((_, r)) if !r.lines.is_empty() => {
-                        (&r.lines, &empty_plain, r.active_index(lyric_now), None)
+                let key = track.path.to_string_lossy();
+                let dur = if held { None } else { player.duration() };
+                match lyrics.state(&key, || lyrics_query(track, dur)) {
+                    LyricsState::Ready(r) if !r.lines.is_empty() => (
+                        &r.lines[..],
+                        &empty_plain[..],
+                        r.active_index(lyric_now),
+                        None,
+                    ),
+                    LyricsState::Ready(r) if !r.plain.is_empty() => {
+                        (&empty_synced[..], &r.plain[..], None, None)
                     }
-                    Some((_, r)) if !r.plain.is_empty() => (&empty_synced, &r.plain, None, None),
+                    LyricsState::Loading => (
+                        &empty_synced[..],
+                        &empty_plain[..],
+                        None,
+                        Some("searching lyrics…".into()),
+                    ),
                     _ => (
-                        &empty_synced,
-                        &empty_plain,
+                        &empty_synced[..],
+                        &empty_plain[..],
                         None,
                         Some("no lyrics found".into()),
                     ),
@@ -943,7 +945,7 @@ fn run_session(
                                         &mut stats_max_pos,
                                         &mut stats_dur,
                                         &mut stats_counted,
-                                        &mut lyrics_cache,
+                                        &mut lyrics,
                                     )? {
                                         ui.toast_info("already at last track");
                                     }
@@ -1103,7 +1105,7 @@ fn run_session(
                                         &mut stats_max_pos,
                                         &mut stats_dur,
                                         &mut stats_counted,
-                                        &mut lyrics_cache,
+                                        &mut lyrics,
                                     )? {
                                         ui.toast_info("already at last track");
                                     }
@@ -1340,7 +1342,7 @@ fn run_session(
                                                     &mut stats_max_pos,
                                                     &mut stats_dur,
                                                     &mut stats_counted,
-                                                    &mut lyrics_cache,
+                                                    &mut lyrics,
                                                 )? {
                                                     ui.toast_info("already at last track");
                                                 }
@@ -1861,6 +1863,45 @@ fn cmd_radio(
         run_plain(&mut player, &mut playlist, loop_mode == LoopMode::Playlist)?;
     }
     Ok(())
+}
+
+fn cmd_doctor() {
+    use optionmusic::doctor::{Need, checks, downloads_ready};
+
+    let checks = checks();
+    println!("  {}", "external tools".with(BRIGHT));
+    for c in &checks {
+        let tag = match c.need {
+            Need::Downloads => "dl",
+            Need::Optional => "opt",
+        };
+        match &c.found {
+            Some(path) => println!(
+                "  {} {} {}  {}",
+                "·".with(BRIGHT),
+                c.tool.with(BRIGHT),
+                format!("[{tag}]").with(DIM),
+                path.display().to_string().with(GRAY)
+            ),
+            None => {
+                println!(
+                    "  {} {} {}  {}",
+                    "·".with(DIM),
+                    c.tool.with(WHITE),
+                    format!("[{tag}]").with(DIM),
+                    "not found".with(GRAY)
+                );
+                println!("    {} {}", "↳".with(DIM), c.purpose.with(GRAY));
+                println!("    {} {}", "↳".with(DIM), c.hint.with(DIM));
+            }
+        }
+    }
+    println!();
+    if downloads_ready(&checks) {
+        print_success("playback and downloads are ready");
+    } else {
+        print_warn("playback works; `msc dl` needs the [dl] tools above");
+    }
 }
 
 fn cmd_stats(limit: usize) -> Result<()> {
