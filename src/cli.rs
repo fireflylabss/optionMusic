@@ -154,6 +154,14 @@ pub struct Cli {
     )]
     pub quiet: bool,
 
+    /// Emit NDJSON playback events instead of the TUI (for scripts/pipes)
+    #[arg(
+        long = "json",
+        global = true,
+        help = "NDJSON events on stdout (forces non-interactive playback)"
+    )]
+    pub json: bool,
+
     #[command(subcommand)]
     pub command: Option<Command>,
 }
