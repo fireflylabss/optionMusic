@@ -12,11 +12,17 @@ Help (`?` / `h`) is a **right sidebar**, while settings (`c`) and playlist (`l`)
 ### Desktop app
 
 The native GPUI desktop client lives in `src-gpui/` and shares the CLI engine
-via the `optionmusic` crate:
+via the `optionmusic` crate. It is a member of the root Cargo workspace, so both
+surfaces share one lockfile and one `target/`:
 
 ```bash
-cd src-gpui && cargo run    # toolchain pinned in rust-toolchain.toml
+cargo run -p optionmusic-gpui   # from the repo root
+cd src-gpui && cargo run        # toolchain pinned in rust-toolchain.toml
 ```
+
+Plain `cargo build` / `cargo test` at the root stay on the CLI
+(`default-members`), so the GPUI system deps are only needed when you ask for
+the desktop crate (`-p optionmusic-gpui` or `--workspace`).
 
 ### Arch / CachyOS (AUR)
 
