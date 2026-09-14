@@ -85,7 +85,7 @@ function homeHtml(): string {
     .map(
       (item) => `
       <section aria-labelledby="${htmlEscape(item.q.toLowerCase().replace(/[^a-z0-9]+/g, "-"))}">
-        <h3 id="${htmlEscape(item.q.toLowerCase().replace(/[^a-z0-9]+/g, "-"))}">${htmlEscape(item.q)}</h3>
+        <h2 id="${htmlEscape(item.q.toLowerCase().replace(/[^a-z0-9]+/g, "-"))}">${htmlEscape(item.q)}</h2>
         <p>${htmlEscape(item.a)}</p>
       </section>`,
     )

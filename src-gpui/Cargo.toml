@@ -16,8 +16,8 @@ path = "src/main.rs"
 optionmusic = { path = ".." }
 gpui = { git = "https://github.com/zed-industries/zed", rev = "7733b9922665f103abda7c6a3fde6b9dfdc8eba9", default-features = false }
 unicode-segmentation = "1.13.3"
-serde = { version = "1.0.228", features = ["derive"] }
-serde_json = "1.0.150"
+serde = { workspace = true }
+serde_json = { workspace = true }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 gpui_platform = { git = "https://github.com/zed-industries/zed", rev = "7733b9922665f103abda7c6a3fde6b9dfdc8eba9", features = ["font-kit"] }
