@@ -911,6 +911,7 @@ fn ease_out_cubic(t: f64) -> f64 {
     1.0 - (1.0 - t).powi(3)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn paint_panel_line(
     out: &mut impl Write,
     x: usize,

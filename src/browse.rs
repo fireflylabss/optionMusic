@@ -158,14 +158,14 @@ impl Session {
                 .library
                 .artists(&base)
                 .into_iter()
-                .map(|a| Row::Artist(a))
+                .map(Row::Artist)
                 .collect(),
             Level::Albums => {
                 let artist = self.selected_artist.clone().unwrap_or_default();
                 self.library
                     .albums_of_artist(&base, &artist)
                     .into_iter()
-                    .map(|a| Row::Album(a))
+                    .map(Row::Album)
                     .collect()
             }
             Level::Tracks => {
@@ -174,7 +174,7 @@ impl Session {
                 self.library
                     .tracks_of_album(&base, &artist, &album)
                     .into_iter()
-                    .map(|i| Row::Track(i))
+                    .map(Row::Track)
                     .collect()
             }
         }
@@ -346,12 +346,11 @@ impl Session {
         if self.player.is_idle() {
             return;
         }
-        if let Some(cur) = self.queue_cursor {
-            if let Some(pos) = self.queue.iter().position(|&i| i == cur) {
-                if let Some(&next) = self.queue.get(pos + 1) {
-                    self.play_index(next);
-                }
-            }
+        if let Some(cur) = self.queue_cursor
+            && let Some(pos) = self.queue.iter().position(|&i| i == cur)
+            && let Some(&next) = self.queue.get(pos + 1)
+        {
+            self.play_index(next);
         }
     }
 
@@ -452,17 +451,17 @@ impl Session {
             self.auto_advance();
 
             // Discord presence (deduped inside; no-op when disabled).
-            if let Some(i) = self.queue_cursor {
-                if let Some(t) = self.library.get(i) {
-                    rpc.update(
-                        &t.display_name(),
-                        &t.artist_album(),
-                        t.thumb_url().as_deref(),
-                        self.player.position(),
-                        self.player.duration(),
-                        self.player.is_paused(),
-                    );
-                }
+            if let Some(i) = self.queue_cursor
+                && let Some(t) = self.library.get(i)
+            {
+                rpc.update(
+                    &t.display_name(),
+                    &t.artist_album(),
+                    t.thumb_url().as_deref(),
+                    self.player.position(),
+                    self.player.duration(),
+                    self.player.is_paused(),
+                );
             }
 
             if event::poll(Duration::from_millis(40)).unwrap_or(false) {
@@ -496,10 +495,10 @@ impl Session {
                                             self.move_queue(1);
                                         }
                                         KeyCode::Enter => {
-                                            if let Some(pos) = self.queue_sel {
-                                                if let Some(&i) = self.queue.get(pos) {
-                                                    self.play_index(i);
-                                                }
+                                            if let Some(pos) = self.queue_sel
+                                                && let Some(&i) = self.queue.get(pos)
+                                            {
+                                                self.play_index(i);
                                             }
                                         }
                                         KeyCode::Char('d') => {
@@ -644,8 +643,7 @@ impl Session {
             &["favorites only: 1 · clear: x"],
             &years,
             self.year
-                .map(|y| years.iter().position(|s| s == &y.to_string()))
-                .flatten(),
+                .and_then(|y| years.iter().position(|s| s == &y.to_string())),
         )?;
         self.year = chosen.and_then(|s| s.parse().ok());
         self.cursor = 0;
@@ -769,7 +767,7 @@ impl Session {
             out,
             MoveTo(0, 0),
             SetForegroundColor(FG_TITLE),
-            Print(format!("♪  browse")),
+            Print("♪  browse".to_string()),
             SetForegroundColor(FG_MUTED),
             Print(format!(
                 "  ·  {} · {} track{}",
@@ -996,10 +994,10 @@ enum Row {
 fn read_key() -> Result<KeyCode> {
     loop {
         let ev = event::read().context("read key")?;
-        if let Event::Key(key) = ev {
-            if key.kind == KeyEventKind::Press {
-                return Ok(key.code);
-            }
+        if let Event::Key(key) = ev
+            && key.kind == KeyEventKind::Press
+        {
+            return Ok(key.code);
         }
     }
 }

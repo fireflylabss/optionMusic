@@ -54,12 +54,8 @@ impl SleepTimer {
             Some(m) => *m,
             None => 0,
         };
-        // When a timer is already running mid-countdown, still step forward.
-        if self.deadline.is_some() {
-            self.set_minutes(next)
-        } else {
-            self.set_minutes(next)
-        }
+        // A timer already running mid-countdown still steps forward.
+        self.set_minutes(next)
     }
 
     pub fn clear(&mut self) {

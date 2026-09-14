@@ -329,7 +329,7 @@ Without a session bus (TTY, containers) it silently stays off.
 
 ## Requirements
 
-- Rust **1.85+** (edition 2024)
+- Rust **1.89+** (edition 2024)
 - **libmpv** (see Install)
 - System audio (PipeWire / PulseAudio / ALSA on Linux, WASAPI on Windows)
 - Optional: **cava** for the spectrum strip (Linux only)

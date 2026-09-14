@@ -643,10 +643,10 @@ impl SessionUi {
     /// Card side for the playlist: sticky snapshot (default left). A second
     /// opener takes the free side so it never overlaps the settings card.
     pub fn list_side(&self) -> PanelSide {
-        if let Some(s) = self.list_side_at_open {
-            if self.show_list || self.list_progress(self.config.ldm) > 0.02 {
-                return s;
-            }
+        if let Some(s) = self.list_side_at_open
+            && (self.show_list || self.list_progress(self.config.ldm) > 0.02)
+        {
+            return s;
         }
         self.free_side_for_list()
     }
@@ -665,10 +665,10 @@ impl SessionUi {
     /// Card side for help: sticky snapshot (default right). Picks the free
     /// side at open so it never overlaps the settings card.
     pub fn help_side(&self) -> PanelSide {
-        if let Some(s) = self.help_side_at_open {
-            if self.show_help || self.help_progress(self.config.ldm) > 0.02 {
-                return s;
-            }
+        if let Some(s) = self.help_side_at_open
+            && (self.show_help || self.help_progress(self.config.ldm) > 0.02)
+        {
+            return s;
         }
         self.free_side_for_help()
     }
@@ -1028,13 +1028,7 @@ impl SessionUi {
                 let base = if is_active {
                     BRIGHT
                 } else if let Some(a) = state.lyrics_active {
-                    if idx < a {
-                        GRAY
-                    } else if idx == a + 1 {
-                        GRAY
-                    } else {
-                        DIM
-                    }
+                    if idx < a || idx == a + 1 { GRAY } else { DIM }
                 } else if idx == start {
                     GRAY
                 } else {
@@ -1097,7 +1091,7 @@ impl SessionUi {
                             } else {
                                 String::new()
                             };
-                            let rest_s: String = if done + 1 <= n {
+                            let rest_s: String = if done < n {
                                 chars.iter().skip(done + 1).collect()
                             } else {
                                 String::new()
@@ -1459,28 +1453,28 @@ impl SessionUi {
     pub fn hit_target(&self, col: u16, row: u16) -> HitTarget {
         // Floating help overlay absorbs clicks so they never leak through
         // to the player controls painted underneath.
-        if let Some(r) = self.hits.help_pane {
-            if r.contains(col, row) {
-                return HitTarget::None;
-            }
+        if let Some(r) = self.hits.help_pane
+            && r.contains(col, row)
+        {
+            return HitTarget::None;
         }
         // Docked lyrics (lines + pinned header) absorb clicks so they
         // never leak through to the player controls painted around them.
-        if let Some(r) = self.hits.lyrics_pane {
-            if r.contains(col, row) {
-                return HitTarget::None;
-            }
+        if let Some(r) = self.hits.lyrics_pane
+            && r.contains(col, row)
+        {
+            return HitTarget::None;
         }
-        if let Some(r) = self.hits.lyrics_head {
-            if r.contains(col, row) {
-                return HitTarget::None;
-            }
+        if let Some(r) = self.hits.lyrics_head
+            && r.contains(col, row)
+        {
+            return HitTarget::None;
         }
         // Playlist scrollbar absorbs hits before track rows.
-        if let Some(r) = self.hits.list_bar {
-            if r.contains(col, row) {
-                return HitTarget::ListScroll(r.v_ratio_at(row));
-            }
+        if let Some(r) = self.hits.list_bar
+            && r.contains(col, row)
+        {
+            return HitTarget::ListScroll(r.v_ratio_at(row));
         }
         for (r, idx) in &self.hits.list {
             if r.contains(col, row) {
@@ -1496,60 +1490,60 @@ impl SessionUi {
                 return *t;
             }
         }
-        if let Some(r) = self.hits.progress {
-            if r.contains(col, row) {
-                return HitTarget::Progress(r.ratio_at(col));
-            }
+        if let Some(r) = self.hits.progress
+            && r.contains(col, row)
+        {
+            return HitTarget::Progress(r.ratio_at(col));
         }
-        if let Some(r) = self.hits.prev {
-            if r.contains(col, row) {
-                return HitTarget::Prev;
-            }
+        if let Some(r) = self.hits.prev
+            && r.contains(col, row)
+        {
+            return HitTarget::Prev;
         }
-        if let Some(r) = self.hits.next {
-            if r.contains(col, row) {
-                return HitTarget::Next;
-            }
+        if let Some(r) = self.hits.next
+            && r.contains(col, row)
+        {
+            return HitTarget::Next;
         }
-        if let Some(r) = self.hits.play_pause {
-            if r.contains(col, row) {
-                return HitTarget::PlayPause;
-            }
+        if let Some(r) = self.hits.play_pause
+            && r.contains(col, row)
+        {
+            return HitTarget::PlayPause;
         }
-        if let Some(r) = self.hits.volume_down {
-            if r.contains(col, row) {
-                return HitTarget::VolumeDown;
-            }
+        if let Some(r) = self.hits.volume_down
+            && r.contains(col, row)
+        {
+            return HitTarget::VolumeDown;
         }
-        if let Some(r) = self.hits.volume_up {
-            if r.contains(col, row) {
-                return HitTarget::VolumeUp;
-            }
+        if let Some(r) = self.hits.volume_up
+            && r.contains(col, row)
+        {
+            return HitTarget::VolumeUp;
         }
-        if let Some(r) = self.hits.volume {
-            if r.contains(col, row) {
-                return HitTarget::Volume;
-            }
+        if let Some(r) = self.hits.volume
+            && r.contains(col, row)
+        {
+            return HitTarget::Volume;
         }
-        if let Some(r) = self.hits.eq {
-            if r.contains(col, row) {
-                return HitTarget::Eq;
-            }
+        if let Some(r) = self.hits.eq
+            && r.contains(col, row)
+        {
+            return HitTarget::Eq;
         }
-        if let Some(r) = self.hits.speed {
-            if r.contains(col, row) {
-                return HitTarget::Speed;
-            }
+        if let Some(r) = self.hits.speed
+            && r.contains(col, row)
+        {
+            return HitTarget::Speed;
         }
-        if let Some(r) = self.hits.pitch {
-            if r.contains(col, row) {
-                return HitTarget::Pitch;
-            }
+        if let Some(r) = self.hits.pitch
+            && r.contains(col, row)
+        {
+            return HitTarget::Pitch;
         }
-        if let Some(r) = self.hits.cava {
-            if r.contains(col, row) {
-                return HitTarget::CavaToggle;
-            }
+        if let Some(r) = self.hits.cava
+            && r.contains(col, row)
+        {
+            return HitTarget::CavaToggle;
         }
         HitTarget::None
     }
@@ -1563,21 +1557,21 @@ impl SessionUi {
     /// Used so `? c v …` clicks stay global even with settings open.
     pub fn footer_hit(&self, col: u16, row: u16) -> HitTarget {
         // The floating help card still owns its own area.
-        if let Some(r) = self.hits.help_pane {
-            if r.contains(col, row) {
-                return HitTarget::None;
-            }
+        if let Some(r) = self.hits.help_pane
+            && r.contains(col, row)
+        {
+            return HitTarget::None;
         }
         // Same for the docked lyrics (lines + pinned header).
-        if let Some(r) = self.hits.lyrics_pane {
-            if r.contains(col, row) {
-                return HitTarget::None;
-            }
+        if let Some(r) = self.hits.lyrics_pane
+            && r.contains(col, row)
+        {
+            return HitTarget::None;
         }
-        if let Some(r) = self.hits.lyrics_head {
-            if r.contains(col, row) {
-                return HitTarget::None;
-            }
+        if let Some(r) = self.hits.lyrics_head
+            && r.contains(col, row)
+        {
+            return HitTarget::None;
         }
         for (r, t) in &self.hits.foot {
             if r.contains(col, row) {
@@ -2040,12 +2034,12 @@ impl SessionUi {
             meta_spans.push(Span::fg(DARK, "  ·  "));
             meta_spans.push(Span::fg(DIM, "smart"));
         }
-        if let Some(sleep) = state.sleep_label {
-            if !sleep.is_empty() {
-                meta_spans.push(Span::fg(DARK, "  ·  "));
-                meta_spans.push(Span::fg(DIM, "sleep "));
-                meta_spans.push(Span::fg(GRAY, sleep));
-            }
+        if let Some(sleep) = state.sleep_label
+            && !sleep.is_empty()
+        {
+            meta_spans.push(Span::fg(DARK, "  ·  "));
+            meta_spans.push(Span::fg(DIM, "sleep "));
+            meta_spans.push(Span::fg(GRAY, sleep));
         }
         let meta_x = paint_in_region(&mut out, y as u16, content_x0, content_cols, &meta_spans)?;
         let mut mx = meta_x;
@@ -2518,7 +2512,7 @@ fn paint_help_sidebar(
             y += 1;
         }
     }
-    if y + 1 <= last {
+    if y < last {
         y += 1;
         paint_row(y, &[Span::fg(DARK, "h  close")])?;
     }
@@ -2737,7 +2731,7 @@ fn paint_list_sidebar(
                 HitRect {
                     x: x0 as u16,
                     y,
-                    w: (track_x as usize).saturating_sub(x0) as u16,
+                    w: track_x.saturating_sub(x0) as u16,
                     h: 1,
                 },
                 track_n,
@@ -2795,6 +2789,7 @@ fn paint_list_sidebar(
 /// Compact footer: bright keys, dim gaps.
 /// Every chip also registers a footer hit rect so `space n/p ←→ +/− v c ?`
 /// (and preview `q`) are clickable — same action as pressing the key.
+#[allow(clippy::too_many_arguments)]
 fn paint_key_footer(
     out: &mut impl Write,
     y: u16,
@@ -2916,6 +2911,7 @@ fn paint_in_region(
 
 /// Classic vertical cava bars under the shortcut bar (default bar look).
 /// Returns (start_x, rows_painted).
+#[allow(clippy::too_many_arguments)]
 fn paint_cava_bars(
     out: &mut impl Write,
     y: u16,
@@ -2940,7 +2936,7 @@ fn paint_cava_bars(
 
     let gap = matches!(style, CavaStyle::Bars | CavaStyle::Mirror);
     let bar_cols = if gap {
-        ((block_w + 1) / 2).clamp(8, n.min(block_w))
+        block_w.div_ceil(2).clamp(8, n.min(block_w))
     } else {
         block_w.clamp(8, n.min(block_w))
     };
@@ -2989,7 +2985,7 @@ fn paint_cava_bars(
 
         let eighths = (level * (rows * (RAMP.len() - 1)) as f64).round() as usize;
         let full = RAMP.len() - 1;
-        for r in 0..rows {
+        for (r, line) in lines.iter_mut().enumerate().take(rows) {
             let from_bottom = rows - 1 - r;
             let cell_base = from_bottom * full;
             let ch = if eighths >= cell_base + full {
@@ -2999,9 +2995,9 @@ fn paint_cava_bars(
             } else {
                 RAMP[0]
             };
-            lines[r].push(ch);
+            line.push(ch);
             if gap && b + 1 < bar_cols {
-                lines[r].push(' ');
+                line.push(' ');
             }
         }
     }
@@ -3363,9 +3359,9 @@ mod tests {
 
     #[test]
     fn list_dock_threshold_keeps_player_min() {
-        assert!(LIST_DOCK_MIN_COLS >= PLAYER_MIN_W + LIST_SIDEBAR_W);
+        const { assert!(LIST_DOCK_MIN_COLS >= PLAYER_MIN_W + LIST_SIDEBAR_W) };
         // Narrow terminals must overlay instead of docking.
-        assert!(LIST_DOCK_MIN_COLS > 60);
+        const { assert!(LIST_DOCK_MIN_COLS > 60) };
     }
 
     #[cfg(test)]

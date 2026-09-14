@@ -139,19 +139,17 @@ impl Rpc {
             // Spotify-style time bar (Playing only shows "left" text).
             .activity_type(ActivityType::Listening)
             .assets(assets);
-        if !paused {
-            if let Some(dur) = duration {
-                let now = SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .map(|d| d.as_secs() as i64)
-                    .unwrap_or(0);
-                let remaining = dur.as_secs().saturating_sub(position.as_secs()) as i64;
-                act = act.timestamps(
-                    Timestamps::new()
-                        .start(now - position.as_secs() as i64)
-                        .end(now + remaining),
-                );
-            }
+        if !paused && let Some(dur) = duration {
+            let now = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|d| d.as_secs() as i64)
+                .unwrap_or(0);
+            let remaining = dur.as_secs().saturating_sub(position.as_secs()) as i64;
+            act = act.timestamps(
+                Timestamps::new()
+                    .start(now - position.as_secs() as i64)
+                    .end(now + remaining),
+            );
         }
 
         let Some(client) = self.client.as_mut() else {

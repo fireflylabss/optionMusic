@@ -99,7 +99,9 @@ pub const VOLUME_MAX_EXCESS: u8 = 200;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
+#[derive(Default)]
 pub enum CavaStyle {
+    #[default]
     Bars,
     Dense,
     Mirror,
@@ -132,12 +134,6 @@ impl CavaStyle {
             Self::Mirror => Self::Dense,
             Self::Dots => Self::Mirror,
         }
-    }
-}
-
-impl Default for CavaStyle {
-    fn default() -> Self {
-        Self::Bars
     }
 }
 
@@ -189,8 +185,9 @@ impl CavaConfig {
 }
 
 /// Accent color: greyscale default, named presets, or `#RRGGBB`.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum Accent {
+    #[default]
     Default,
     Cyan,
     Green,
@@ -198,13 +195,11 @@ pub enum Accent {
     Rose,
     Blue,
     Violet,
-    Custom { r: u8, g: u8, b: u8 },
-}
-
-impl Default for Accent {
-    fn default() -> Self {
-        Self::Default
-    }
+    Custom {
+        r: u8,
+        g: u8,
+        b: u8,
+    },
 }
 
 impl Accent {
@@ -311,37 +306,29 @@ fn parse_hex(hex: &str) -> Result<(u8, u8, u8), String> {
 /// Interactive download wizard UI (`msc dl`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
+#[derive(Default)]
 pub enum DlUiMode {
     /// Arrow keys, checkboxes, cycling options (default).
     #[serde(alias = "arrow")]
+    #[default]
     Arrows,
     /// Classic typed prompts.
     #[serde(alias = "typing", alias = "prompt")]
     Type,
 }
 
-impl Default for DlUiMode {
-    fn default() -> Self {
-        Self::Arrows
-    }
-}
-
 /// How the Artists browser groups tracks (shared CLI + desktop).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
+#[derive(Default)]
 pub enum ArtistSource {
     /// Group by embedded artist / album-artist tags (default).
     #[serde(alias = "tag", alias = "tags", alias = "meta")]
+    #[default]
     Metadata,
     /// Group by parent folder name.
     #[serde(alias = "dir", alias = "directory")]
     Folder,
-}
-
-impl Default for ArtistSource {
-    fn default() -> Self {
-        Self::Metadata
-    }
 }
 
 impl ArtistSource {

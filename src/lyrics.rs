@@ -186,7 +186,7 @@ fn parse_inline_words(body: &str) -> (String, Vec<LyricWord>) {
             None => seg_start,
         };
         // Preserve one leading space gap between words for karaoke join.
-        let word_text = seg.trim_start_matches(|c| c == ' ' || c == '\t');
+        let word_text = seg.trim_start_matches([' ', '\t']);
         // Empty segment (back-to-back tags) carries no word — skip it so
         // timing stays attached to real syllables.
         if !word_text.trim().is_empty() {
@@ -334,9 +334,8 @@ pub fn ease_lyric_offset(current: f64, target: f64, rate: f64) -> f64 {
     }
     let rate = rate.clamp(0.0, 1.0);
     let next = current + (target - current) * rate;
-    if (target - next).abs() < 0.5 && rate >= 0.99 {
-        target
-    } else if (target - next).abs() < 0.02 {
+    let remaining = (target - next).abs();
+    if remaining < 0.02 || (remaining < 0.5 && rate >= 0.99) {
         target
     } else {
         next
@@ -388,10 +387,10 @@ fn lrclib_url(artist: &str, title: &str, album: &str, duration: Option<f64>) -> 
     if !album.trim().is_empty() {
         url.push_str(&format!("&album_name={}", percent_encode(album)));
     }
-    if let Some(d) = duration {
-        if d > 0.0 {
-            url.push_str(&format!("&duration={}", d.round() as u64));
-        }
+    if let Some(d) = duration
+        && d > 0.0
+    {
+        url.push_str(&format!("&duration={}", d.round() as u64));
     }
     url
 }

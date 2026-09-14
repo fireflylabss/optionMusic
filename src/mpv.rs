@@ -95,7 +95,7 @@ pub fn create_player(config: &MpvConfig) -> Result<Mpv> {
 pub fn ensure_c_numeric_locale() {
     #[cfg(unix)]
     unsafe {
-        libc::setlocale(libc::LC_NUMERIC, b"C\0".as_ptr().cast());
+        libc::setlocale(libc::LC_NUMERIC, c"C".as_ptr());
     }
 }
 

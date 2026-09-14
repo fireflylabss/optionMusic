@@ -413,6 +413,7 @@ impl CoreController {
         }
         let _ = self.persist_resume(true);
     }
+    #[allow(clippy::should_implement_trait)]
     pub fn next(&mut self) -> Result<()> {
         let id = self
             .queue
@@ -435,11 +436,12 @@ impl CoreController {
         }
     }
     pub fn previous(&mut self) -> Result<()> {
-        if let Some(p) = self.player.as_mut() {
-            if !p.is_idle() && p.position() > Duration::from_secs(3) {
-                p.seek(Duration::ZERO)?;
-                return Ok(());
-            }
+        if let Some(p) = self.player.as_mut()
+            && !p.is_idle()
+            && p.position() > Duration::from_secs(3)
+        {
+            p.seek(Duration::ZERO)?;
+            return Ok(());
         }
         let id = self.current.clone();
         if let Some(id) = id {

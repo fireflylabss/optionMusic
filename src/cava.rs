@@ -26,10 +26,9 @@ impl CavaBridge {
         if !cava_on_path() {
             return None;
         }
-        match Self::start_with_input("pipewire").or_else(|_| Self::start_with_input("pulse")) {
-            Ok(bridge) => Some(bridge),
-            Err(_) => None,
-        }
+        Self::start_with_input("pipewire")
+            .or_else(|_| Self::start_with_input("pulse"))
+            .ok()
     }
 
     fn start_with_input(input_method: &str) -> Result<Self> {
@@ -142,10 +141,10 @@ fn read_loop<R: std::io::Read>(reader: R, levels: Arc<Mutex<Vec<f32>>>, bars: us
         match reader.read_line(&mut line) {
             Ok(0) => break,
             Ok(_) => {
-                if let Some(parsed) = parse_ascii_frame(&line, bars) {
-                    if let Ok(mut g) = levels.lock() {
-                        *g = parsed;
-                    }
+                if let Some(parsed) = parse_ascii_frame(&line, bars)
+                    && let Ok(mut g) = levels.lock()
+                {
+                    *g = parsed;
                 }
             }
             Err(_) => break,

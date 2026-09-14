@@ -605,10 +605,10 @@ fn run_session(
     let mut recent = RecentWindow::new(playlist.len());
     recent.push(index);
     let mut sleep = SleepTimer::new();
-    if let Some(mins) = optionmusic::sleep::take_request() {
-        if mins > 0 {
-            ui.toast_config(sleep.set_minutes(mins));
-        }
+    if let Some(mins) = optionmusic::sleep::take_request()
+        && mins > 0
+    {
+        ui.toast_config(sleep.set_minutes(mins));
     }
     let mut stats_store = StatsStore::load();
     let mut stats_max_pos = Duration::ZERO;
@@ -953,11 +953,9 @@ fn run_session(
                                         ui.toggle_help();
                                         break;
                                     }
-                                    KeyCode::Char('q') => {
-                                        if ui.show_help() {
-                                            ui.toggle_help();
-                                            break;
-                                        }
+                                    KeyCode::Char('q') if ui.show_help() => {
+                                        ui.toggle_help();
+                                        break;
                                     }
                                     _ => {}
                                 }
@@ -1120,12 +1118,11 @@ fn run_session(
                                 Action::Shuffle => {
                                     let current_path = playlist.get(index).map(|t| t.path.clone());
                                     playlist.shuffle();
-                                    if let Some(path) = current_path {
-                                        if let Some(new_idx) =
+                                    if let Some(path) = current_path
+                                        && let Some(new_idx) =
                                             playlist.tracks().iter().position(|t| t.path == path)
-                                        {
-                                            index = new_idx;
-                                        }
+                                    {
+                                        index = new_idx;
                                     }
                                     // One-shot reorder invalidates index history.
                                     recent = RecentWindow::new(playlist.len());
@@ -1631,10 +1628,10 @@ fn run_session(
                                     // scrolled (grab offset preserved).
                                     if let Some((start_row, start_scroll)) = list_drag {
                                         ui.list_drag_to(start_row, start_scroll, m.row);
-                                    } else if dragging_progress {
-                                        if let Some(ratio) = ui.progress_ratio_at_col(m.column) {
-                                            let _ = player.seek_ratio(ratio);
-                                        }
+                                    } else if dragging_progress
+                                        && let Some(ratio) = ui.progress_ratio_at_col(m.column)
+                                    {
+                                        let _ = player.seek_ratio(ratio);
                                     }
                                 }
                                 MouseEventKind::Up(MouseButton::Left) => {
@@ -2020,6 +2017,7 @@ fn handle_key(key: KeyEvent, player: &mut Player) -> Action {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn cmd_download(
     query: Option<&str>,
     provider: Option<download::Provider>,
@@ -2394,7 +2392,7 @@ fn cmd_stats(limit: usize) -> Result<()> {
         print_warn("no plays recorded yet — play something past halfway");
         return Ok(());
     }
-    let limit = limit.max(1).min(100);
+    let limit = limit.clamp(1, 100);
     println!(
         "  {} {}  {} {}",
         format!("{}", store.total_plays).with(BRIGHT),
