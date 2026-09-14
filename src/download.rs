@@ -362,20 +362,30 @@ pub fn ensure_yt_dlp() -> Result<String> {
 }
 
 fn which_bin(name: &str) -> Result<String> {
-    let output = Command::new("sh")
-        .args(["-c", &format!("command -v {name}")])
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .output()
-        .with_context(|| format!("looking up {name}"))?;
-    if !output.status.success() {
-        bail!("{name} not found");
+    let exts: Vec<String> = if cfg!(windows) {
+        std::env::var("PATHEXT")
+            .unwrap_or_else(|_| ".EXE;.CMD;.BAT".into())
+            .split(';')
+            .filter(|e| !e.is_empty())
+            .map(str::to_string)
+            .collect()
+    } else {
+        Vec::new()
+    };
+    let dirs = std::env::var_os("PATH").context("PATH not set")?;
+    for dir in std::env::split_paths(&dirs) {
+        let base = dir.join(name);
+        if base.is_file() {
+            return Ok(base.to_string_lossy().into_owned());
+        }
+        for ext in &exts {
+            let candidate = dir.join(format!("{name}{ext}"));
+            if candidate.is_file() {
+                return Ok(candidate.to_string_lossy().into_owned());
+            }
+        }
     }
-    let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    if path.is_empty() {
-        bail!("{name} not found");
-    }
-    Ok(path)
+    bail!("{name} not found")
 }
 
 fn ffmpeg_available() -> bool {
