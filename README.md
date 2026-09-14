@@ -124,6 +124,7 @@ msc --help
 | `-m` / `--music-dir DIR` | Library root (default `~/Music`; env `OPTIONMUSIC_MUSIC_DIR`) |
 | `--cava` | Enable cava spectrum strip (off by default) |
 | `-q` / `--quiet` | Less stdout noise outside the TUI |
+| `--json` | NDJSON playback events on stdout (forces non-interactive mode) |
 
 ### Play options
 
@@ -141,6 +142,22 @@ msc --help
 `msc play` with no paths and no playback flags **resumes** the last session —
 saved queue order, last track paused at the saved position. Toggle with
 settings `c` → Resume or `resume = false` in config.
+
+### Scripts and pipes
+
+Without a TTY (or with `--json`) playback runs headless: the queue plays
+straight through, listening time still counts toward `msc stats`, and `Ctrl-C`
+(or `SIGTERM`/`SIGHUP`) stops MPV, saves, and exits `128 + signo` (`130` for
+Ctrl-C) — press it twice to bail out immediately.
+
+`--json` prints one event per line, so it can be consumed while playing:
+
+```bash
+msc play --json ~/Music | jq -r 'select(.event == "track") | .title'
+```
+
+Events: `start`, `track` (index/total/path/title/artist/album/duration),
+`track_end` (played seconds, `completed`), then `end` or `interrupted`.
 
 ### Download (`download` / `dl` / `d`)
 

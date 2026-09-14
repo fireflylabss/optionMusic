@@ -294,7 +294,9 @@ function HomePage() {
           <Card className="h-full transition-[transform,border-color] duration-(--duration-base) ease-(--ease-option) hover:-translate-y-0.5 hover:border-mono-300 dark:hover:border-mono-600">
             <CardHeader>
               <Terminal className="mb-2 size-5 text-muted-foreground" strokeWidth={1.5} />
-              <CardTitle className="font-sans text-title">CLI-first</CardTitle>
+              <CardTitle as="h2" className="font-sans text-title">
+                CLI-first
+              </CardTitle>
               <CardDescription>
                 Runs in your terminal. Starts in milliseconds and stays out of
                 your way.
@@ -307,7 +309,7 @@ function HomePage() {
           <Card className="h-full transition-[transform,border-color] duration-(--duration-base) ease-(--ease-option) hover:-translate-y-0.5 hover:border-mono-300 dark:hover:border-mono-600">
             <CardHeader>
               <Keyboard className="mb-2 size-5 text-muted-foreground" strokeWidth={1.5} />
-              <CardTitle className="font-sans text-title">
+              <CardTitle as="h2" className="font-sans text-title">
                 Keyboard driven
               </CardTitle>
               <CardDescription>
@@ -322,7 +324,7 @@ function HomePage() {
           <Card className="h-full transition-[transform,border-color] duration-(--duration-base) ease-(--ease-option) hover:-translate-y-0.5 hover:border-mono-300 dark:hover:border-mono-600">
             <CardHeader>
               <Music className="mb-2 size-5 text-muted-foreground" strokeWidth={1.5} />
-              <CardTitle className="font-sans text-title">
+              <CardTitle as="h2" className="font-sans text-title">
                 Pure monochrome
               </CardTitle>
               <CardDescription>
