@@ -631,6 +631,9 @@ pub struct AppConfig {
     /// Discord application client id override (empty = built-in).
     #[serde(default)]
     pub discord_rpc_id: String,
+    /// MPRIS on the session bus — multimedia keys and `playerctl` (on by default).
+    #[serde(default = "default_true")]
+    pub mpris: bool,
     /// Persisted playback prefs (restored on next launch; CLI flags win).
     #[serde(default = "default_volume")]
     pub volume: u8,
@@ -668,6 +671,7 @@ impl Default for AppConfig {
             resume: true,
             discord_rpc: false,
             discord_rpc_id: String::new(),
+            mpris: true,
             volume: 80,
             eq: crate::eq::EqPreset::Off,
             repeat: RepeatMode::Off,

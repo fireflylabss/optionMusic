@@ -12,6 +12,7 @@ pub mod history;
 pub mod library;
 pub mod lyrics;
 pub mod meta;
+pub mod mpris;
 pub mod mpv;
 pub mod plain;
 pub mod player;

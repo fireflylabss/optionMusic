@@ -50,6 +50,13 @@ ureq = { version = "3.4.2", default-features = false, features = ["rustls", "gzi
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 
+# MPRIS lives on the session bus, so it only makes sense where D-Bus does.
+[target.'cfg(target_os = "linux")'.dependencies]
+zbus = { version = "5.13.2", default-features = false, features = [
+    "async-io",
+    "blocking-api",
+] }
+
 [profile.release]
 lto = true
 codegen-units = 1

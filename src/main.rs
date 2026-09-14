@@ -10,7 +10,8 @@ use std::time::Duration;
 use anyhow::{Context, Result};
 use clap::Parser;
 use crossterm::event::{
-    self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEventKind,
+    self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MediaKeyCode, MouseButton,
+    MouseEventKind,
 };
 use crossterm::style::Stylize;
 
@@ -595,6 +596,8 @@ fn run_session(
 
     // Discord Rich Presence (opt-in) + session persistence throttle.
     let mut rpc = optionmusic::rpc::Rpc::new();
+    // MPRIS on the session bus (on by default) — multimedia keys + playerctl.
+    let mut mpris = optionmusic::mpris::Mpris::new();
     let mut last_save = std::time::Instant::now();
 
     // Smart shuffle (history-aware advance), sleep timer, stats + lyrics.
@@ -679,6 +682,103 @@ fn run_session(
                     player.is_paused(),
                 );
             }
+        }
+
+        // MPRIS: same live-toggle shape as the presence, then run whatever the
+        // desktop (multimedia keys, panel widget, playerctl) asked for through
+        // the very code paths the keyboard uses.
+        if let Some(warn) = mpris.sync(ui.config().mpris) {
+            ui.toast_config(warn);
+        }
+        for cmd in mpris.take_commands() {
+            use optionmusic::mpris::Command;
+            match cmd {
+                Command::Play | Command::PlayPause | Command::Pause => {
+                    let want_pause = matches!(cmd, Command::Pause)
+                        || (matches!(cmd, Command::PlayPause) && !player.is_paused() && !held);
+                    if held && !want_pause {
+                        held = false;
+                        if let Some(t) = playlist.get(index) {
+                            player.play_file(&t.path)?;
+                        }
+                    } else if !held {
+                        player.set_paused(want_pause);
+                    }
+                }
+                Command::Stop => {
+                    player.stop();
+                    held = true;
+                    ui.toast_info("stopped");
+                }
+                Command::Next => {
+                    held = false;
+                    if !go_next(
+                        player,
+                        playlist,
+                        &mut ui,
+                        &mut index,
+                        loop_mode,
+                        smart,
+                        &mut recent,
+                        &mut stats_store,
+                        &mut stats_max_pos,
+                        &mut stats_dur,
+                        &mut stats_counted,
+                        &mut lyrics,
+                    )? {
+                        ui.toast_info("already at last track");
+                    }
+                }
+                Command::Previous => {
+                    held = false;
+                    go_prev(player, playlist, &mut ui, &mut index)?;
+                }
+                Command::Seek(delta, forward) => {
+                    let now = player.position();
+                    let target = if forward {
+                        now + delta
+                    } else {
+                        now.saturating_sub(delta)
+                    };
+                    let _ = player.seek(target);
+                }
+                Command::SetPosition(target) => {
+                    let _ = player.seek(target);
+                }
+                Command::SetVolume(pct) => {
+                    player.set_volume(pct);
+                    ui.toast_config(format!("volume {}%", player.volume()));
+                }
+                Command::Quit => {
+                    player.stop();
+                    done_msg = "bye — thanks for listening ♪";
+                    dragging_progress = false;
+                    list_drag = None;
+                    quitting = true;
+                }
+            }
+        }
+        if quitting {
+            break;
+        }
+        if let Some(t) = playlist.get(index) {
+            mpris.update(optionmusic::mpris::Status {
+                title: t.display_name(),
+                artist: t.artist.clone().unwrap_or_default(),
+                album: t.album.clone().unwrap_or_default(),
+                path: t.path.to_string_lossy().into_owned(),
+                position: if held {
+                    Duration::ZERO
+                } else {
+                    player.position()
+                },
+                duration: player.duration(),
+                paused: player.is_paused(),
+                stopped: held,
+                volume: player.volume(),
+                can_next: index + 1 < playlist.len() || loop_mode == LoopMode::Playlist,
+                can_prev: index > 0,
+            });
         }
 
         // Session persistence: throttle writes while playing; final save on quit.
@@ -1013,25 +1113,7 @@ fn run_session(
                                 }
                                 Action::Prev => {
                                     held = false;
-                                    if !player.is_idle()
-                                        && player.position() > Duration::from_secs(3)
-                                    {
-                                        let _ = player.seek(Duration::ZERO);
-                                        ui.toast_info("restarted");
-                                    } else if index > 0 {
-                                        index -= 1;
-                                        if let Some(t) = playlist.get(index) {
-                                            player.play_file(&t.path)?;
-                                            ui.toast_track(t.display_name());
-                                        }
-                                    } else if player.is_idle() {
-                                        if let Some(t) = playlist.get(index) {
-                                            player.play_file(&t.path)?;
-                                            ui.toast_track(t.display_name());
-                                        }
-                                    } else {
-                                        let _ = player.seek(Duration::ZERO);
-                                    }
+                                    go_prev(player, playlist, &mut ui, &mut index)?;
                                 }
                                 Action::Shuffle => {
                                     let current_path = playlist.get(index).map(|t| t.path.clone());
@@ -1610,6 +1692,7 @@ fn run_session(
     // `quitting` = user left mid-session → keep resume; natural end clears it.
     save_session(&mut ui, player, playlist, index, loop_mode, smart, quitting);
     rpc.clear();
+    mpris.clear();
 
     ui.leave()?;
     println!();
@@ -1724,6 +1807,34 @@ fn go_next(
     Ok(true)
 }
 
+/// Previous-track behaviour shared by `p` and MPRIS `Previous`: restart the
+/// current track when past the 3s grace, otherwise step back.
+fn go_prev(
+    player: &mut Player,
+    playlist: &Playlist,
+    ui: &mut SessionUi,
+    index: &mut usize,
+) -> Result<()> {
+    if !player.is_idle() && player.position() > Duration::from_secs(3) {
+        let _ = player.seek(Duration::ZERO);
+        ui.toast_info("restarted");
+    } else if *index > 0 {
+        *index -= 1;
+        if let Some(t) = playlist.get(*index) {
+            player.play_file(&t.path)?;
+            ui.toast_track(t.display_name());
+        }
+    } else if player.is_idle() {
+        if let Some(t) = playlist.get(*index) {
+            player.play_file(&t.path)?;
+            ui.toast_track(t.display_name());
+        }
+    } else {
+        let _ = player.seek(Duration::ZERO);
+    }
+    Ok(())
+}
+
 /// Lyrics lookup context from track tags (filename title fallback).
 fn lyrics_query(track: &optionmusic::playlist::Track, duration: Option<Duration>) -> LyricsQuery {
     let title = track
@@ -1824,6 +1935,18 @@ fn handle_key(key: KeyEvent, player: &mut Player) -> Action {
         KeyCode::Char('n') | KeyCode::Char('>') | KeyCode::Down => Action::Next,
         KeyCode::Char('p') | KeyCode::Char('<') | KeyCode::Up => Action::Prev,
         KeyCode::Char('s') => Action::Stop,
+        // Terminals that report media keys (kitty protocol) — the desktop's
+        // own multimedia keys arrive over MPRIS instead.
+        KeyCode::Media(media) => match media {
+            MediaKeyCode::Play | MediaKeyCode::Pause | MediaKeyCode::PlayPause => Action::PlayPause,
+            MediaKeyCode::TrackNext | MediaKeyCode::FastForward => Action::Next,
+            MediaKeyCode::TrackPrevious | MediaKeyCode::Rewind => Action::Prev,
+            MediaKeyCode::Stop => Action::Stop,
+            MediaKeyCode::LowerVolume => Action::VolChanged(player.volume_step_down()),
+            MediaKeyCode::RaiseVolume => Action::VolChanged(player.volume_step_up()),
+            MediaKeyCode::MuteVolume => Action::Muted(player.toggle_mute()),
+            _ => Action::None,
+        },
         KeyCode::Char('+') | KeyCode::Char('=') => {
             let v = player.volume_step_up();
             Action::VolChanged(v)
