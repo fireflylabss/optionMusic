@@ -1,0 +1,18 @@
+name: Feature request
+description: Suggest a command, key binding or setting
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to do
+      description: The workflow that is awkward today, not just the feature name.
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: Proposed behaviour
+      description: Keys, flags or config keys you would expect, and how it stays minimal/black & white.
+    validations:
+      required: true

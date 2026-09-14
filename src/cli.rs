@@ -92,6 +92,7 @@ impl CliEq {
   msc sleep 30            arm the sleep timer (off to clear)\n\
   msc radio               endless queue built from your library\n\
   msc radio \"artist\"      seed by search · --artist · --genre · --fresh\n\
+  msc doctor              check yt-dlp / ffmpeg / cava on PATH\n\
 \n\
 Playback keys (press ? / h in the player for the full sidebar):\n\
   space        pause / resume          n / p        next / previous\n\
@@ -163,6 +164,18 @@ pub struct Cli {
 
     #[command(subcommand)]
     pub command: Option<Command>,
+}
+
+/// Whether `word` names a subcommand (or one of its aliases), taken from the
+/// parser itself so a new command can never be swallowed by the bare-path
+/// `msc song.mp3` shortcut.
+pub fn is_subcommand(word: &str) -> bool {
+    use clap::CommandFactory;
+    let mut cmd = Cli::command();
+    // Builds the generated `help` subcommand, which is otherwise absent.
+    cmd.build();
+    cmd.get_subcommands()
+        .any(|sub| sub.get_name() == word || sub.get_all_aliases().any(|alias| alias == word))
 }
 
 #[derive(Debug, Subcommand)]
@@ -377,6 +390,10 @@ pub enum Command {
         #[arg(long = "loop-file", visible_alias = "repeat-one")]
         loop_file: bool,
     },
+
+    /// Check external tools (yt-dlp, ffmpeg, cava) on PATH
+    #[command(visible_aliases = ["doc", "check"])]
+    Doctor,
 
     /// Print version
     #[command(visible_alias = "ver")]
@@ -705,5 +722,27 @@ mod tests {
             }
             _ => panic!("expected radio via alias rd"),
         }
+    }
+
+    #[test]
+    fn subcommand_names_cover_every_command_and_alias() {
+        for word in ["play", "p", "doctor", "doc", "check", "radio", "rd", "help"] {
+            assert!(is_subcommand(word), "{word} should be a subcommand");
+        }
+        for word in ["song.mp3", "./album", ""] {
+            assert!(!is_subcommand(word), "{word} should stay a bare path");
+        }
+    }
+
+    #[test]
+    fn parses_doctor() {
+        assert!(matches!(
+            Cli::parse_from(["msc", "doctor"]).command,
+            Some(Command::Doctor)
+        ));
+        assert!(matches!(
+            Cli::parse_from(["msc", "check"]).command,
+            Some(Command::Doctor)
+        ));
     }
 }

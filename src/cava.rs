@@ -91,14 +91,7 @@ impl Drop for CavaBridge {
 }
 
 fn cava_on_path() -> bool {
-    Command::new("cava")
-        .arg("-v")
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false)
+    crate::which::on_path("cava")
 }
 
 fn write_cava_config(bars: usize, input_method: &str) -> Result<PathBuf> {
