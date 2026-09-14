@@ -699,9 +699,7 @@ mod tests {
     fn parses_radio_alias_and_genre() {
         let cli = Cli::parse_from(["msc", "rd", "--genre", "trip-hop", "-v", "60"]);
         match cli.command {
-            Some(Command::Radio {
-                genre, volume, ..
-            }) => {
+            Some(Command::Radio { genre, volume, .. }) => {
                 assert_eq!(genre.as_deref(), Some("trip-hop"));
                 assert_eq!(volume, Some(60));
             }

@@ -49,6 +49,27 @@ sudo dnf install mpv-libs-devel pkgconf-pkg-config cava yt-dlp ffmpeg
 
 PipeWire or PulseAudio should be running if you use cava.
 
+### Windows
+
+Built from source (no installer yet; CI also uploads `optionmusic.exe` / `msc.exe` artifacts).
+Grab the **`mpv-dev-x86_64-*.7z`** package from the
+[shinchiro/mpv-winbuild-cmake releases](https://github.com/shinchiro/mpv-winbuild-cmake/releases) — it
+contains `libmpv-2.dll` and the `libmpv.dll.a` import library.
+
+```powershell
+# GNU toolchain (matches the import lib shipped with libmpv)
+rustup toolchain install stable-x86_64-pc-windows-gnu
+$env:RUSTFLAGS = "-L C:\path\to\mpv-dev"
+cargo +stable-x86_64-pc-windows-gnu build --release
+
+# put libmpv-2.dll next to the exe (or on PATH)
+copy C:\path\to\mpv-dev\libmpv-2.dll target\release\
+```
+
+Optional tools: `winget install yt-dlp.yt-dlp Gyan.FFmpeg` for `msc dl`.
+`cava` is not available on Windows, so the spectrum strip is disabled there.
+Use a modern terminal (Windows Terminal) for proper colours and mouse support.
+
 ### Build from source
 
 ```bash
@@ -281,8 +302,8 @@ on the app (local embedded covers can't be sent over IPC).
 
 - Rust **1.85+** (edition 2024)
 - **libmpv** (see Install)
-- System audio (PipeWire / PulseAudio / ALSA)
-- Optional: **cava** for the spectrum strip
+- System audio (PipeWire / PulseAudio / ALSA on Linux, WASAPI on Windows)
+- Optional: **cava** for the spectrum strip (Linux only)
 - Optional: **yt-dlp** (+ **ffmpeg** for audio) for `msc dl`
 
 ## License
