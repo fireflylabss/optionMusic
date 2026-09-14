@@ -88,10 +88,10 @@ mod bus {
     const QUEUE_MAX: usize = 32;
 
     pub(super) fn push(queue: &Queue, cmd: Command) {
-        if let Ok(mut q) = queue.lock() {
-            if q.len() < QUEUE_MAX {
-                q.push_back(cmd);
-            }
+        if let Ok(mut q) = queue.lock()
+            && q.len() < QUEUE_MAX
+        {
+            q.push_back(cmd);
         }
     }
 
