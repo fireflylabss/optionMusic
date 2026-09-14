@@ -25,9 +25,15 @@ function CardHeader({ className, ...props }: ComponentProps<'div'>) {
   )
 }
 
-function CardTitle({ className, ...props }: ComponentProps<'h3'>) {
+type HeadingLevel = 'h2' | 'h3' | 'h4'
+
+function CardTitle({
+  className,
+  as: Heading = 'h3',
+  ...props
+}: ComponentProps<'h3'> & { as?: HeadingLevel }) {
   return (
-    <h3
+    <Heading
       data-slot="card-title"
       className={cn('leading-none font-semibold', className)}
       {...props}
