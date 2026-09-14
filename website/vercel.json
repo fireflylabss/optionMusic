@@ -1,9 +1,9 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "buildCommand": "bun run build",
+  "buildCommand": "npm run build",
   "outputDirectory": "dist",
-  "devCommand": "bun run dev",
-  "installCommand": "bun install",
+  "devCommand": "npm run dev",
+  "installCommand": "npm install",
   "cleanUrls": true,
   "trailingSlash": false,
   "headers": [
