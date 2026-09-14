@@ -19,6 +19,7 @@ use optionmusic::config::{AppConfig, RepeatMode, resolve_music_dir};
 use optionmusic::download::{self, DownloadRequest, MediaKind};
 use optionmusic::library::Library;
 use optionmusic::lyrics::{LyricsLoader, LyricsState};
+use optionmusic::plain::Event as PlainEvent;
 use optionmusic::player::Player;
 use optionmusic::playlist::Playlist;
 use optionmusic::session::{
@@ -60,10 +61,33 @@ fn parse_cli() -> Cli {
     Cli::parse()
 }
 
+/// How much of stdout belongs to humans: `--quiet` drops the banner, `--json`
+/// replaces the plain-mode lines with NDJSON and rules out the TUI entirely.
+#[derive(Debug, Clone, Copy)]
+struct OutputMode {
+    quiet: bool,
+    json: bool,
+}
+
+impl OutputMode {
+    fn interactive(&self) -> bool {
+        !self.json && io::stdin().is_terminal() && io::stdout().is_terminal()
+    }
+
+    /// Human lines are silenced by `--quiet` and replaced by `--json`.
+    fn prose(&self) -> bool {
+        !self.quiet && !self.json
+    }
+}
+
 fn run() -> Result<()> {
     let cli = parse_cli();
     let bin = bin_name();
-    let quiet = cli.quiet;
+    let quiet = cli.quiet || cli.json;
+    let out = OutputMode {
+        quiet: cli.quiet,
+        json: cli.json,
+    };
 
     match cli.command {
         Some(Command::Play {
@@ -106,7 +130,7 @@ fn run() -> Result<()> {
                 shuffle,
                 loop_flag,
                 cli.cava,
-                quiet,
+                out,
                 bare,
             )?;
         }
@@ -221,7 +245,7 @@ fn run() -> Result<()> {
                 loop_flag,
                 &cli.music_dir,
                 cli.cava,
-                quiet,
+                out,
             )?;
         }
         Some(Command::Doctor) => {
@@ -279,7 +303,7 @@ fn cmd_play(
     shuffle: bool,
     loop_flag: Option<LoopMode>,
     enable_cava: bool,
-    quiet: bool,
+    out: OutputMode,
     bare: bool,
 ) -> Result<()> {
     if paths.is_empty() {
@@ -327,7 +351,7 @@ fn cmd_play(
     player.set_eq(eq);
     player.set_loop_track(loop_mode == LoopMode::Track);
 
-    if io::stdin().is_terminal() && io::stdout().is_terminal() {
+    if out.interactive() {
         run_session(
             &mut player,
             &mut playlist,
@@ -339,7 +363,7 @@ fn cmd_play(
             None,
         )?;
     } else {
-        if !quiet {
+        if out.prose() {
             banner();
             print_success(&format!(
                 "Loaded {} track{}",
@@ -347,26 +371,62 @@ fn cmd_play(
                 if playlist.len() == 1 { "" } else { "s" }
             ));
         }
-        run_plain(&mut player, &mut playlist, loop_mode == LoopMode::Playlist)?;
+        run_plain(
+            &mut player,
+            &mut playlist,
+            loop_mode == LoopMode::Playlist,
+            out,
+        )?;
     }
 
     Ok(())
 }
 
-fn run_plain(player: &mut Player, playlist: &mut Playlist, loop_playlist: bool) -> Result<()> {
+/// Non-TTY playback: no key loop, so a signal is the only way out. Listening
+/// time is counted like the TUI does, and Ctrl-C stops MPV and saves before
+/// exiting with the conventional 130.
+fn run_plain(
+    player: &mut Player,
+    playlist: &mut Playlist,
+    loop_playlist: bool,
+    out: OutputMode,
+) -> Result<()> {
+    optionmusic::signals::install();
     let mut rpc = optionmusic::rpc::Rpc::new();
     let cfg = AppConfig::load();
     let _ = rpc.sync(cfg.discord_rpc, &cfg.discord_rpc_id);
-    loop {
+    let mut stats_store = StatsStore::load();
+    let total = playlist.len();
+    let mut tracks_played = 0usize;
+    let mut interrupted = false;
+
+    emit(out, &PlainEvent::Start { tracks: total });
+
+    'queue: loop {
         for (idx, track) in playlist.tracks().iter().enumerate() {
-            print_info(&format!(
-                "[{}/{}] {}",
-                idx + 1,
-                playlist.len(),
-                track.display_name()
-            ));
+            // A signal between tracks must not start another one.
+            if optionmusic::signals::interrupted() {
+                interrupted = true;
+                break 'queue;
+            }
+            if out.prose() {
+                print_info(&format!("[{}/{}] {}", idx + 1, total, track.display_name()));
+            }
             player.play_file(&track.path)?;
+            let duration = track
+                .duration_secs
+                .map(Duration::from_secs_f64)
+                .or_else(|| player.duration());
+            emit(out, &PlainEvent::track(idx + 1, total, track, duration));
+
+            let mut max_pos = Duration::ZERO;
+            let mut counted = false;
             while !player.is_idle() {
+                if optionmusic::signals::interrupted() {
+                    interrupted = true;
+                    break;
+                }
+                max_pos = max_pos.max(player.position());
                 rpc.update(
                     &track.display_name(),
                     &track.artist_album(),
@@ -375,16 +435,75 @@ fn run_plain(player: &mut Player, playlist: &mut Playlist, loop_playlist: bool) 
                     player.duration(),
                     false,
                 );
+                maybe_count_stats(
+                    &mut stats_store,
+                    track,
+                    max_pos,
+                    player.duration(),
+                    &mut counted,
+                );
                 std::thread::sleep(Duration::from_millis(100));
+            }
+            max_pos = max_pos.max(player.position());
+            maybe_count_stats(
+                &mut stats_store,
+                track,
+                max_pos,
+                player.duration(),
+                &mut counted,
+            );
+            tracks_played += 1;
+            emit(
+                out,
+                &PlainEvent::TrackEnd {
+                    index: idx + 1,
+                    played: max_pos.as_secs_f64(),
+                    completed: !interrupted,
+                },
+            );
+            if interrupted {
+                break 'queue;
             }
         }
         if !loop_playlist {
             break;
         }
     }
+
+    if interrupted {
+        player.stop();
+    }
+    let _ = stats_store.save();
     rpc.clear();
-    print_success("Done. Thanks for listening ♪");
+
+    if interrupted {
+        emit(out, &PlainEvent::Interrupted { tracks_played });
+        if out.prose() {
+            print_info("Stopped.");
+        }
+        // MPV is stopped and everything is persisted, so exiting here is safe and
+        // keeps the shell's `128 + signo` contract for "killed by a signal".
+        io::Write::flush(&mut io::stdout()).ok();
+        std::process::exit(optionmusic::signals::exit_code());
+    }
+
+    emit(out, &PlainEvent::End { tracks_played });
+    if out.prose() {
+        print_success("Done. Thanks for listening ♪");
+    }
     Ok(())
+}
+
+/// One NDJSON line per event, flushed so a consumer sees it while the track
+/// plays. Write errors (a `head`-style reader closing the pipe) are ignored
+/// rather than panicking mid-playback like `println!` would.
+fn emit(out: OutputMode, event: &PlainEvent) {
+    if out.json {
+        use io::Write;
+        let mut stdout = io::stdout().lock();
+        let _ = writeln!(stdout, "{}", event.to_line());
+        let _ = stdout.flush();
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1752,12 +1871,12 @@ fn cmd_radio(
     loop_flag: Option<LoopMode>,
     music_dir_flag: &str,
     enable_cava: bool,
-    quiet: bool,
+    out: OutputMode,
 ) -> Result<()> {
     let prefs = AppConfig::load();
     let root = resolve_music_dir(music_dir_flag)?;
     let library = Library::scan(root.clone())?;
-    if !library.walk_errors.is_empty() {
+    if !library.walk_errors.is_empty() && out.prose() {
         print_warn(&format!(
             "{} path(s) could not be read",
             library.walk_errors.len()
@@ -1840,7 +1959,7 @@ fn cmd_radio(
     player.set_loop_track(loop_mode == LoopMode::Track);
 
     let label = format!("radio · {seed_label}");
-    if io::stdin().is_terminal() && io::stdout().is_terminal() {
+    if out.interactive() {
         run_session(
             &mut player,
             &mut playlist,
@@ -1852,7 +1971,7 @@ fn cmd_radio(
             Some(label),
         )?;
     } else {
-        if !quiet {
+        if out.prose() {
             banner();
             print_success(&format!(
                 "Radio · {} tracks · seed {}",
@@ -1860,7 +1979,12 @@ fn cmd_radio(
                 seed_label
             ));
         }
-        run_plain(&mut player, &mut playlist, loop_mode == LoopMode::Playlist)?;
+        run_plain(
+            &mut player,
+            &mut playlist,
+            loop_mode == LoopMode::Playlist,
+            out,
+        )?;
     }
     Ok(())
 }
