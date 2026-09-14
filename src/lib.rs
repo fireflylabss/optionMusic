@@ -1,11 +1,3 @@
-// libmpv is linked from the system, the TUI assumes a POSIX terminal, and the
-// optional tools are looked up on `PATH`; see `platform` and the README.
-#[cfg(not(unix))]
-compile_error!(
-    "optionMusic supports Unix targets only (Linux is tested, other Unixes are \
-     best-effort). Windows is not supported yet."
-);
-
 pub mod browse;
 pub mod cava;
 pub mod cli;

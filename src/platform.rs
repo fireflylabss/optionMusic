@@ -1,16 +1,15 @@
 //! Which platforms optionMusic actually claims to support.
 //!
-//! Everything here is Unix-shaped: libmpv is linked from the system, the TUI
-//! assumes a POSIX terminal, and `cava`/`yt-dlp` are expected on `PATH`. Rather
-//! than half-work on Windows, that target is rejected at compile time (see the
-//! `compile_error!` in `lib.rs`), and untested Unixes say so out loud.
+//! Linux is the one target that is developed against and packaged; everything
+//! else builds (CI covers macOS and Windows) but nobody runs it day to day, so
+//! those builds say so out loud instead of pretending to be equal.
 
 /// How much confidence the project has in the current build target.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Support {
-    /// Built and exercised in CI.
+    /// Developed against and packaged.
     Tested,
-    /// Expected to work, but nobody runs it: expect rough edges.
+    /// Builds in CI, but nobody runs it: expect rough edges.
     BestEffort,
 }
 

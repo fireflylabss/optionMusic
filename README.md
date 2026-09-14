@@ -32,12 +32,13 @@ paru -S optionmusic
 
 | Platform | Status |
 |----------|--------|
-| **Linux** | supported — built and tested in CI, packaged on the AUR |
-| **Other Unix** (macOS, BSD) | best-effort — should build with libmpv installed, untested; `msc version` says so |
-| **Windows** | not supported — the build fails on purpose rather than half-working |
+| **Linux** | supported — developed against, built and tested in CI, packaged on the AUR |
+| **macOS / Windows** | best-effort — built in CI, but not used day to day; `msc version` says so |
+| **Other Unix** (BSD) | best-effort — should build with libmpv installed, untested |
 
-Everything here assumes a POSIX terminal, a system **libmpv** to link against and
-optional tools found on `PATH`.
+Every platform needs a system **libmpv** to link against; the TUI assumes a
+terminal that speaks ANSI, and the optional tools (`cava`, `yt-dlp`) are looked
+up on `PATH`.
 
 ### System deps
 
