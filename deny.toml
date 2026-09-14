@@ -18,6 +18,8 @@ allow = [
   "BSD-2-Clause",
   "BSD-3-Clause",
   "BSL-1.0",
+  # webpki-roots ships Mozilla's root store as data under CDLA.
+  "CDLA-Permissive-2.0",
   "ISC",
   # libmpv2 / libmpv2-sys bind the LGPL libmpv we already require at runtime.
   "LGPL-2.1",
