@@ -37,7 +37,7 @@ This path is off the record. If you are looking for optionMusic documentation or
 const ASSET_PATTERN = /\.(?:png|jpg|jpeg|gif|svg|webp|ico|mp4|webm|mov|css|js|json|xml|txt|md|woff2?)$/i;
 
 export const config = {
-  matcher: ["/((?!.*\\..*).*)/?"],
+  matcher: ["/((?!.*\\..*).*)"],
 };
 
 export default function middleware(request: Request) {
