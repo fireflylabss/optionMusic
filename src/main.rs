@@ -1254,10 +1254,8 @@ fn run_session(
                                 HitTarget::Settings => {
                                     ui.toggle_settings();
                                 }
-                                HitTarget::Help => {
-                                    if !ui.try_toggle_help() {
-                                        ui.toast_info("no room — close a panel");
-                                    }
+                                HitTarget::Help if !ui.try_toggle_help() => {
+                                    ui.toast_info("no room — close a panel");
                                 }
                                 HitTarget::Quit => {
                                     if ui.lyrics_open() {
@@ -1664,6 +1662,7 @@ fn run_session(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn cmd_download(
     query: Option<&str>,
     provider: Option<download::Provider>,

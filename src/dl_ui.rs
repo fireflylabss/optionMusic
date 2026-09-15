@@ -777,22 +777,16 @@ fn browse_search_arrows(ui: &TermUi, results: &[SearchHit]) -> Result<Vec<MediaI
                     .checked_sub(1)
                     .unwrap_or(slice.len().saturating_sub(1));
             }
-            KeyCode::Down | KeyCode::Char('j') => {
-                if !slice.is_empty() {
-                    cursor = (cursor + 1) % slice.len();
-                }
+            KeyCode::Down | KeyCode::Char('j') if !slice.is_empty() => {
+                cursor = (cursor + 1) % slice.len();
             }
-            KeyCode::Left | KeyCode::Char('h') | KeyCode::Char('p') => {
-                if page > 0 {
-                    page -= 1;
-                    cursor = 0;
-                }
+            KeyCode::Left | KeyCode::Char('h') | KeyCode::Char('p') if page > 0 => {
+                page -= 1;
+                cursor = 0;
             }
-            KeyCode::Right | KeyCode::Char('l') | KeyCode::Char('n') => {
-                if page + 1 < pages {
-                    page += 1;
-                    cursor = 0;
-                }
+            KeyCode::Right | KeyCode::Char('l') | KeyCode::Char('n') if page + 1 < pages => {
+                page += 1;
+                cursor = 0;
             }
             KeyCode::Char(' ') => {
                 if let Some(hit) = slice.get(cursor)
