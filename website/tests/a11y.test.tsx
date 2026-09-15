@@ -10,8 +10,6 @@ import { Shell } from "../src/components/layout/Shell";
 import { HomePage } from "../src/pages/HomePage";
 import type { AxeResults, RunOptions, Spec } from "axe-core";
 
-const DIST = resolve(process.cwd(), "dist");
-
 // Static markup carries no layout, so paint-dependent rules cannot be judged
 // here; everything structural (names, roles, landmarks, headings) can.
 const OPTIONS: RunOptions = {
@@ -55,23 +53,7 @@ function describeViolations(results: AxeResults): string {
     .join("\n");
 }
 
-// The shell renders through React, so what a scriptless client (and most
-// crawlers) sees is the <noscript> fallback — audit that markup as the page.
-function unwrapNoscript(html: string): string {
-  return html.replace(/<\/?noscript[^>]*>/g, "");
-}
-
-const PAGES = ["index", "404", "about", "contact", "privacy", "docs"];
-
 describe("accessibility", () => {
-  for (const page of PAGES) {
-    it(`${page}.html has no axe violations`, async () => {
-      const html = readFileSync(resolve(DIST, `${page}.html`), "utf-8");
-      const results = await audit(unwrapNoscript(html));
-      expect(describeViolations(results)).toBe("");
-    }, 30_000);
-  }
-
   it("the React homepage has no axe violations", async () => {
     const body = renderToStaticMarkup(
       <StaticRouter location="/">

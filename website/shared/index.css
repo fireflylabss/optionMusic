@@ -1,7 +1,7 @@
 @import "../generated/theme.css";
 @import "tw-animate-css";
 
-/* Tailwind scans from the Vite root — cover shared + the app source. */
+/* Tailwind scans from the Vite root (sites/*) — cover shared + both sites. */
 @source ".";
 @source "../src";
 
