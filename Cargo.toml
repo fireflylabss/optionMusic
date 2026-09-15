@@ -34,16 +34,16 @@ path = "src/main.rs"
 
 [dependencies]
 clap = { version = "4", features = ["derive", "color", "env"] }
-libmpv2 = "5.0"
+libmpv2 = "6.0"
 anyhow = { workspace = true }
 walkdir = "2"
-crossterm = "0.28"
+crossterm = "0.29"
 optionSDK = "0.1.3"
 serde = { workspace = true }
 toml = "0.8"
 serde_json = { workspace = true }
 lofty = "0.24"
-base64 = "0.22"
+base64 = "0.23"
 discord-rich-presence = "1.1.0"
 ureq = { version = "3.4.2", default-features = false, features = ["rustls", "gzip"] }
 

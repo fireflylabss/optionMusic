@@ -390,7 +390,7 @@ impl Player {
 /// Probe duration of a file via a short-lived MPV instance (ao=null).
 pub fn probe_duration(path: &Path) -> Option<Duration> {
     let path_str = path.to_str()?;
-    let mut mpv = Mpv::new().ok()?;
+    let mpv = Mpv::new().ok()?;
     let _ = mpv.set_property("video", "no");
     let _ = mpv.set_property("ao", "null");
     let _ = mpv.set_property("terminal", "no");
