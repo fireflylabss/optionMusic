@@ -108,7 +108,7 @@ jobs:
           targets: x86_64-pc-windows-gnu
       - run: cargo test --all-targets --locked --target x86_64-pc-windows-gnu
       - run: cargo build --release --locked --target x86_64-pc-windows-gnu
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: optionmusic-windows-x86_64
           path: |
