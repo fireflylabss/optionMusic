@@ -1,6 +1,6 @@
 import { readFileSync, statSync } from "node:fs";
 import { resolve } from "node:path";
-import { preferredMedia } from "../src/negotiate.ts";
+import { preferredMedia } from "../middleware.ts";
 
 const DIST = resolve(process.cwd(), "dist");
 const PORT = 8124;

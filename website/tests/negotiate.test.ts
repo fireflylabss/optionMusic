@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { preferredMedia } from "../src/negotiate";
+import { preferredMedia } from "../middleware";
 
 describe("preferredMedia", () => {
   it("prefers markdown when Accept is text/markdown", () => {
