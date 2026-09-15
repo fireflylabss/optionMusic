@@ -29,7 +29,7 @@
     "@tailwindcss/vite": "^4",
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
-    "@vitejs/plugin-react": "^4.3.4",
+    "@vitejs/plugin-react": "^6.1.1",
     "axe-core": "4.10.2",
     "happy-dom": "15.11.7",
     "tailwindcss": "^4",
