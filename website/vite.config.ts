@@ -6,8 +6,12 @@ import { defineConfig } from "vite";
 export default defineConfig({
   plugins: [tailwindcss(), react()],
   clearScreen: false,
-  server: { port: 1421, strictPort: true },
-  preview: { port: 1421, strictPort: true },
+  server: {
+    port: 1421,
+    strictPort: true,
+    // src/releases.ts imports ../../CHANGELOG.md?raw — outside the Vite root.
+    fs: { allow: [".."] },
+  },
   resolve: {
     alias: {
       "@shared": fileURLToPath(new URL("./shared", import.meta.url)),

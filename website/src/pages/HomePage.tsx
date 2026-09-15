@@ -22,6 +22,8 @@ import {
   CardTitle,
 } from '@shared/components/ui/card'
 
+import { RELEASES } from '../releases'
+
 const enter = (ms: number) => ({
   className: 'option-enter',
   style: { animationDelay: `${ms}ms` },
@@ -177,49 +179,18 @@ const STATS: { value: string; label: string }[] = [
   { value: '0', label: 'telemetry & accounts' },
 ]
 
-const RELEASES: {
-  v: string
-  date: string
-  channel: 'stable' | 'beta' | 'mixed'
-  note: string
-}[] = [
-  {
-    v: 'v0.2.16',
-    date: '12/09/2026',
-    channel: 'beta',
-    note: 'Discord Rich Presence, session memory — resume where you left off',
-  },
-  {
-    v: 'v0.2.15',
-    date: '04/09/2026',
-    channel: 'stable',
-    note: 'Floating panels, docked karaoke lyrics, hardened downloader',
-  },
-  {
-    v: 'v0.2.14',
-    date: '29/08/2026',
-    channel: 'beta',
-    note: 'Library core: incremental refresh, artists → albums → tracks',
-  },
-  {
-    v: 'v0.2.13',
-    date: '22/08/2026',
-    channel: 'stable',
-    note: '`optmusic` alias removed — `optionmusic` and `msc` remain',
-  },
-  {
-    v: 'v0.2.12m',
-    date: '03/08/2026',
-    channel: 'mixed',
-    note: 'Shared path ownership, atomic playlist/config writes',
-  },
-]
-
 const releaseVariant = {
   stable: 'success',
   beta: 'info',
+  alpha: 'warning',
   mixed: 'warning',
 } as const
+
+const surfaceLabel: Record<string, string | null> = {
+  cli: null,
+  desktop: 'desktop',
+  both: 'cli + desktop',
+}
 
 const FAQ: { q: string; a: string }[] = [
   {
@@ -506,16 +477,21 @@ function HomePage() {
         <h2 className="mt-3 font-sans text-display-md">Changelog</h2>
         <Reveal delay={90}>
         <div className="mt-8 border-y border-border">
-          {RELEASES.map((r) => (
+          {RELEASES.slice(0, 6).map((r) => (
             <div
               key={r.v}
               className="flex items-baseline gap-4 border-b border-border py-3 font-mono text-sm last:border-b-0 sm:gap-6"
             >
-              <span className="w-20 shrink-0 text-foreground">{r.v}</span>
+              <span className="w-28 shrink-0 whitespace-nowrap text-foreground">{r.v}</span>
               <span className="hidden w-24 shrink-0 text-xs text-muted-foreground sm:inline">
                 {r.date}
               </span>
               <Badge variant={releaseVariant[r.channel]}>{r.channel}</Badge>
+              {surfaceLabel[r.surface] && (
+                <span className="hidden shrink-0 text-[10px] uppercase tracking-[0.15em] text-muted-foreground/70 md:inline">
+                  {surfaceLabel[r.surface]}
+                </span>
+              )}
               <span className="min-w-0 text-muted-foreground">{r.note}</span>
             </div>
           ))}

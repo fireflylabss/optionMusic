@@ -3,6 +3,8 @@ import { NavLink } from 'react-router-dom'
 
 import { Button } from '@shared/components/ui/button'
 
+import { LATEST_CLI } from '../../releases'
+
 type FooterLink = { label: string; href: string } | { label: string; to: string }
 
 const groups: { title: string; links: FooterLink[] }[] = [
@@ -120,7 +122,7 @@ function Footer() {
               Source
             </a>
             <span className="font-mono text-xs text-muted-foreground">
-              v0.2.16-beta
+              {LATEST_CLI.v}
             </span>
           </div>
         </div>
