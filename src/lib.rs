@@ -15,6 +15,7 @@ pub mod meta;
 pub mod mpris;
 pub mod mpv;
 pub mod plain;
+pub mod platform;
 pub mod player;
 pub mod playlist;
 pub mod preview;
