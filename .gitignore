@@ -1,9 +1,36 @@
-/target
-/node_modules
-/dist
-/.agents
-/.opencode
-/.commandcode
-command-code-session-*.html
+# Rust
+/target/
+**/*.rs.bk
+
+# Secrets
+.env
+.env.*
+!.env.example
+!.env.*.example
+
+# Logs
 *.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+*.swp
+*~
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# Agent tooling
+/.agents/
+/.commandcode/
+/.opencode/
+/.pi/
+command-code-session-*.html
 skills-lock.json
+
+# Temp
+/.tmp/
+
+# Project

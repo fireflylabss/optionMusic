@@ -1,2 +1,41 @@
-node_modules/
-dist/
+# Dependencies
+/node_modules/
+
+# Build output
+/dist/
+/dist-ssr/
+/out/
+/.vite/
+*.local
+
+# Secrets
+.env
+.env.*
+!.env.example
+!.env.*.example
+
+# Logs
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+*.swp
+*~
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# Agent tooling
+/.agents/
+/.commandcode/
+/.opencode/
+command-code-session-*.html
+skills-lock.json
+
+# Temp
+/.tmp/
+
+# Project
