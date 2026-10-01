@@ -96,6 +96,13 @@ pub(crate) struct RootView {
     pub(crate) lyrics_track: Option<String>,
     pub(crate) lyrics_scroll: ScrollHandle,
     pub(crate) drop_hover: bool,
+    /// Radio composer fields (seed query / artist / genre) + `fresh` toggle
+    /// and the label of the last session started, shown under the composer.
+    pub(crate) radio_query: Entity<SearchInput>,
+    pub(crate) radio_artist: Entity<SearchInput>,
+    pub(crate) radio_genre: Entity<SearchInput>,
+    pub(crate) radio_fresh: bool,
+    pub(crate) radio_label: Option<SharedString>,
     pub(crate) _scan_task: Option<Task<()>>,
     pub(crate) _poll_task: Option<Task<()>>,
     pub(crate) _cover_task: Option<Task<()>>,
@@ -133,6 +140,9 @@ impl RootView {
                 SearchEvent::TabNext | SearchEvent::TabPrev => {}
             },
         );
+        let (radio_query, radio_query_sub) = Self::radio_field(cx, "Track, artist or album…");
+        let (radio_artist, radio_artist_sub) = Self::radio_field(cx, "Seed artist — optional");
+        let (radio_genre, radio_genre_sub) = Self::radio_field(cx, "Seed genre — optional");
         let mut view = Self {
             controller: None,
             library: Vec::new(),
@@ -194,6 +204,11 @@ impl RootView {
             lyrics_track: None,
             lyrics_scroll: ScrollHandle::new(),
             drop_hover: false,
+            radio_query,
+            radio_artist,
+            radio_genre,
+            radio_fresh: false,
+            radio_label: None,
             _scan_task: None,
             _poll_task: None,
             _cover_task: None,
@@ -202,7 +217,13 @@ impl RootView {
             _enrich_task: None,
             _lyrics_task: None,
             _prefs_task: None,
-            _subscriptions: vec![search_subscription, name_subscription],
+            _subscriptions: vec![
+                search_subscription,
+                name_subscription,
+                radio_query_sub,
+                radio_artist_sub,
+                radio_genre_sub,
+            ],
         };
         view.start_scan(cx);
         view
@@ -1417,7 +1438,7 @@ impl RootView {
 
     /// Refocus the root handle without holding a `Window` (submit callbacks
     /// don't receive one).
-    fn refocus_root(&mut self, cx: &mut Context<Self>) {
+    pub(crate) fn refocus_root(&mut self, cx: &mut Context<Self>) {
         let handle = self.focus_handle.clone();
         for window in cx.windows() {
             let handle = handle.clone();
@@ -1694,6 +1715,8 @@ impl RootView {
                     FocusedList::Shelves
                 }
             }
+            // Unreachable — the Radio guards below focus the seed field.
+            Page::Radio => FocusedList::Tracks,
         }
     }
 
@@ -1719,6 +1742,13 @@ impl RootView {
 
     /// Tab: enter the list that makes sense for the active page.
     pub(crate) fn focus_current_list(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        // The Radio page has no list — Tab targets the seed field instead.
+        if self.page == Page::Radio {
+            let focus = self.radio_query.read(cx).focus_handle.clone();
+            focus.focus(window, cx);
+            cx.notify();
+            return;
+        }
         self.aim_page_list();
         self.list_focus.focus(window, cx);
         cx.notify();
@@ -1728,6 +1758,18 @@ impl RootView {
     /// subscriptions) — focuses `list_focus` in every window, like
     /// `refocus_root` does for the root handle.
     fn focus_current_list_detached(&mut self, cx: &mut Context<Self>) {
+        // The Radio page has no list — Tab targets the seed field instead.
+        if self.page == Page::Radio {
+            let handle = self.radio_query.read(cx).focus_handle.clone();
+            for window in cx.windows() {
+                let handle = handle.clone();
+                let _ = window.update(cx, move |_, window, app| {
+                    handle.focus(window, app);
+                });
+            }
+            cx.notify();
+            return;
+        }
         self.aim_page_list();
         let handle = self.list_focus.clone();
         for window in cx.windows() {
@@ -2598,6 +2640,8 @@ impl Render for RootView {
             .on_action(cx.listener(Self::queue_item_down))
             .on_action(cx.listener(Self::queue_jump))
             .on_action(cx.listener(Self::clear_queue))
+            .on_action(cx.listener(Self::nav_radio))
+            .on_action(cx.listener(Self::quick_radio))
             .on_drag_move::<ExternalPaths>(cx.listener(
                 |this: &mut RootView,
                  _event: &gpui::DragMoveEvent<ExternalPaths>,
@@ -2650,7 +2694,7 @@ impl Render for RootView {
                                     .flex()
                                     .flex_1()
                                     .min_h_0()
-                                    .child(self.catalog(tokens, cx).flex_1().min_w(px(0.0)))
+                                    .child(self.catalog(window, tokens, cx).flex_1().min_w(px(0.0)))
                                     .when(self.stage_open, |this| {
                                         this.child(self.stage(tokens, stage_h, cx))
                                     }),

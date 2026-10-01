@@ -15,6 +15,7 @@ pub(crate) enum Page {
     Playlists,
     Favorites,
     Shelves,
+    Radio,
 }
 
 impl Page {
@@ -26,6 +27,7 @@ impl Page {
             Self::Playlists => "playlists",
             Self::Favorites => "favorites",
             Self::Shelves => "shelves",
+            Self::Radio => "radio",
         }
     }
 
@@ -36,6 +38,7 @@ impl Page {
             "playlists" => Self::Playlists,
             "favorites" => Self::Favorites,
             "shelves" => Self::Shelves,
+            "radio" => Self::Radio,
             _ => Self::Library,
         }
     }

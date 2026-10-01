@@ -63,7 +63,9 @@ actions!(
         QueueItemUp,
         QueueItemDown,
         QueueJump,
-        ClearQueue
+        ClearQueue,
+        NavRadio,
+        Radio
     ]
 );
 
@@ -230,6 +232,13 @@ fn main() {
             KeyBinding::new("ctrl-c", search_input::InputCopy, Some("TextInput")),
             #[cfg(not(target_os = "macos"))]
             KeyBinding::new("ctrl-x", search_input::InputCut, Some("TextInput")),
+            // Radio page + quick seed-from-current action.
+            KeyBinding::new("ctrl-7", NavRadio, Some("!TextInput")),
+            #[cfg(target_os = "macos")]
+            KeyBinding::new("cmd-7", NavRadio, Some("!TextInput")),
+            KeyBinding::new("ctrl-shift-r", Radio, None),
+            #[cfg(target_os = "macos")]
+            KeyBinding::new("cmd-shift-r", Radio, None),
         ]);
         cx.set_menus([Menu::new("optionMusic").items([
             MenuItem::action("New Window", NewWindow),
