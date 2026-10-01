@@ -704,12 +704,31 @@ impl RootView {
                             this.settings_open = !this.settings_open;
                             this.context_menu = None;
                             this.about_open = false;
+                            this.dl_sheet = None;
                             if this.settings_open {
                                 this.overlay_focus.focus(window, cx);
                             }
                             cx.notify();
                         },
                     ))
+                    .child(
+                        self.side_action(
+                            "Download",
+                            icons::download(px(15.0)),
+                            self.dl_sheet.is_some(),
+                            Some(
+                                if cfg!(target_os = "macos") {
+                                    "⌘⇧D"
+                                } else {
+                                    "ctrl+shift+d"
+                                }
+                                .into(),
+                            ),
+                            tokens,
+                            cx,
+                            |this, window, cx| this.open_downloader(window, cx),
+                        ),
+                    )
                     .child(
                         div()
                             .px(px(10.0))

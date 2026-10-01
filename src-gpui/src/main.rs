@@ -1,6 +1,7 @@
 //! optionMusic GPUI — minimal black & white desktop music player.
 
 mod crash;
+mod downloads;
 mod icons;
 mod mini;
 mod model;
@@ -76,7 +77,8 @@ actions!(
         ToggleVisualizer,
         SleepTimerCycle,
         NavStats,
-        ToggleMiniPlayer
+        ToggleMiniPlayer,
+        OpenDownloader
     ]
 );
 
@@ -270,6 +272,10 @@ fn main() {
             KeyBinding::new("cmd-shift-z", SleepTimerCycle, Some("!TextInput")),
             #[cfg(not(target_os = "macos"))]
             KeyBinding::new("ctrl-shift-z", SleepTimerCycle, Some("!TextInput")),
+            #[cfg(target_os = "macos")]
+            KeyBinding::new("cmd-shift-d", OpenDownloader, None),
+            #[cfg(not(target_os = "macos"))]
+            KeyBinding::new("ctrl-shift-d", OpenDownloader, None),
         ]);
         cx.set_menus([
             Menu::new("optionMusic").items([
@@ -281,7 +287,10 @@ fn main() {
                 MenuItem::separator(),
                 MenuItem::action("Quit optionMusic", Quit),
             ]),
-            Menu::new("File").items([MenuItem::action("New Window", NewWindow)]),
+            Menu::new("File").items([
+                MenuItem::action("New Window", NewWindow),
+                MenuItem::action("Download\u{2026}", OpenDownloader),
+            ]),
             Menu::new("Playback").items([
                 MenuItem::action("Play/Pause", PlayPause),
                 MenuItem::action("Stop", Stop),
