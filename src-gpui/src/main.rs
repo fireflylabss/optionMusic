@@ -2,6 +2,7 @@
 
 mod icons;
 mod model;
+mod now_playing;
 mod search_input;
 mod theme;
 mod view;
