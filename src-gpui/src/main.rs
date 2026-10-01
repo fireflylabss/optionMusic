@@ -71,7 +71,8 @@ actions!(
         About,
         NavRadio,
         Radio,
-        CheckForUpdates
+        CheckForUpdates,
+        ToggleVisualizer
     ]
 );
 
@@ -250,6 +251,7 @@ fn main() {
             KeyBinding::new("ctrl-shift-r", Radio, None),
             #[cfg(target_os = "macos")]
             KeyBinding::new("cmd-shift-r", Radio, None),
+            KeyBinding::new("v", ToggleVisualizer, Some("!TextInput")),
         ]);
         cx.set_menus([
             Menu::new("optionMusic").items([
@@ -289,6 +291,7 @@ fn main() {
                 MenuItem::action("Queue", ToggleQueue),
                 MenuItem::action("Stage", ToggleStage),
                 MenuItem::action("Lyrics", ToggleLyrics),
+                MenuItem::action("Visualizer", ToggleVisualizer),
                 MenuItem::separator(),
                 MenuItem::action("Focus List", FocusList),
             ]),

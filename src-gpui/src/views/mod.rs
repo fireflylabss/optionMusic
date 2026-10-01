@@ -7,3 +7,4 @@ pub mod radio;
 pub mod sidebar;
 pub mod stage;
 pub mod update;
+pub mod visualizer;

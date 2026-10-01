@@ -158,6 +158,8 @@ pub(crate) struct DesktopPrefs {
     pub(crate) stage_open: bool,
     /// "queue" | "lyrics" | null (panel hidden).
     pub(crate) panel: Option<String>,
+    /// Spectrum strip above the player bar (cava-powered).
+    pub(crate) visualizer: bool,
 }
 
 impl Default for DesktopPrefs {
@@ -168,6 +170,7 @@ impl Default for DesktopPrefs {
             page: "library".into(),
             stage_open: true,
             panel: None,
+            visualizer: true,
         }
     }
 }
