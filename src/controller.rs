@@ -5,6 +5,7 @@ use crate::{
     player::Player,
     playlist::{self, Track},
     sleep::SleepTimer,
+    stats::StatsStore,
 };
 use anyhow::Result;
 use serde::Serialize;
@@ -158,6 +159,13 @@ pub struct CoreController {
     /// Sleep timer (`msc sleep` / TUI `z`) — shared state the desktop UI
     /// shows as a countdown in the player bar.
     sleep: SleepTimer,
+    /// Per-track play accounting shared with `msc` (`session::maybe_count_stats`):
+    /// max position reached, probed duration, and the counted latch — reset
+    /// every time `play()` starts a new track.
+    stats_store: StatsStore,
+    stats_max_pos: Duration,
+    stats_dur: Option<Duration>,
+    stats_counted: bool,
 }
 impl Default for CoreController {
     fn default() -> Self {
@@ -186,6 +194,10 @@ impl CoreController {
                 .checked_sub(std::time::Duration::from_secs(60))
                 .unwrap_or_else(std::time::Instant::now),
             sleep: SleepTimer::new(),
+            stats_store: StatsStore::load(),
+            stats_max_pos: Duration::ZERO,
+            stats_dur: None,
+            stats_counted: false,
         }
     }
     fn load_desktop_preferences() -> String {
@@ -374,7 +386,25 @@ impl CoreController {
         }
         Ok(self.player.as_mut().unwrap())
     }
+    /// Count the outgoing track's play if it passed the same ~50%/60s
+    /// threshold `msc` uses, then no-op once the latch is set.
+    fn count_current_play(&mut self) {
+        let Some(id) = self.current.clone() else {
+            return;
+        };
+        let Some(track) = self.track(&id).ok().cloned() else {
+            return;
+        };
+        crate::session::maybe_count_stats(
+            &mut self.stats_store,
+            &track,
+            self.stats_max_pos,
+            self.stats_dur,
+            &mut self.stats_counted,
+        );
+    }
     pub fn play(&mut self, id: &str) -> Result<()> {
+        self.count_current_play();
         let path = self.track(id)?.path.clone();
         let loop_track = self.loop_mode == LoopMode::Track;
         // Load first so a failed open does not leave "now playing" without audio.
@@ -385,6 +415,9 @@ impl CoreController {
         player.play_file(&path)?;
         self.current = Some(id.into());
         self.manually_stopped = false;
+        self.stats_max_pos = Duration::ZERO;
+        self.stats_dur = None;
+        self.stats_counted = false;
         self.queue.retain(|x| x != id);
         self.push_recent(id);
         let _ = crate::history::record_play(id);
@@ -412,6 +445,7 @@ impl CoreController {
         Ok(paused)
     }
     pub fn stop(&mut self) {
+        self.count_current_play();
         self.manually_stopped = true;
         if let Some(p) = self.player.as_mut() {
             p.stop();
@@ -805,6 +839,16 @@ impl CoreController {
     /// This is called by the Tauri position ticker, so EOF advances even when
     /// the frontend sends no further command.
     fn advance_if_finished(&mut self) {
+        // Keep the play-accounting watermarks fresh before EOF can advance:
+        // `next()` → `play()` counts the outgoing track against them.
+        if let Some(p) = self.player.as_mut()
+            && !p.is_idle()
+        {
+            self.stats_max_pos = self.stats_max_pos.max(p.position());
+            if let Some(d) = p.duration() {
+                self.stats_dur = Some(d);
+            }
+        }
         let ended = self.player.as_mut().is_some_and(|p| p.is_idle())
             && !self.manually_stopped
             && self.current.is_some()

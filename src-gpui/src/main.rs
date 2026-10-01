@@ -204,8 +204,10 @@ fn main() {
             KeyBinding::new("escape", DismissOverlay, Some("Overlay")),
             KeyBinding::new("up", MenuUp, Some("Overlay")),
             KeyBinding::new("down", MenuDown, Some("Overlay")),
-            KeyBinding::new("k", MenuUp, Some("Overlay")),
-            KeyBinding::new("j", MenuDown, Some("Overlay")),
+            // j/k = vim nav in overlay menus, except while a text field is
+            // focused — otherwise the letters never reach the input.
+            KeyBinding::new("k", MenuUp, Some("Overlay && !TextInput")),
+            KeyBinding::new("j", MenuDown, Some("Overlay && !TextInput")),
             KeyBinding::new("enter", MenuActivate, Some("Overlay")),
             KeyBinding::new("left", MenuLeft, Some("Overlay")),
             KeyBinding::new("right", MenuRight, Some("Overlay")),
