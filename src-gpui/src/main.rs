@@ -70,7 +70,8 @@ actions!(
         OpenSettings,
         About,
         NavRadio,
-        Radio
+        Radio,
+        CheckForUpdates
     ]
 );
 
@@ -253,6 +254,8 @@ fn main() {
         cx.set_menus([
             Menu::new("optionMusic").items([
                 MenuItem::action("About optionMusic", About),
+                MenuItem::separator(),
+                MenuItem::action("Check for Updates…", CheckForUpdates),
                 MenuItem::separator(),
                 MenuItem::action("Settings…", OpenSettings),
                 MenuItem::separator(),

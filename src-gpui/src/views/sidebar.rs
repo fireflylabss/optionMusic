@@ -373,7 +373,15 @@ impl RootView {
                     .font_weight(gpui::FontWeight::SEMIBOLD)
                     .text_color(tokens.ink)
                     .child("optionMusic"),
-            );
+            )
+            .when_some(self.update_available(), |this, info| {
+                this.child(self.update_badge(
+                    info.tag.clone().into(),
+                    info.url.clone().into(),
+                    tokens,
+                    cx,
+                ))
+            });
 
         let controls = div()
             .id("titlebar-controls")
