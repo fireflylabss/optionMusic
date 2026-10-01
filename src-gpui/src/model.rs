@@ -15,6 +15,7 @@ pub(crate) enum Page {
     Playlists,
     Favorites,
     Shelves,
+    Radio,
 }
 
 impl Page {
@@ -26,6 +27,7 @@ impl Page {
             Self::Playlists => "playlists",
             Self::Favorites => "favorites",
             Self::Shelves => "shelves",
+            Self::Radio => "radio",
         }
     }
 
@@ -36,6 +38,7 @@ impl Page {
             "playlists" => Self::Playlists,
             "favorites" => Self::Favorites,
             "shelves" => Self::Shelves,
+            "radio" => Self::Radio,
             _ => Self::Library,
         }
     }
@@ -155,6 +158,8 @@ pub(crate) struct DesktopPrefs {
     pub(crate) stage_open: bool,
     /// "queue" | "lyrics" | null (panel hidden).
     pub(crate) panel: Option<String>,
+    /// Spectrum strip above the player bar (cava-powered).
+    pub(crate) visualizer: bool,
 }
 
 impl Default for DesktopPrefs {
@@ -165,6 +170,7 @@ impl Default for DesktopPrefs {
             page: "library".into(),
             stage_open: true,
             panel: None,
+            visualizer: true,
         }
     }
 }
@@ -250,3 +256,45 @@ pub(crate) fn track_album_key(track: &TrackDto) -> String {
 
 pub(crate) struct SliderDrag(pub(crate) &'static str);
 pub(crate) struct ScrollbarDrag(pub(crate) &'static str);
+
+/// Which tab the Settings dialog shows.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SettingsTab {
+    General,
+    Playback,
+    Library,
+    Interface,
+}
+
+impl SettingsTab {
+    pub(crate) const ALL: [Self; 4] = [
+        Self::General,
+        Self::Playback,
+        Self::Library,
+        Self::Interface,
+    ];
+
+    pub(crate) fn label(self) -> &'static str {
+        match self {
+            Self::General => "General",
+            Self::Playback => "Playback",
+            Self::Library => "Library",
+            Self::Interface => "Interface",
+        }
+    }
+
+    pub(crate) fn element_id(self) -> &'static str {
+        match self {
+            Self::General => "settings-tab-general",
+            Self::Playback => "settings-tab-playback",
+            Self::Library => "settings-tab-library",
+            Self::Interface => "settings-tab-interface",
+        }
+    }
+
+    /// Move one tab left/right, clamped at the ends.
+    pub(crate) fn shift(self, delta: isize) -> Self {
+        let index = Self::ALL.iter().position(|t| *t == self).unwrap_or(0) as isize;
+        Self::ALL[(index + delta).clamp(0, Self::ALL.len() as isize - 1) as usize]
+    }
+}

@@ -18,6 +18,8 @@ allow = [
   "BSD-2-Clause",
   "BSD-3-Clause",
   "BSL-1.0",
+  # notify (library file watcher) is public-domain/CC0.
+  "CC0-1.0",
   # webpki-roots ships Mozilla's root store as data under CDLA.
   "CDLA-Permissive-2.0",
   "ISC",

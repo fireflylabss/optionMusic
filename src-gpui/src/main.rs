@@ -1,12 +1,15 @@
 //! optionMusic GPUI — minimal black & white desktop music player.
 
+mod crash;
 mod icons;
 mod mini;
 mod model;
+mod now_playing;
 mod search_input;
 mod theme;
 mod view;
 mod views;
+mod watcher;
 mod widgets;
 
 use gpui::{
@@ -65,6 +68,12 @@ actions!(
         QueueItemDown,
         QueueJump,
         ClearQueue,
+        OpenSettings,
+        About,
+        NavRadio,
+        Radio,
+        CheckForUpdates,
+        ToggleVisualizer,
         ToggleMiniPlayer
     ]
 );
@@ -111,6 +120,7 @@ fn quit(_: &Quit, cx: &mut App) {
 }
 
 fn main() {
+    crash::install();
     application().run(|cx: &mut App| {
         cx.on_action(new_window);
         cx.on_action(quit);
@@ -237,13 +247,63 @@ fn main() {
             KeyBinding::new("ctrl-c", search_input::InputCopy, Some("TextInput")),
             #[cfg(not(target_os = "macos"))]
             KeyBinding::new("ctrl-x", search_input::InputCut, Some("TextInput")),
+            #[cfg(target_os = "macos")]
+            KeyBinding::new("cmd-,", OpenSettings, None),
+            #[cfg(not(target_os = "macos"))]
+            KeyBinding::new("ctrl-,", OpenSettings, None),
+            // Radio page + quick seed-from-current action.
+            KeyBinding::new("ctrl-7", NavRadio, Some("!TextInput")),
+            #[cfg(target_os = "macos")]
+            KeyBinding::new("cmd-7", NavRadio, Some("!TextInput")),
+            KeyBinding::new("ctrl-shift-r", Radio, None),
+            #[cfg(target_os = "macos")]
+            KeyBinding::new("cmd-shift-r", Radio, None),
+            KeyBinding::new("v", ToggleVisualizer, Some("!TextInput")),
         ]);
-        cx.set_menus([Menu::new("optionMusic").items([
-            MenuItem::action("New Window", NewWindow),
-            MenuItem::action("Mini Player", ToggleMiniPlayer),
-            MenuItem::separator(),
-            MenuItem::action("Quit", Quit),
-        ])]);
+        cx.set_menus([
+            Menu::new("optionMusic").items([
+                MenuItem::action("About optionMusic", About),
+                MenuItem::separator(),
+                MenuItem::action("Check for Updates…", CheckForUpdates),
+                MenuItem::separator(),
+                MenuItem::action("Settings…", OpenSettings),
+                MenuItem::separator(),
+                MenuItem::action("Quit optionMusic", Quit),
+            ]),
+            Menu::new("File").items([MenuItem::action("New Window", NewWindow)]),
+            Menu::new("Playback").items([
+                MenuItem::action("Play/Pause", PlayPause),
+                MenuItem::action("Stop", Stop),
+                MenuItem::separator(),
+                MenuItem::action("Next", Next),
+                MenuItem::action("Previous", Previous),
+                MenuItem::separator(),
+                MenuItem::action("Loop", CycleLoop),
+                MenuItem::action("Shuffle", Shuffle),
+                MenuItem::separator(),
+                MenuItem::action("Volume Up", VolumeUp),
+                MenuItem::action("Volume Down", VolumeDown),
+                MenuItem::action("Mute", Mute),
+            ]),
+            Menu::new("View").items([
+                MenuItem::action("Library", NavLibrary),
+                MenuItem::action("Artists", NavArtists),
+                MenuItem::action("Albums", NavAlbums),
+                MenuItem::action("Playlists", NavPlaylists),
+                MenuItem::action("Favorites", NavFavorites),
+                MenuItem::action("Shelves", NavShelves),
+                MenuItem::action("Radio", NavRadio),
+                MenuItem::separator(),
+                MenuItem::action("Search", ToggleSearch),
+                MenuItem::action("Queue", ToggleQueue),
+                MenuItem::action("Stage", ToggleStage),
+                MenuItem::action("Lyrics", ToggleLyrics),
+                MenuItem::action("Visualizer", ToggleVisualizer),
+                MenuItem::action("Mini Player", ToggleMiniPlayer),
+                MenuItem::separator(),
+                MenuItem::action("Focus List", FocusList),
+            ]),
+        ]);
         cx.on_window_closed(|cx, _| {
             if cx.windows().is_empty() {
                 cx.quit();

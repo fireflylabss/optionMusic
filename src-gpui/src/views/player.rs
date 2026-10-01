@@ -168,6 +168,25 @@ impl RootView {
                     .text_right()
                     .child(format!("{}%", self.playback.volume)),
             )
+            .child(self.icon_button(
+                "viz-toggle",
+                "Visualizer",
+                icons::styled(
+                    icons::visualizer(px(15.0)),
+                    if self.visualizer {
+                        tokens.ink
+                    } else {
+                        tokens.mute
+                    },
+                    tokens.ink,
+                ),
+                |this: &mut RootView, window: &mut Window, cx: &mut Context<RootView>| {
+                    this.do_toggle_visualizer(cx);
+                    this.save_desktop_prefs(window, cx);
+                },
+                tokens,
+                cx,
+            ))
     }
 
     pub(crate) fn player_bar(

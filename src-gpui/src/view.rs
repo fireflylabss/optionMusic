@@ -9,6 +9,7 @@ use gpui::{
     ScrollHandle, ScrollStrategy, SharedString, Subscription, Task, UniformListScrollHandle,
     Window, deferred, div, prelude::*, px,
 };
+use optionmusic::cava::CavaBridge;
 use optionmusic::config::{ArtistSource, ReplayGainMode};
 use optionmusic::controller::{CoreController, PlaybackState, SmartShelf, TrackDto};
 use optionmusic::eq::EqPreset;
@@ -16,15 +17,17 @@ use optionmusic::rpc::Rpc;
 use optionmusic::saved_playlists::SavedPlaylist;
 
 use crate::model::*;
+use crate::now_playing::{NowPlaying, RemoteCommand};
 use crate::search_input::{SearchEvent, SearchInput};
 use crate::theme::*;
+use crate::watcher::{self, LibraryWatcher};
 use crate::{
-    BlurList, ClearQueue, CycleLoop, DismissOverlay, FavoriteCurrent, FocusList, ListActivate,
-    ListDown, ListFirst, ListLast, ListUp, MenuActivate, MenuDown, MenuLeft, MenuRight, MenuUp,
-    Mute, NavAlbums, NavArtists, NavFavorites, NavLibrary, NavPlaylists, NavShelves, Next,
-    PlayPause, Previous, QueueItemDown, QueueItemUp, QueueJump, SeekBack, SeekForward, Shuffle,
-    SliderEnd, SliderHome, SliderLeft, SliderRight, Stop, ToggleLyrics, ToggleQueue, ToggleSearch,
-    ToggleStage, VolumeDown, VolumeUp,
+    About, BlurList, ClearQueue, CycleLoop, DismissOverlay, FavoriteCurrent, FocusList,
+    ListActivate, ListDown, ListFirst, ListLast, ListUp, MenuActivate, MenuDown, MenuLeft,
+    MenuRight, MenuUp, Mute, NavAlbums, NavArtists, NavFavorites, NavLibrary, NavPlaylists,
+    NavShelves, Next, OpenSettings, PlayPause, Previous, QueueItemDown, QueueItemUp, QueueJump,
+    SeekBack, SeekForward, Shuffle, SliderEnd, SliderHome, SliderLeft, SliderRight, Stop,
+    ToggleLyrics, ToggleQueue, ToggleSearch, ToggleStage, VolumeDown, VolumeUp,
 };
 
 pub(crate) struct RootView {
@@ -96,6 +99,13 @@ pub(crate) struct RootView {
     pub(crate) lyrics_track: Option<String>,
     pub(crate) lyrics_scroll: ScrollHandle,
     pub(crate) drop_hover: bool,
+    /// Radio composer fields (seed query / artist / genre) + `fresh` toggle
+    /// and the label of the last session started, shown under the composer.
+    pub(crate) radio_query: Entity<SearchInput>,
+    pub(crate) radio_artist: Entity<SearchInput>,
+    pub(crate) radio_genre: Entity<SearchInput>,
+    pub(crate) radio_fresh: bool,
+    pub(crate) radio_label: Option<SharedString>,
     pub(crate) _scan_task: Option<Task<()>>,
     pub(crate) _poll_task: Option<Task<()>>,
     pub(crate) _cover_task: Option<Task<()>>,
@@ -105,6 +115,26 @@ pub(crate) struct RootView {
     pub(crate) _lyrics_task: Option<Task<()>>,
     pub(crate) _prefs_task: Option<Task<()>>,
     pub(crate) _subscriptions: Vec<Subscription>,
+    /// macOS Now Playing / media-key bridge; no-op on other platforms.
+    pub(crate) now_playing: NowPlaying,
+    /// Library filesystem watcher — present unless init failed.
+    pub(crate) _watcher: Option<LibraryWatcher>,
+    pub(crate) _watch_scan_task: Option<Task<()>>,
+    pub(crate) about_open: bool,
+    pub(crate) settings_tab: SettingsTab,
+    /// Latest GitHub release state — the background check runs at most once
+    /// a day (`update::check_due`); `CheckForUpdates` bypasses the stamp.
+    pub(crate) update_status: optionmusic::update::UpdateStatus,
+    pub(crate) _update_task: Option<Task<()>>,
+    /// Spectrum strip above the player bar (persisted in desktop prefs).
+    pub(crate) visualizer: bool,
+    /// Live cava bridge — `None` while disabled or when cava is unavailable.
+    pub(crate) viz_bridge: Option<CavaBridge>,
+    /// Latest spectrum frame rendered by `visualizer_strip`.
+    pub(crate) viz_levels: Vec<f32>,
+    /// Set while cava's input methods are being probed off-thread.
+    pub(crate) viz_starting: bool,
+    pub(crate) _viz_task: Option<Task<()>>,
 }
 
 impl RootView {
@@ -133,6 +163,9 @@ impl RootView {
                 SearchEvent::TabNext | SearchEvent::TabPrev => {}
             },
         );
+        let (radio_query, radio_query_sub) = Self::radio_field(cx, "Track, artist or album…");
+        let (radio_artist, radio_artist_sub) = Self::radio_field(cx, "Seed artist — optional");
+        let (radio_genre, radio_genre_sub) = Self::radio_field(cx, "Seed genre — optional");
         let mut view = Self {
             controller: None,
             library: Vec::new(),
@@ -194,6 +227,11 @@ impl RootView {
             lyrics_track: None,
             lyrics_scroll: ScrollHandle::new(),
             drop_hover: false,
+            radio_query,
+            radio_artist,
+            radio_genre,
+            radio_fresh: false,
+            radio_label: None,
             _scan_task: None,
             _poll_task: None,
             _cover_task: None,
@@ -202,9 +240,29 @@ impl RootView {
             _enrich_task: None,
             _lyrics_task: None,
             _prefs_task: None,
-            _subscriptions: vec![search_subscription, name_subscription],
+            _subscriptions: vec![
+                search_subscription,
+                name_subscription,
+                radio_query_sub,
+                radio_artist_sub,
+                radio_genre_sub,
+            ],
+            now_playing: NowPlaying::new(),
+            _watcher: None,
+            _watch_scan_task: None,
+            about_open: false,
+            settings_tab: SettingsTab::General,
+            update_status: optionmusic::update::UpdateStatus::Unknown,
+            _update_task: None,
+            visualizer: false,
+            viz_bridge: None,
+            viz_levels: Vec::new(),
+            viz_starting: false,
+            _viz_task: None,
         };
         view.start_scan(cx);
+        view.check_crash_recovery(cx);
+        view.start_update_check(cx, false);
         view
     }
 
@@ -241,6 +299,7 @@ impl RootView {
                 view.update_playback_and_cover(cx);
                 view.start_enrichment(cx);
                 view.start_poll(cx);
+                view._watcher = LibraryWatcher::start(view, cx);
                 cx.notify();
             })
             .ok();
@@ -327,11 +386,12 @@ impl RootView {
 
     pub(crate) fn start_poll(&mut self, cx: &mut Context<Self>) {
         self._poll_task = Some(cx.spawn(async move |this, cx| {
+            // Interval is chosen per tick: ~30fps while a live cava bridge
+            // animates the spectrum strip, 200ms otherwise — same ticker.
+            let mut interval = Duration::from_millis(200);
             loop {
-                cx.background_executor()
-                    .timer(Duration::from_millis(200))
-                    .await;
-                this.update(cx, |view, cx| {
+                cx.background_executor().timer(interval).await;
+                let Ok(next) = this.update(cx, |view, cx| {
                     let changed = view
                         .controller
                         .as_mut()
@@ -349,8 +409,15 @@ impl RootView {
                         cx.notify();
                     }
                     view.sync_presence(cx);
-                })
-                .ok();
+                    view.sync_now_playing(cx);
+                    if view.viz_sync_frame() {
+                        cx.notify();
+                    }
+                    view.viz_tick_interval()
+                }) else {
+                    break;
+                };
+                interval = next;
             }
         }));
     }
@@ -953,6 +1020,67 @@ impl RootView {
         cx.notify();
     }
 
+    /// Start a watcher-triggered rescan unless one is already running: the
+    /// controller moves to the background executor for the filesystem walk,
+    /// then `finish_watched_rescan` applies the result. Returns false while
+    /// a rescan is in flight so the caller can retry the burst later.
+    pub(crate) fn try_begin_watched_rescan(&mut self, cx: &mut Context<Self>) -> bool {
+        if self._watch_scan_task.is_some() {
+            return false;
+        }
+        let Some(mut controller) = self.controller.take() else {
+            return false;
+        };
+        self._watch_scan_task = Some(cx.spawn(async move |this, cx| {
+            let controller = cx
+                .background_executor()
+                .spawn(async move {
+                    let _ = controller.scan(None);
+                    controller
+                })
+                .await;
+            this.update(cx, |view, cx| view.finish_watched_rescan(controller, cx))
+                .ok();
+        }));
+        true
+    }
+
+    /// Apply the off-thread scan: diff against the visible library, refresh
+    /// the derived lists, and toast only when the track set changed.
+    pub(crate) fn finish_watched_rescan(
+        &mut self,
+        mut controller: CoreController,
+        cx: &mut Context<Self>,
+    ) {
+        self._watch_scan_task = None;
+        let next = controller.snapshot().library;
+        self.controller = Some(controller);
+        if library_differ(&self.library, &next) {
+            self.library = next;
+            self.refresh_playlists();
+            self.rebuild_indexes();
+            self.apply_filter(cx);
+            self.set_status("library updated", cx);
+            self.start_enrichment(cx);
+        }
+        self.sync_watcher_dirs();
+        self.update_playback_and_cover(cx);
+        cx.notify();
+    }
+
+    /// Re-sync the watcher with the effective scan dirs (music folders added
+    /// at runtime get picked up here).
+    pub(crate) fn sync_watcher_dirs(&mut self) {
+        let dirs = self
+            .controller
+            .as_ref()
+            .map(|c| watcher::watch_dirs(&c.config.music_dirs))
+            .unwrap_or_default();
+        if let Some(watcher) = self._watcher.as_mut() {
+            watcher.watch_dirs(dirs);
+        }
+    }
+
     pub(crate) fn do_seek(&mut self, fraction: f64, cx: &mut Context<Self>) {
         let Some(duration) = self.playback.duration.filter(|d| *d > 0.0) else {
             return;
@@ -965,6 +1093,46 @@ impl RootView {
         }
         self.playback.position = position;
         cx.notify();
+    }
+
+    /// Absolute seek (seconds) — the Control Center / Touch Bar scrubber.
+    pub(crate) fn do_seek_absolute(&mut self, position: f64, cx: &mut Context<Self>) {
+        let position = position.max(0.0);
+        if let Some(controller) = self.controller.as_mut()
+            && let Err(error) = controller.seek(position)
+        {
+            eprintln!("seek failed: {error}");
+        }
+        self.playback.position = position;
+        cx.notify();
+    }
+
+    /// Drain media-key commands enqueued by MPRemoteCommandCenter and push
+    /// the current track to MPNowPlayingInfoCenter. Runs on the poll tick so
+    /// all ObjC work stays off render and command dispatch matches the
+    /// player bar's controller calls.
+    pub(crate) fn sync_now_playing(&mut self, cx: &mut Context<Self>) {
+        for command in self.now_playing.poll_commands() {
+            match command {
+                RemoteCommand::TogglePause => self.do_play_pause(cx),
+                RemoteCommand::Play => {
+                    if self.playback.paused {
+                        self.do_play_pause(cx)
+                    }
+                }
+                RemoteCommand::Pause => {
+                    if !self.playback.paused {
+                        self.do_play_pause(cx)
+                    }
+                }
+                RemoteCommand::Next => self.do_next(cx),
+                RemoteCommand::Previous => self.do_previous(cx),
+                RemoteCommand::Stop => self.do_stop(cx),
+                RemoteCommand::Seek(position) => self.do_seek_absolute(position, cx),
+            }
+        }
+        self.now_playing
+            .sync(&self.playback, self.current_cover.as_deref());
     }
 
     pub(crate) fn do_set_volume(&mut self, fraction: f64, cx: &mut Context<Self>) {
@@ -1128,6 +1296,7 @@ impl RootView {
         self.playlist_picker = None;
         self.pending_confirm = None;
         self.settings_open = false;
+        self.about_open = false;
         if self.name_target.is_some() {
             self.name_target = None;
             self.name_input.update(cx, |input, cx| input.clear(cx));
@@ -1417,7 +1586,7 @@ impl RootView {
 
     /// Refocus the root handle without holding a `Window` (submit callbacks
     /// don't receive one).
-    fn refocus_root(&mut self, cx: &mut Context<Self>) {
+    pub(crate) fn refocus_root(&mut self, cx: &mut Context<Self>) {
         let handle = self.focus_handle.clone();
         for window in cx.windows() {
             let handle = handle.clone();
@@ -1694,6 +1863,8 @@ impl RootView {
                     FocusedList::Shelves
                 }
             }
+            // Unreachable — the Radio guards below focus the seed field.
+            Page::Radio => FocusedList::Tracks,
         }
     }
 
@@ -1719,6 +1890,13 @@ impl RootView {
 
     /// Tab: enter the list that makes sense for the active page.
     pub(crate) fn focus_current_list(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        // The Radio page has no list — Tab targets the seed field instead.
+        if self.page == Page::Radio {
+            let focus = self.radio_query.read(cx).focus_handle.clone();
+            focus.focus(window, cx);
+            cx.notify();
+            return;
+        }
         self.aim_page_list();
         self.list_focus.focus(window, cx);
         cx.notify();
@@ -1728,6 +1906,18 @@ impl RootView {
     /// subscriptions) — focuses `list_focus` in every window, like
     /// `refocus_root` does for the root handle.
     fn focus_current_list_detached(&mut self, cx: &mut Context<Self>) {
+        // The Radio page has no list — Tab targets the seed field instead.
+        if self.page == Page::Radio {
+            let handle = self.radio_query.read(cx).focus_handle.clone();
+            for window in cx.windows() {
+                let handle = handle.clone();
+                let _ = window.update(cx, move |_, window, app| {
+                    handle.focus(window, app);
+                });
+            }
+            cx.notify();
+            return;
+        }
         self.aim_page_list();
         let handle = self.list_focus.clone();
         for window in cx.windows() {
@@ -1856,6 +2046,7 @@ impl RootView {
             }
             Err(error) => self.set_status(format!("Scan failed: {error}"), cx),
         }
+        self.sync_watcher_dirs();
         self.update_playback_and_cover(cx);
         cx.notify();
     }
@@ -1876,6 +2067,10 @@ impl RootView {
             Some("lyrics") => Some(StagePanel::Lyrics),
             _ => None,
         };
+        self.visualizer = prefs.visualizer;
+        if self.visualizer {
+            self.start_viz(cx);
+        }
         cx.notify();
     }
 
@@ -1891,6 +2086,7 @@ impl RootView {
                 StagePanel::Queue => "queue".into(),
                 StagePanel::Lyrics => "lyrics".into(),
             }),
+            visualizer: self.visualizer,
         };
         self._prefs_task = Some(cx.spawn(async move |this, cx| {
             cx.background_executor()
@@ -2450,11 +2646,19 @@ impl RootView {
             self.confirm_accept_selected = false;
             cx.notify();
         }
+        if self.settings_open {
+            self.settings_tab = self.settings_tab.shift(-1);
+            cx.notify();
+        }
     }
 
     pub(crate) fn menu_right(&mut self, _: &MenuRight, _w: &mut Window, cx: &mut Context<Self>) {
         if self.pending_confirm.is_some() {
             self.confirm_accept_selected = true;
+            cx.notify();
+        }
+        if self.settings_open {
+            self.settings_tab = self.settings_tab.shift(1);
             cx.notify();
         }
     }
@@ -2546,6 +2750,102 @@ impl RootView {
         );
         self.overlay_focus.focus(window, cx);
     }
+
+    /// App-menu "Settings…" (⌘,/Ctrl+,): open the settings dialog.
+    pub(crate) fn open_settings(
+        &mut self,
+        _: &OpenSettings,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.settings_open = true;
+        self.about_open = false;
+        self.context_menu = None;
+        self.playlist_picker = None;
+        self.overlay_focus.focus(window, cx);
+        cx.notify();
+    }
+
+    /// App-menu "About optionMusic": open the about panel.
+    pub(crate) fn open_about(&mut self, _: &About, window: &mut Window, cx: &mut Context<Self>) {
+        self.about_open = true;
+        self.settings_open = false;
+        self.context_menu = None;
+        self.playlist_picker = None;
+        self.overlay_focus.focus(window, cx);
+        cx.notify();
+    }
+
+    /// Switch the Settings dialog to a different tab (chips + arrow keys).
+    pub(crate) fn select_settings_tab(&mut self, tab: SettingsTab, cx: &mut Context<Self>) {
+        self.settings_tab = tab;
+        cx.notify();
+    }
+
+    /// Toast when the previous run left a `.crashed` sentinel behind.
+    pub(crate) fn check_crash_recovery(&mut self, cx: &mut Context<Self>) {
+        if crate::crash::take_crash_flag().is_some() {
+            self.set_status("recovered after a crash — log saved", cx);
+        }
+    }
+
+    /// `ReleaseInfo` when a newer release was found — drives the titlebar
+    /// badge and the Settings → Updates row.
+    pub(crate) fn update_available(&self) -> Option<&optionmusic::update::ReleaseInfo> {
+        match &self.update_status {
+            optionmusic::update::UpdateStatus::Available(info) => Some(info),
+            _ => None,
+        }
+    }
+
+    /// Kick the GitHub release check on the background executor. Automatic
+    /// runs are gated by `update::check_due` (once a day); `manual` runs
+    /// bypass the stamp and report through the status toast. Request
+    /// failures stay silent — `Unknown` renders as "not checked".
+    pub(crate) fn start_update_check(&mut self, cx: &mut Context<Self>, manual: bool) {
+        if self._update_task.is_some() {
+            return;
+        }
+        if !manual && !optionmusic::update::check_due() {
+            return;
+        }
+        self.update_status = optionmusic::update::UpdateStatus::Checking;
+        cx.notify();
+        self._update_task = Some(cx.spawn(async move |this, cx| {
+            let status = cx
+                .background_executor()
+                .spawn(async move { optionmusic::update::check_now(env!("CARGO_PKG_VERSION")) })
+                .await;
+            this.update(cx, move |view, cx| {
+                view._update_task = None;
+                match &status {
+                    optionmusic::update::UpdateStatus::Available(info) if manual => {
+                        view.set_status(format!("Update available: {}", info.tag), cx);
+                    }
+                    optionmusic::update::UpdateStatus::UpToDate(_) if manual => {
+                        view.set_status("optionMusic is up to date", cx);
+                    }
+                    optionmusic::update::UpdateStatus::Unknown if manual => {
+                        view.set_status("Update check failed", cx);
+                    }
+                    _ => {}
+                }
+                view.update_status = status;
+                cx.notify();
+            })
+            .ok();
+        }));
+    }
+
+    pub(crate) fn check_for_updates(
+        &mut self,
+        _: &crate::CheckForUpdates,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.set_status("Checking for updates…", cx);
+        self.start_update_check(cx, true);
+    }
 }
 
 impl Render for RootView {
@@ -2601,6 +2901,12 @@ impl Render for RootView {
             .on_action(cx.listener(Self::queue_item_down))
             .on_action(cx.listener(Self::queue_jump))
             .on_action(cx.listener(Self::clear_queue))
+            .on_action(cx.listener(Self::open_settings))
+            .on_action(cx.listener(Self::open_about))
+            .on_action(cx.listener(Self::nav_radio))
+            .on_action(cx.listener(Self::quick_radio))
+            .on_action(cx.listener(Self::check_for_updates))
+            .on_action(cx.listener(Self::toggle_visualizer))
             .on_drag_move::<ExternalPaths>(cx.listener(
                 |this: &mut RootView,
                  _event: &gpui::DragMoveEvent<ExternalPaths>,
@@ -2653,11 +2959,14 @@ impl Render for RootView {
                                     .flex()
                                     .flex_1()
                                     .min_h_0()
-                                    .child(self.catalog(tokens, cx).flex_1().min_w(px(0.0)))
+                                    .child(self.catalog(window, tokens, cx).flex_1().min_w(px(0.0)))
                                     .when(self.stage_open, |this| {
                                         this.child(self.stage(tokens, stage_h, cx))
                                     }),
                             )
+                            .when(self.visualizer, |this| {
+                                this.child(self.visualizer_strip(tokens))
+                            })
                             .child(self.player_bar(tokens, cx)),
                     ),
             )
@@ -2697,8 +3006,21 @@ impl Render for RootView {
                 this.child(deferred(self.overlay_scrim(cx, true)))
                     .child(deferred(self.confirm_dialog(request, tokens, cx)).with_priority(3))
             })
+            .when(self.about_open, |this| {
+                this.child(deferred(self.overlay_scrim(cx, true)))
+                    .child(deferred(self.about_dialog(tokens, cx)).with_priority(2))
+            })
             .when(!self.status.is_empty(), |this| {
                 this.child(deferred(self.status_toast(tokens, cx)).with_priority(4))
             })
     }
+}
+
+/// File-identity diff (path + mtime + size) between two library snapshots.
+/// Used by the watcher so tag enrichment doesn't masquerade as a change.
+fn library_differ(a: &[TrackDto], b: &[TrackDto]) -> bool {
+    a.len() != b.len()
+        || a.iter()
+            .zip(b.iter())
+            .any(|(x, y)| x.id != y.id || x.mtime != y.mtime || x.size != y.size)
 }

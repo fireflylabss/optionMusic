@@ -373,7 +373,15 @@ impl RootView {
                     .font_weight(gpui::FontWeight::SEMIBOLD)
                     .text_color(tokens.ink)
                     .child("optionMusic"),
-            );
+            )
+            .when_some(self.update_available(), |this, info| {
+                this.child(self.update_badge(
+                    info.tag.clone().into(),
+                    info.url.clone().into(),
+                    tokens,
+                    cx,
+                ))
+            });
 
         let controls = div()
             .id("titlebar-controls")
@@ -581,6 +589,15 @@ impl RootView {
                         shortcut_hint(5),
                         tokens,
                         cx,
+                    ))
+                    .child(self.side_link(
+                        Page::Radio,
+                        "Radio",
+                        icons::radio(px(18.0)),
+                        None,
+                        shortcut_hint(7),
+                        tokens,
+                        cx,
                     )),
             )
             .child(div().mx(px(10.0)).h(px(1.0)).bg(tokens.border))
@@ -677,6 +694,7 @@ impl RootView {
                         |this, window, cx| {
                             this.settings_open = !this.settings_open;
                             this.context_menu = None;
+                            this.about_open = false;
                             if this.settings_open {
                                 this.overlay_focus.focus(window, cx);
                             }

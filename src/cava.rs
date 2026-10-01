@@ -12,6 +12,21 @@ use anyhow::{Context, Result};
 const ASCII_MAX: u32 = 100;
 const DEFAULT_BARS: usize = 64;
 
+/// `(input method, source)` pairs tried in order until cava stays alive.
+/// macOS: `coreaudio` `source = tap` captures the system output mix on
+/// macOS 14.2+ without a loopback device; `auto` targets the default output
+/// device; `portaudio`/`osx` cover builds without tap support. Linux keeps
+/// the original pipewire → pulse order.
+#[cfg(target_os = "macos")]
+const INPUTS: &[(&str, &str)] = &[
+    ("coreaudio", "tap"),
+    ("coreaudio", "auto"),
+    ("portaudio", "auto"),
+    ("osx", "auto"),
+];
+#[cfg(not(target_os = "macos"))]
+const INPUTS: &[(&str, &str)] = &[("pipewire", "auto"), ("pulse", "auto")];
+
 /// Live spectrum levels in `0.0 ..= 1.0`, refreshed by a cava child process.
 pub struct CavaBridge {
     child: Option<Child>,
@@ -26,14 +41,14 @@ impl CavaBridge {
         if !cava_on_path() {
             return None;
         }
-        Self::start_with_input("pipewire")
-            .or_else(|_| Self::start_with_input("pulse"))
-            .ok()
+        INPUTS
+            .iter()
+            .find_map(|&(method, source)| Self::start_with_input(method, source).ok())
     }
 
-    fn start_with_input(input_method: &str) -> Result<Self> {
+    fn start_with_input(input_method: &str, source: &str) -> Result<Self> {
         let bars = DEFAULT_BARS;
-        let config_path = write_cava_config(bars, input_method)?;
+        let config_path = write_cava_config(bars, input_method, source)?;
         let levels = Arc::new(Mutex::new(vec![0.0; bars]));
 
         let mut child = Command::new("cava")
@@ -93,7 +108,7 @@ fn cava_on_path() -> bool {
     crate::which::on_path("cava")
 }
 
-fn write_cava_config(bars: usize, input_method: &str) -> Result<PathBuf> {
+fn write_cava_config(bars: usize, input_method: &str, source: &str) -> Result<PathBuf> {
     let dir = std::env::temp_dir().join("optionmusic");
     std::fs::create_dir_all(&dir).context("temp cava dir")?;
     let path = dir.join(format!("cava-{}.cfg", std::process::id()));
@@ -110,7 +125,7 @@ higher_cutoff_freq = 12000
 
 [input]
 method = {input_method}
-source = auto
+source = {source}
 
 [output]
 method = raw

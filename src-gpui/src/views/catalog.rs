@@ -1080,6 +1080,7 @@ impl RootView {
 
     pub(crate) fn catalog(
         &self,
+        window: &Window,
         tokens: MusicTokens,
         cx: &mut Context<Self>,
     ) -> gpui::Stateful<gpui::Div> {
@@ -1140,6 +1141,10 @@ impl RootView {
             Page::Favorites => (
                 "Favorites".into(),
                 format!("{} liked", self.playback.favorites.len()).into(),
+            ),
+            Page::Radio => (
+                "Radio".into(),
+                "Endless queue built from your library".into(),
             ),
             Page::Shelves => (
                 "Shelves".into(),
@@ -1259,6 +1264,7 @@ impl RootView {
                 Page::Albums => self.albums_page(tokens, cx).into_any_element(),
                 Page::Favorites => self.favorites_view(tokens, cx).into_any_element(),
                 Page::Playlists => self.playlists_view(tokens, cx).into_any_element(),
+                Page::Radio => self.radio_view(window, tokens, cx).into_any_element(),
                 Page::Shelves => {
                     if self.selected_shelf.is_some() {
                         self.shelf_detail(tokens, cx).into_any_element()
