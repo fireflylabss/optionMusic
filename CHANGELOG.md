@@ -34,6 +34,24 @@ Older desktop builds (`v0.1.0`, `v0.1.1`) had no channel suffix. From `v0.1.2-be
 
 </details>
 
+## v0.1.8-beta · 01/10/2026
+
+The biggest desktop cut yet: the GPUI app reaches feature parity with the CLI's power tools — radio, sleep timer, downloads, stats — plus a full platform polish pass (menus, updater, packaging, file watching, OS media integration). This version was made for desktop with a beta release channel on 01/10/2026 (v0.1.8-beta).
+
+- **Radio**: new page (Ctrl/Cmd+7) driven by `CoreController::radio_order`/`radio_start`; seed by query/artist/genre or a quick-seed prompt (Cmd/Ctrl+Shift+R); stations queue like `msc radio --fresh`.
+- **Sleep timer**: Playback menu / `Z` (Cmd/Ctrl+Shift+Z cycles) with a countdown in the player bar and a menu of presets; engine via `controller.sleep_*`.
+- **Download sheet** (File → Download… / Cmd+Shift+D): the `msc dl` wizard ported natively — provider → query (search or `;`-separated URLs) → results → options derived from caps → run with per-item progress; batches continue in background when the sheet closes.
+- **Stats & History**: new page (Ctrl/Cmd+8) with top tracks/artists, listening time, and full history via `controller.stats_view`/`history_entries`.
+- **Spectrum visualizer**: native GPUI bars fed by the cava bridge; toggle with `V`, runs at 33 ms refresh while live.
+- **Mini-player**: compact always-on-top mode (Cmd+M) with cover, transport, and progress.
+- **Menus & windows**: real menu-bar menus (App/File/Playback/View), a tabbed Settings window (General/Playback/Library/Interface, Cmd+,), and an About dialog.
+- **Update checker**: Help/App menu → "Check for Updates…"; queries GitHub releases (`src/update.rs`) and shows a badge/dialog when a newer desktop cut exists.
+- **Crash handler**: crash report capture + recovery prompt on next launch.
+- **File watcher**: library folders watched with `notify`; edits/additions trigger an incremental rescan automatically.
+- **macOS Now Playing**: `MPNowPlayingInfoCenter` integration — Control Center/lock screen metadata, artwork, and media-key transport.
+- **Packaging & release**: `desktop-release` workflow builds `.app`+DMG (macOS), a tarball with `.desktop`+icons (Linux), and a zip (Windows) from `desktop-v*` tags.
+- **Core lift** (`optionmusic` crate): `CoreController` now exposes radio, stats/history, sleep, and dl so all surfaces share one engine — `DlEvent` progress sink, `RadioSession`, `StatsView`, generic `resolve_seed_in`, `track_matches_query`. Same core+surfaces pattern as the rest of the stack.
+
 ## v0.2.18-beta · 13/09/2026
 
 Windows support for the CLI. This version was made for CLI with a beta release channel on 13/09/2026 (v0.2.18-beta).
