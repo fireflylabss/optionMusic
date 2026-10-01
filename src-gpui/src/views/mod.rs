@@ -5,3 +5,4 @@ pub mod overlays;
 pub mod player;
 pub mod sidebar;
 pub mod stage;
+pub mod update;

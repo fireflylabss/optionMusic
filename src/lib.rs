@@ -29,4 +29,5 @@ pub mod sleep;
 pub mod smart_shuffle;
 pub mod stats;
 pub mod ui;
+pub mod update;
 pub mod which;

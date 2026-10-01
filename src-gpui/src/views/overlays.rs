@@ -820,6 +820,7 @@ impl RootView {
                     |this, cx| this.do_toggle_discord_rpc(cx),
                 ),
             )
+            .child(self.update_row(tokens, cx))
             .into_any_element()
     }
 

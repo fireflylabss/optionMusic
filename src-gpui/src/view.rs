@@ -114,6 +114,10 @@ pub(crate) struct RootView {
     pub(crate) _watch_scan_task: Option<Task<()>>,
     pub(crate) about_open: bool,
     pub(crate) settings_tab: SettingsTab,
+    /// Latest GitHub release state — the background check runs at most once
+    /// a day (`update::check_due`); `CheckForUpdates` bypasses the stamp.
+    pub(crate) update_status: optionmusic::update::UpdateStatus,
+    pub(crate) _update_task: Option<Task<()>>,
 }
 
 impl RootView {
@@ -217,9 +221,12 @@ impl RootView {
             _watch_scan_task: None,
             about_open: false,
             settings_tab: SettingsTab::General,
+            update_status: optionmusic::update::UpdateStatus::Unknown,
+            _update_task: None,
         };
         view.start_scan(cx);
         view.check_crash_recovery(cx);
+        view.start_update_check(cx, false);
         view
     }
 
@@ -2712,6 +2719,64 @@ impl RootView {
             self.set_status("recovered after a crash — log saved", cx);
         }
     }
+
+    /// `ReleaseInfo` when a newer release was found — drives the titlebar
+    /// badge and the Settings → Updates row.
+    pub(crate) fn update_available(&self) -> Option<&optionmusic::update::ReleaseInfo> {
+        match &self.update_status {
+            optionmusic::update::UpdateStatus::Available(info) => Some(info),
+            _ => None,
+        }
+    }
+
+    /// Kick the GitHub release check on the background executor. Automatic
+    /// runs are gated by `update::check_due` (once a day); `manual` runs
+    /// bypass the stamp and report through the status toast. Request
+    /// failures stay silent — `Unknown` renders as "not checked".
+    pub(crate) fn start_update_check(&mut self, cx: &mut Context<Self>, manual: bool) {
+        if self._update_task.is_some() {
+            return;
+        }
+        if !manual && !optionmusic::update::check_due() {
+            return;
+        }
+        self.update_status = optionmusic::update::UpdateStatus::Checking;
+        cx.notify();
+        self._update_task = Some(cx.spawn(async move |this, cx| {
+            let status = cx
+                .background_executor()
+                .spawn(async move { optionmusic::update::check_now(env!("CARGO_PKG_VERSION")) })
+                .await;
+            this.update(cx, move |view, cx| {
+                view._update_task = None;
+                match &status {
+                    optionmusic::update::UpdateStatus::Available(info) if manual => {
+                        view.set_status(format!("Update available: {}", info.tag), cx);
+                    }
+                    optionmusic::update::UpdateStatus::UpToDate(_) if manual => {
+                        view.set_status("optionMusic is up to date", cx);
+                    }
+                    optionmusic::update::UpdateStatus::Unknown if manual => {
+                        view.set_status("Update check failed", cx);
+                    }
+                    _ => {}
+                }
+                view.update_status = status;
+                cx.notify();
+            })
+            .ok();
+        }));
+    }
+
+    pub(crate) fn check_for_updates(
+        &mut self,
+        _: &crate::CheckForUpdates,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.set_status("Checking for updates…", cx);
+        self.start_update_check(cx, true);
+    }
 }
 
 impl Render for RootView {
@@ -2766,6 +2831,7 @@ impl Render for RootView {
             .on_action(cx.listener(Self::clear_queue))
             .on_action(cx.listener(Self::open_settings))
             .on_action(cx.listener(Self::open_about))
+            .on_action(cx.listener(Self::check_for_updates))
             .on_drag_move::<ExternalPaths>(cx.listener(
                 |this: &mut RootView,
                  _event: &gpui::DragMoveEvent<ExternalPaths>,

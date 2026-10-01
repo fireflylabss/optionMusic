@@ -68,7 +68,8 @@ actions!(
         QueueJump,
         ClearQueue,
         OpenSettings,
-        About
+        About,
+        CheckForUpdates
     ]
 );
 
@@ -244,6 +245,8 @@ fn main() {
         cx.set_menus([
             Menu::new("optionMusic").items([
                 MenuItem::action("About optionMusic", About),
+                MenuItem::separator(),
+                MenuItem::action("Check for Updates…", CheckForUpdates),
                 MenuItem::separator(),
                 MenuItem::action("Settings…", OpenSettings),
                 MenuItem::separator(),
