@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=optionMusic
+GenericName=Music Player
+Comment=Minimal black & white music player powered by MPV
+Exec=optionmusic-gpui
+TryExec=optionmusic-gpui
+Icon=optionmusic
+Terminal=false
+Categories=AudioVideo;Audio;Player;
+Keywords=music;audio;player;mpv;
+StartupNotify=true
