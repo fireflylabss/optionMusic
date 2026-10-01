@@ -26,8 +26,8 @@ use crate::{
     ListActivate, ListDown, ListFirst, ListLast, ListUp, MenuActivate, MenuDown, MenuLeft,
     MenuRight, MenuUp, Mute, NavAlbums, NavArtists, NavFavorites, NavLibrary, NavPlaylists,
     NavShelves, Next, OpenSettings, PlayPause, Previous, QueueItemDown, QueueItemUp, QueueJump,
-    SeekBack, SeekForward, Shuffle, SliderEnd, SliderHome, SliderLeft, SliderRight, Stop,
-    ToggleLyrics, ToggleQueue, ToggleSearch, ToggleStage, VolumeDown, VolumeUp,
+    SeekBack, SeekForward, Shuffle, SleepTimerCycle, SliderEnd, SliderHome, SliderLeft,
+    SliderRight, Stop, ToggleLyrics, ToggleQueue, ToggleSearch, ToggleStage, VolumeDown, VolumeUp,
 };
 
 pub(crate) struct RootView {
@@ -135,6 +135,15 @@ pub(crate) struct RootView {
     /// Set while cava's input methods are being probed off-thread.
     pub(crate) viz_starting: bool,
     pub(crate) _viz_task: Option<Task<()>>,
+    /// Sleep-timer countdown mirrored from `CoreController` each poll tick
+    /// (`None` = timer off).
+    pub(crate) sleep_countdown: Option<String>,
+    /// Minutes the timer was last armed to (0 = off) — popover highlight.
+    pub(crate) sleep_minutes: u64,
+    /// Anchored minute picker opened by right-clicking the player moon.
+    pub(crate) sleep_menu: Option<Point<Pixels>>,
+    /// Keyboard-selected row inside `sleep_menu`.
+    pub(crate) sleep_selection: usize,
 }
 
 impl RootView {
@@ -259,6 +268,10 @@ impl RootView {
             viz_levels: Vec::new(),
             viz_starting: false,
             _viz_task: None,
+            sleep_countdown: None,
+            sleep_minutes: 0,
+            sleep_menu: None,
+            sleep_selection: 0,
         };
         view.start_scan(cx);
         view.check_crash_recovery(cx);
@@ -392,6 +405,7 @@ impl RootView {
             loop {
                 cx.background_executor().timer(interval).await;
                 let Ok(next) = this.update(cx, |view, cx| {
+                    view.sync_sleep(cx);
                     let changed = view
                         .controller
                         .as_mut()
@@ -1286,12 +1300,14 @@ impl RootView {
         self.menu_selection = 0;
         self.playlist_picker = None;
         self.settings_open = false;
+        self.sleep_menu = None;
         self.overlay_focus.focus(window, cx);
         cx.notify();
     }
 
     pub(crate) fn close_overlays(&mut self, cx: &mut Context<Self>) {
         self.context_menu = None;
+        self.sleep_menu = None;
         self.menu_selection = 0;
         self.playlist_picker = None;
         self.pending_confirm = None;
@@ -1334,6 +1350,9 @@ impl RootView {
     }
 
     pub(crate) fn menu_move(&mut self, delta: isize, cx: &mut Context<Self>) {
+        if self.sleep_menu.is_some() {
+            return self.sleep_menu_move(delta, cx);
+        }
         if self.playlist_picker.is_some() {
             return self.picker_move(delta, cx);
         }
@@ -1347,6 +1366,9 @@ impl RootView {
     }
 
     pub(crate) fn menu_activate(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.sleep_menu.is_some() {
+            return self.sleep_menu_activate(window, cx);
+        }
         if self.pending_confirm.is_some() {
             if self.confirm_accept_selected {
                 self.confirm_accept(window, cx);
@@ -2846,6 +2868,95 @@ impl RootView {
         self.set_status("Checking for updates…", cx);
         self.start_update_check(cx, true);
     }
+
+    // ── Sleep timer (`z` / right-click minute picker) ───────────
+
+    /// Poll-tick sync: mirror `sleep_countdown()` into view state and fire
+    /// the "sleep timer · stopped" toast the one tick the deadline hits
+    /// (the pause it applies lands in this tick's playback diff).
+    pub(crate) fn sync_sleep(&mut self, cx: &mut Context<Self>) {
+        let Some(controller) = self.controller.as_mut() else {
+            return;
+        };
+        let fired = controller.sleep_poll();
+        let countdown = controller.sleep_countdown();
+        if countdown != self.sleep_countdown {
+            self.sleep_countdown = countdown;
+            if self.sleep_countdown.is_none() {
+                self.sleep_minutes = 0;
+            }
+            cx.notify();
+        }
+        if fired {
+            self.set_status("sleep timer · stopped", cx);
+            cx.notify();
+        }
+    }
+
+    fn apply_sleep_label(&mut self, label: String, cx: &mut Context<Self>) {
+        self.sleep_minutes = sleep_minutes_from_label(&label);
+        if let Some(controller) = self.controller.as_mut() {
+            self.sleep_countdown = controller.sleep_countdown();
+        }
+        self.set_status(label, cx);
+        cx.notify();
+    }
+
+    pub(crate) fn do_sleep_cycle(&mut self, cx: &mut Context<Self>) {
+        if let Some(controller) = self.controller.as_mut() {
+            let label = controller.sleep_cycle();
+            self.apply_sleep_label(label, cx);
+        }
+    }
+
+    pub(crate) fn do_sleep_set(&mut self, minutes: u64, cx: &mut Context<Self>) {
+        if let Some(controller) = self.controller.as_mut() {
+            let label = controller.sleep_set(minutes);
+            self.apply_sleep_label(label, cx);
+        }
+    }
+
+    pub(crate) fn open_sleep_menu(
+        &mut self,
+        position: Point<Pixels>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.sleep_menu = Some(position);
+        self.sleep_selection = SLEEP_MENU_STEPS
+            .iter()
+            .position(|(_, minutes)| *minutes == self.sleep_minutes)
+            .unwrap_or(0);
+        self.context_menu = None;
+        self.playlist_picker = None;
+        self.settings_open = false;
+        self.overlay_focus.focus(window, cx);
+        cx.notify();
+    }
+
+    pub(crate) fn sleep_menu_move(&mut self, delta: isize, cx: &mut Context<Self>) {
+        let len = SLEEP_MENU_STEPS.len() as isize;
+        self.sleep_selection = (self.sleep_selection as isize + delta).clamp(0, len - 1) as usize;
+        cx.notify();
+    }
+
+    pub(crate) fn sleep_menu_activate(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some((_, minutes)) = SLEEP_MENU_STEPS.get(self.sleep_selection).copied() else {
+            return;
+        };
+        self.sleep_menu = None;
+        self.do_sleep_set(minutes, cx);
+        self.focus_handle.focus(window, cx);
+    }
+
+    pub(crate) fn sleep_timer_cycle(
+        &mut self,
+        _: &SleepTimerCycle,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.do_sleep_cycle(cx);
+    }
 }
 
 impl Render for RootView {
@@ -2904,6 +3015,7 @@ impl Render for RootView {
             .on_action(cx.listener(Self::quick_radio))
             .on_action(cx.listener(Self::check_for_updates))
             .on_action(cx.listener(Self::toggle_visualizer))
+            .on_action(cx.listener(Self::sleep_timer_cycle))
             .on_drag_move::<ExternalPaths>(cx.listener(
                 |this: &mut RootView,
                  _event: &gpui::DragMoveEvent<ExternalPaths>,
@@ -3006,6 +3118,10 @@ impl Render for RootView {
             .when(self.about_open, |this| {
                 this.child(deferred(self.overlay_scrim(cx, true)))
                     .child(deferred(self.about_dialog(tokens, cx)).with_priority(2))
+            })
+            .when_some(self.sleep_menu, |this, position| {
+                this.child(deferred(self.overlay_scrim(cx, false)))
+                    .child(deferred(self.sleep_menu_panel(position, tokens, cx)).with_priority(1))
             })
             .when(!self.status.is_empty(), |this| {
                 this.child(deferred(self.status_toast(tokens, cx)).with_priority(4))

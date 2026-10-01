@@ -298,3 +298,18 @@ impl SettingsTab {
         Self::ALL[(index + delta).clamp(0, Self::ALL.len() as isize - 1) as usize]
     }
 }
+
+/// Direct choices shown by the sleep-timer popover, in render order
+/// (minutes; 0 = off).
+pub(crate) const SLEEP_MENU_STEPS: &[(&str, u64)] =
+    &[("15 min", 15), ("30 min", 30), ("60 min", 60), ("off", 0)];
+
+/// Minutes coded in a `sleep_set`/`sleep_cycle` status label
+/// (`"sleep timer · 15 min"` → 15, `"sleep timer · off"` → 0).
+pub(crate) fn sleep_minutes_from_label(label: &str) -> u64 {
+    label
+        .strip_prefix("sleep timer · ")
+        .and_then(|rest| rest.strip_suffix(" min"))
+        .and_then(|mins| mins.parse::<u64>().ok())
+        .unwrap_or(0)
+}
