@@ -74,6 +74,7 @@ actions!(
         Radio,
         CheckForUpdates,
         ToggleVisualizer,
+        SleepTimerCycle,
         ToggleMiniPlayer
     ]
 );
@@ -259,6 +260,12 @@ fn main() {
             #[cfg(target_os = "macos")]
             KeyBinding::new("cmd-shift-r", Radio, None),
             KeyBinding::new("v", ToggleVisualizer, Some("!TextInput")),
+            // Sleep timer — `z` mirrors the TUI key.
+            KeyBinding::new("z", SleepTimerCycle, Some("!TextInput")),
+            #[cfg(target_os = "macos")]
+            KeyBinding::new("cmd-shift-z", SleepTimerCycle, Some("!TextInput")),
+            #[cfg(not(target_os = "macos"))]
+            KeyBinding::new("ctrl-shift-z", SleepTimerCycle, Some("!TextInput")),
         ]);
         cx.set_menus([
             Menu::new("optionMusic").items([
@@ -284,6 +291,8 @@ fn main() {
                 MenuItem::action("Volume Up", VolumeUp),
                 MenuItem::action("Volume Down", VolumeDown),
                 MenuItem::action("Mute", Mute),
+                MenuItem::separator(),
+                MenuItem::action("Sleep Timer", SleepTimerCycle),
             ]),
             Menu::new("View").items([
                 MenuItem::action("Library", NavLibrary),

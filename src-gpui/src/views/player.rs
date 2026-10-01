@@ -4,7 +4,7 @@ use crate::icons;
 use crate::model::*;
 use crate::theme::*;
 use crate::view::RootView;
-use gpui::{Context, Role, SharedString, Window, div, prelude::*, px};
+use gpui::{Context, MouseButton, MouseDownEvent, Role, SharedString, Window, div, prelude::*, px};
 
 impl RootView {
     pub(crate) fn player_track(
@@ -141,6 +141,7 @@ impl RootView {
             .w(px(168.0))
             .min_w(px(0.0))
             .flex_1()
+            .child(self.sleep_control(tokens, cx))
             .child(self.icon_button(
                 "vol-mute",
                 "Mute",
@@ -221,5 +222,72 @@ impl RootView {
                 tokens,
                 cx,
             ))
+    }
+
+    /// Sleep-timer control: moon button cycles off → 15 → 30 → 60 → off
+    /// (left click) or opens the minute picker (right click); while armed
+    /// the `mm:ss` countdown sits beside it.
+    pub(crate) fn sleep_control(&self, tokens: MusicTokens, cx: &mut Context<Self>) -> gpui::Div {
+        let active = self.sleep_countdown.is_some();
+        let aria: SharedString = match self.sleep_countdown.as_ref() {
+            Some(countdown) => format!("Sleep timer: {countdown} remaining").into(),
+            None => "Sleep timer".into(),
+        };
+        let mut control = div().flex().items_center().gap(px(6.0)).child(
+            div()
+                .id("player-sleep")
+                .accessibility_id("optionmusic.player.sleep")
+                .role(Role::Button)
+                .aria_label(aria)
+                .size(px(32.0))
+                .rounded(px(8.0))
+                .flex()
+                .items_center()
+                .justify_center()
+                .cursor_pointer()
+                .when(active, |this| this.bg(tokens.lift_2))
+                .hover(|style| style.bg(tokens.lift_2))
+                .active(|style| style.opacity(0.75))
+                .focus_visible(|style| {
+                    style
+                        .border_color(tokens.focus)
+                        .shadow(focus_shadow(tokens))
+                })
+                .on_click(cx.listener(
+                    |this: &mut RootView,
+                     _: &gpui::ClickEvent,
+                     _window: &mut Window,
+                     cx: &mut Context<RootView>| {
+                        this.do_sleep_cycle(cx);
+                        cx.stop_propagation();
+                    },
+                ))
+                .on_mouse_down(
+                    MouseButton::Right,
+                    cx.listener(
+                        |this: &mut RootView,
+                         event: &MouseDownEvent,
+                         window: &mut Window,
+                         cx: &mut Context<RootView>| {
+                            this.open_sleep_menu(event.position, window, cx);
+                            cx.stop_propagation();
+                        },
+                    ),
+                )
+                .child(icons::styled(
+                    icons::moon(px(15.0)),
+                    if active { tokens.ink } else { tokens.mute },
+                    tokens.ink,
+                )),
+        );
+        if let Some(countdown) = self.sleep_countdown.clone() {
+            control = control.child(
+                div()
+                    .text_size(px(11.0))
+                    .text_color(tokens.mute)
+                    .child(countdown),
+            );
+        }
+        control
     }
 }
