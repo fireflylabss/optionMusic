@@ -6,6 +6,7 @@ mod search_input;
 mod theme;
 mod view;
 mod views;
+mod watcher;
 mod widgets;
 
 use gpui::{
