@@ -64,7 +64,8 @@ actions!(
         QueueItemUp,
         QueueItemDown,
         QueueJump,
-        ClearQueue
+        ClearQueue,
+        SleepTimerCycle
     ]
 );
 
@@ -231,6 +232,12 @@ fn main() {
             KeyBinding::new("ctrl-c", search_input::InputCopy, Some("TextInput")),
             #[cfg(not(target_os = "macos"))]
             KeyBinding::new("ctrl-x", search_input::InputCut, Some("TextInput")),
+            // Sleep timer — `z` mirrors the TUI key.
+            KeyBinding::new("z", SleepTimerCycle, Some("!TextInput")),
+            #[cfg(target_os = "macos")]
+            KeyBinding::new("cmd-shift-z", SleepTimerCycle, Some("!TextInput")),
+            #[cfg(not(target_os = "macos"))]
+            KeyBinding::new("ctrl-shift-z", SleepTimerCycle, Some("!TextInput")),
         ]);
         cx.set_menus([Menu::new("optionMusic").items([
             MenuItem::action("New Window", NewWindow),

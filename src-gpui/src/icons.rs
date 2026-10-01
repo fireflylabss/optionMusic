@@ -39,6 +39,7 @@ const ARROW_DOWN: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0
 const DOWNLOAD: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>"#;
 const UPLOAD: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 14l5-5 5 5M12 9v12"/></svg>"#;
 const LOCATE: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3"/><path d="M12 3v2M12 19v2M3 12h2M19 12h2"/></svg>"#;
+const MOON: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg>"#;
 
 pub fn play(size: Pixels) -> Svg {
     icon(PLAY, size)
@@ -138,6 +139,9 @@ pub fn upload(size: Pixels) -> Svg {
 }
 pub fn locate(size: Pixels) -> Svg {
     icon(LOCATE, size)
+}
+pub fn moon(size: Pixels) -> Svg {
+    icon(MOON, size)
 }
 
 pub fn styled(icon: Svg, color: impl Into<Hsla>, hover: impl Into<Hsla>) -> Svg {

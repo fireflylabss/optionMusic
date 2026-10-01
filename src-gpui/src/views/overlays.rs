@@ -1,8 +1,8 @@
 use std::path::PathBuf;
 
 use gpui::{
-    AnyElement, BoxShadow, Context, Entity, Role, SharedString, Window, anchored, div, prelude::*,
-    px,
+    AnyElement, BoxShadow, Context, Entity, Pixels, Point, Role, SharedString, Window, anchored,
+    div, prelude::*, px,
 };
 use optionmusic::eq::EqPreset;
 
@@ -80,6 +80,47 @@ impl RootView {
             .position(menu.position)
             .snap_to_window()
             .child(self.overlay_enter(panel, "context-menu-enter"))
+    }
+
+    /// Minute picker opened by right-clicking the player sleep button.
+    /// Same anchored chrome as the track context menu; the armed value
+    /// carries a `✓` and keyboard selection rides `sleep_selection`.
+    pub(crate) fn sleep_menu_panel(
+        &self,
+        position: Point<Pixels>,
+        tokens: MusicTokens,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let mut panel = self.menu_shell("sleep-menu", "Sleep timer", 140.0, tokens, cx);
+        for (index, (label, minutes)) in SLEEP_MENU_STEPS.iter().copied().enumerate() {
+            let text: SharedString = if self.sleep_minutes == minutes {
+                format!("✓ {label}").into()
+            } else {
+                label.into()
+            };
+            panel = panel.child(self.menu_item(
+                match index {
+                    0 => "sleep-15",
+                    1 => "sleep-30",
+                    2 => "sleep-60",
+                    _ => "sleep-off",
+                },
+                text,
+                self.sleep_selection == index,
+                tokens,
+                cx,
+                move |this, window, cx| {
+                    this.sleep_menu = None;
+                    this.do_sleep_set(minutes, cx);
+                    this.focus_handle.focus(window, cx);
+                },
+            ));
+        }
+
+        anchored()
+            .position(position)
+            .snap_to_window()
+            .child(self.overlay_enter(panel, "sleep-menu-enter"))
     }
 
     pub(crate) fn settings_dialog(
