@@ -39,6 +39,7 @@ const ARROW_DOWN: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0
 const DOWNLOAD: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>"#;
 const UPLOAD: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 14l5-5 5 5M12 9v12"/></svg>"#;
 const LOCATE: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3"/><path d="M12 3v2M12 19v2M3 12h2M19 12h2"/></svg>"#;
+const RADIO: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="2"/><path d="M4.9 4.9C1 8.8 1 15.2 4.9 19.1"/><path d="M7.8 7.8c-2.3 2.4-2.3 6.2 0 8.5"/><path d="M16.2 7.8c2.3 2.4 2.3 6.2 0 8.5"/><path d="M19.1 4.9C23 8.8 23 15.2 19.1 19.1"/></svg>"#;
 
 pub fn play(size: Pixels) -> Svg {
     icon(PLAY, size)
@@ -138,6 +139,9 @@ pub fn upload(size: Pixels) -> Svg {
 }
 pub fn locate(size: Pixels) -> Svg {
     icon(LOCATE, size)
+}
+pub fn radio(size: Pixels) -> Svg {
+    icon(RADIO, size)
 }
 
 pub fn styled(icon: Svg, color: impl Into<Hsla>, hover: impl Into<Hsla>) -> Svg {

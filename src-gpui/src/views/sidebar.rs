@@ -581,6 +581,15 @@ impl RootView {
                         shortcut_hint(5),
                         tokens,
                         cx,
+                    ))
+                    .child(self.side_link(
+                        Page::Radio,
+                        "Radio",
+                        icons::radio(px(18.0)),
+                        None,
+                        shortcut_hint(7),
+                        tokens,
+                        cx,
                     )),
             )
             .child(div().mx(px(10.0)).h(px(1.0)).bg(tokens.border))

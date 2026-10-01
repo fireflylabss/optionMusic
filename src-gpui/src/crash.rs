@@ -126,6 +126,6 @@ mod tests {
     fn utc_stamp_formats_known_epochs() {
         assert_eq!(utc_stamp(0), "1970-01-01 00:00:00Z");
         assert_eq!(utc_stamp(1_700_000_000), "2023-11-14 22:13:20Z");
-        assert_eq!(utc_stamp(1_789_000_000), "2026-09-05 07:06:40Z");
+        assert_eq!(utc_stamp(1_789_000_000), "2026-09-10 00:26:40Z");
     }
 }

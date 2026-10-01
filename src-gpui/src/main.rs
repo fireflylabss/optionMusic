@@ -68,7 +68,9 @@ actions!(
         QueueJump,
         ClearQueue,
         OpenSettings,
-        About
+        About,
+        NavRadio,
+        Radio
     ]
 );
 
@@ -240,6 +242,13 @@ fn main() {
             KeyBinding::new("cmd-,", OpenSettings, None),
             #[cfg(not(target_os = "macos"))]
             KeyBinding::new("ctrl-,", OpenSettings, None),
+            // Radio page + quick seed-from-current action.
+            KeyBinding::new("ctrl-7", NavRadio, Some("!TextInput")),
+            #[cfg(target_os = "macos")]
+            KeyBinding::new("cmd-7", NavRadio, Some("!TextInput")),
+            KeyBinding::new("ctrl-shift-r", Radio, None),
+            #[cfg(target_os = "macos")]
+            KeyBinding::new("cmd-shift-r", Radio, None),
         ]);
         cx.set_menus([
             Menu::new("optionMusic").items([
@@ -271,6 +280,7 @@ fn main() {
                 MenuItem::action("Playlists", NavPlaylists),
                 MenuItem::action("Favorites", NavFavorites),
                 MenuItem::action("Shelves", NavShelves),
+                MenuItem::action("Radio", NavRadio),
                 MenuItem::separator(),
                 MenuItem::action("Search", ToggleSearch),
                 MenuItem::action("Queue", ToggleQueue),
