@@ -19,6 +19,7 @@ use crate::model::*;
 use crate::now_playing::{NowPlaying, RemoteCommand};
 use crate::search_input::{SearchEvent, SearchInput};
 use crate::theme::*;
+use crate::watcher::{self, LibraryWatcher};
 use crate::{
     BlurList, ClearQueue, CycleLoop, DismissOverlay, FavoriteCurrent, FocusList, ListActivate,
     ListDown, ListFirst, ListLast, ListUp, MenuActivate, MenuDown, MenuLeft, MenuRight, MenuUp,
@@ -108,6 +109,9 @@ pub(crate) struct RootView {
     pub(crate) _subscriptions: Vec<Subscription>,
     /// macOS Now Playing / media-key bridge; no-op on other platforms.
     pub(crate) now_playing: NowPlaying,
+    /// Library filesystem watcher — present unless init failed.
+    pub(crate) _watcher: Option<LibraryWatcher>,
+    pub(crate) _watch_scan_task: Option<Task<()>>,
 }
 
 impl RootView {
@@ -207,6 +211,8 @@ impl RootView {
             _prefs_task: None,
             _subscriptions: vec![search_subscription, name_subscription],
             now_playing: NowPlaying::new(),
+            _watcher: None,
+            _watch_scan_task: None,
         };
         view.start_scan(cx);
         view
@@ -245,6 +251,7 @@ impl RootView {
                 view.update_playback_and_cover(cx);
                 view.start_enrichment(cx);
                 view.start_poll(cx);
+                view._watcher = LibraryWatcher::start(view, cx);
                 cx.notify();
             })
             .ok();
@@ -956,6 +963,67 @@ impl RootView {
         }
         self.update_playback_and_cover(cx);
         cx.notify();
+    }
+
+    /// Start a watcher-triggered rescan unless one is already running: the
+    /// controller moves to the background executor for the filesystem walk,
+    /// then `finish_watched_rescan` applies the result. Returns false while
+    /// a rescan is in flight so the caller can retry the burst later.
+    pub(crate) fn try_begin_watched_rescan(&mut self, cx: &mut Context<Self>) -> bool {
+        if self._watch_scan_task.is_some() {
+            return false;
+        }
+        let Some(mut controller) = self.controller.take() else {
+            return false;
+        };
+        self._watch_scan_task = Some(cx.spawn(async move |this, cx| {
+            let controller = cx
+                .background_executor()
+                .spawn(async move {
+                    let _ = controller.scan(None);
+                    controller
+                })
+                .await;
+            this.update(cx, |view, cx| view.finish_watched_rescan(controller, cx))
+                .ok();
+        }));
+        true
+    }
+
+    /// Apply the off-thread scan: diff against the visible library, refresh
+    /// the derived lists, and toast only when the track set changed.
+    pub(crate) fn finish_watched_rescan(
+        &mut self,
+        mut controller: CoreController,
+        cx: &mut Context<Self>,
+    ) {
+        self._watch_scan_task = None;
+        let next = controller.snapshot().library;
+        self.controller = Some(controller);
+        if library_differ(&self.library, &next) {
+            self.library = next;
+            self.refresh_playlists();
+            self.rebuild_indexes();
+            self.apply_filter(cx);
+            self.set_status("library updated", cx);
+            self.start_enrichment(cx);
+        }
+        self.sync_watcher_dirs();
+        self.update_playback_and_cover(cx);
+        cx.notify();
+    }
+
+    /// Re-sync the watcher with the effective scan dirs (music folders added
+    /// at runtime get picked up here).
+    pub(crate) fn sync_watcher_dirs(&mut self) {
+        let dirs = self
+            .controller
+            .as_ref()
+            .map(|c| watcher::watch_dirs(&c.config.music_dirs))
+            .unwrap_or_default();
+        if let Some(watcher) = self._watcher.as_mut() {
+            watcher.watch_dirs(dirs);
+        }
     }
 
     pub(crate) fn do_seek(&mut self, fraction: f64, cx: &mut Context<Self>) {
@@ -1901,6 +1969,7 @@ impl RootView {
             }
             Err(error) => self.set_status(format!("Scan failed: {error}"), cx),
         }
+        self.sync_watcher_dirs();
         self.update_playback_and_cover(cx);
         cx.notify();
     }
@@ -2743,4 +2812,13 @@ impl Render for RootView {
                 this.child(deferred(self.status_toast(tokens, cx)).with_priority(4))
             })
     }
+}
+
+/// File-identity diff (path + mtime + size) between two library snapshots.
+/// Used by the watcher so tag enrichment doesn't masquerade as a change.
+fn library_differ(a: &[TrackDto], b: &[TrackDto]) -> bool {
+    a.len() != b.len()
+        || a.iter()
+            .zip(b.iter())
+            .any(|(x, y)| x.id != y.id || x.mtime != y.mtime || x.size != y.size)
 }
