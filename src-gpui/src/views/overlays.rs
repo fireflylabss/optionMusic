@@ -82,62 +82,35 @@ impl RootView {
             .child(self.overlay_enter(panel, "context-menu-enter"))
     }
 
+    /// Tabbed settings dialog: a chip strip switches between
+    /// General / Playback / Library / Interface; ←/→ (and Tab/Shift-Tab)
+    /// cycle tabs via `menu_left`/`menu_right`.
     pub(crate) fn settings_dialog(
         &self,
         tokens: MusicTokens,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
-        let dirs: Vec<PathBuf> = self
-            .controller
-            .as_ref()
-            .map(|controller| controller.config.music_dirs.clone())
-            .unwrap_or_default();
+        let mut tabs = div().id("settings-tabs").flex().gap(px(6.0)).flex_wrap();
+        for tab in SettingsTab::ALL {
+            tabs = tabs.child(self.chip(
+                tab.element_id(),
+                tab.label(),
+                self.settings_tab == tab,
+                tokens,
+                cx,
+                move |this, cx| this.select_settings_tab(tab, cx),
+            ));
+        }
 
-        let mut list = div()
-            .id("settings-dirs")
-            .flex()
-            .flex_col()
-            .gap(px(4.0))
-            .max_h(px(160.0));
-        if dirs.is_empty() {
-            list = list.child(
-                div()
-                    .text_size(px(12.0))
-                    .text_color(tokens.mute)
-                    .child("Default: ~/Music"),
-            );
-        }
-        for dir in dirs.iter().take(5) {
-            list = list.child(
-                div()
-                    .h(px(22.0))
-                    .flex()
-                    .items_center()
-                    .gap(px(7.0))
-                    .child(icons::folder(px(12.0)).text_color(tokens.mute))
-                    .child(
-                        div()
-                            .min_w(px(0.0))
-                            .text_size(px(11.5))
-                            .text_color(tokens.ink_2)
-                            .whitespace_nowrap()
-                            .text_ellipsis_middle()
-                            .overflow_hidden()
-                            .child(dir.display().to_string()),
-                    ),
-            );
-        }
-        if dirs.len() > 5 {
-            list = list.child(
-                div()
-                    .text_size(px(11.0))
-                    .text_color(tokens.faint)
-                    .child(format!("+{} more", dirs.len() - 5)),
-            );
-        }
+        let body: AnyElement = match self.settings_tab {
+            SettingsTab::General => self.settings_general_tab(tokens, cx),
+            SettingsTab::Playback => self.settings_playback_tab(tokens, cx),
+            SettingsTab::Library => self.settings_library_tab(tokens, cx),
+            SettingsTab::Interface => self.settings_interface_tab(tokens, cx),
+        };
 
         let panel = self
-            .dialog_shell("settings-dialog", "Settings", 320.0, tokens, cx)
+            .dialog_shell("settings-dialog", "Settings", 340.0, tokens, cx)
             .child(self.dialog_header(
                 "Settings",
                 None,
@@ -146,62 +119,22 @@ impl RootView {
                 cx,
                 |this, _w, cx| this.close_overlays(cx),
             ))
-            .child(self.section_label("MUSIC FOLDERS", tokens))
-            .child(list)
+            .child(tabs)
+            .child(div().h(px(1.0)).bg(tokens.border))
+            .child(body)
+            .child(div().h(px(1.0)).bg(tokens.border))
             .child(
                 div()
                     .flex()
-                    .gap(px(8.0))
-                    .child(self.dialog_button(
-                        "settings-add",
-                        "Add folder",
-                        false,
-                        false,
-                        true,
-                        tokens,
-                        cx,
-                        |this, _w, cx| this.add_folders(cx),
-                    ))
-                    .child(self.dialog_button(
-                        "settings-rescan",
-                        "Rescan",
-                        false,
-                        false,
-                        true,
-                        tokens,
-                        cx,
-                        |this, _w, cx| this.do_rescan(cx),
-                    )),
-            )
-            .child(div().h(px(1.0)).bg(tokens.border))
-            .child(self.section_label("SOUND", tokens))
-            .child(self.sound_controls(tokens, cx))
-            .child(div().h(px(1.0)).bg(tokens.border))
-            .child(self.section_label("DISCORD", tokens))
-            .child(
-                self.sound_row(
-                    "discord-rpc",
-                    "Rich Presence",
-                    if self
-                        .controller
-                        .as_ref()
-                        .is_some_and(|c| c.config.discord_rpc)
-                    {
-                        "on"
-                    } else {
-                        "off"
-                    },
-                    tokens,
-                    cx,
-                    |this, cx| this.do_toggle_discord_rpc(cx),
-                ),
-            )
-            .child(div().h(px(1.0)).bg(tokens.border))
-            .child(
-                div()
-                    .text_size(px(10.0))
-                    .text_color(tokens.faint)
-                    .child(format!("{} · libmpv2", env!("CARGO_PKG_VERSION"))),
+                    .items_center()
+                    .child(
+                        div()
+                            .text_size(px(10.0))
+                            .text_color(tokens.faint)
+                            .child(format!("{} · libmpv2", env!("CARGO_PKG_VERSION"))),
+                    )
+                    .child(div().flex_1())
+                    .child(self.hint_row(&[("← →", "tabs"), ("esc", "close")], tokens)),
             );
 
         self.dialog_layer(self.overlay_enter(panel, "settings-enter"))
@@ -476,22 +409,6 @@ impl RootView {
                     tokens,
                     cx,
                     |this, cx| this.do_toggle_excess_volume(cx),
-                ))
-                .child(self.sound_row(
-                    "sound-ldm",
-                    "Normalize",
-                    if config.ldm { "on" } else { "off" },
-                    tokens,
-                    cx,
-                    |this, cx| this.do_toggle_ldm(cx),
-                ))
-                .child(self.sound_row(
-                    "sound-artist-src",
-                    "Artists by",
-                    config.artist_source.label(),
-                    tokens,
-                    cx,
-                    |this, cx| this.do_cycle_artist_source(cx),
                 ));
         }
 
@@ -873,5 +790,168 @@ impl RootView {
             );
         self.dialog_layer(self.overlay_enter(panel, "tag-editor-enter"))
             .into_any_element()
+    }
+
+    // ── Settings tab bodies ──────────────────────────────────────
+
+    /// Settings → General: integrations (Discord Rich Presence).
+    fn settings_general_tab(&self, tokens: MusicTokens, cx: &mut Context<Self>) -> AnyElement {
+        div()
+            .id("settings-tab-body")
+            .flex()
+            .flex_col()
+            .gap(px(8.0))
+            .child(self.section_label("DISCORD", tokens))
+            .child(
+                self.sound_row(
+                    "discord-rpc",
+                    "Rich Presence",
+                    if self
+                        .controller
+                        .as_ref()
+                        .is_some_and(|c| c.config.discord_rpc)
+                    {
+                        "on"
+                    } else {
+                        "off"
+                    },
+                    tokens,
+                    cx,
+                    |this, cx| this.do_toggle_discord_rpc(cx),
+                ),
+            )
+            .into_any_element()
+    }
+
+    /// Settings → Playback: EQ, speed/pitch, ReplayGain, volume boost.
+    fn settings_playback_tab(&self, tokens: MusicTokens, cx: &mut Context<Self>) -> AnyElement {
+        div()
+            .id("settings-tab-body")
+            .flex()
+            .flex_col()
+            .gap(px(8.0))
+            .child(self.section_label("SOUND", tokens))
+            .child(self.sound_controls(tokens, cx))
+            .into_any_element()
+    }
+
+    /// Settings → Library: music folders, rescan, artist grouping.
+    fn settings_library_tab(&self, tokens: MusicTokens, cx: &mut Context<Self>) -> AnyElement {
+        let dirs: Vec<PathBuf> = self
+            .controller
+            .as_ref()
+            .map(|controller| controller.config.music_dirs.clone())
+            .unwrap_or_default();
+
+        let mut list = div()
+            .id("settings-dirs")
+            .flex()
+            .flex_col()
+            .gap(px(4.0))
+            .max_h(px(160.0));
+        if dirs.is_empty() {
+            list = list.child(
+                div()
+                    .text_size(px(12.0))
+                    .text_color(tokens.mute)
+                    .child("Default: ~/Music"),
+            );
+        }
+        for dir in dirs.iter().take(5) {
+            list = list.child(
+                div()
+                    .h(px(22.0))
+                    .flex()
+                    .items_center()
+                    .gap(px(7.0))
+                    .child(icons::folder(px(12.0)).text_color(tokens.mute))
+                    .child(
+                        div()
+                            .min_w(px(0.0))
+                            .text_size(px(11.5))
+                            .text_color(tokens.ink_2)
+                            .whitespace_nowrap()
+                            .text_ellipsis_middle()
+                            .overflow_hidden()
+                            .child(dir.display().to_string()),
+                    ),
+            );
+        }
+        if dirs.len() > 5 {
+            list = list.child(
+                div()
+                    .text_size(px(11.0))
+                    .text_color(tokens.faint)
+                    .child(format!("+{} more", dirs.len() - 5)),
+            );
+        }
+
+        let mut body = div()
+            .id("settings-tab-body")
+            .flex()
+            .flex_col()
+            .gap(px(8.0))
+            .child(self.section_label("MUSIC FOLDERS", tokens))
+            .child(list)
+            .child(
+                div()
+                    .flex()
+                    .gap(px(8.0))
+                    .child(self.dialog_button(
+                        "settings-add",
+                        "Add folder",
+                        false,
+                        false,
+                        true,
+                        tokens,
+                        cx,
+                        |this, _w, cx| this.add_folders(cx),
+                    ))
+                    .child(self.dialog_button(
+                        "settings-rescan",
+                        "Rescan",
+                        false,
+                        false,
+                        true,
+                        tokens,
+                        cx,
+                        |this, _w, cx| this.do_rescan(cx),
+                    )),
+            );
+        if let Some(config) = self.controller.as_ref().map(|c| c.config.clone()) {
+            body = body
+                .child(div().h(px(1.0)).bg(tokens.border))
+                .child(self.section_label("ARTISTS", tokens))
+                .child(self.sound_row(
+                    "library-artist-src",
+                    "Artists by",
+                    config.artist_source.label(),
+                    tokens,
+                    cx,
+                    |this, cx| this.do_cycle_artist_source(cx),
+                ));
+        }
+        body.into_any_element()
+    }
+
+    /// Settings → Interface: Low detail mode (fewer animations/redraws).
+    fn settings_interface_tab(&self, tokens: MusicTokens, cx: &mut Context<Self>) -> AnyElement {
+        let mut body = div()
+            .id("settings-tab-body")
+            .flex()
+            .flex_col()
+            .gap(px(8.0))
+            .child(self.section_label("INTERFACE", tokens));
+        if let Some(config) = self.controller.as_ref().map(|c| c.config.clone()) {
+            body = body.child(self.sound_row(
+                "interface-ldm",
+                "Low detail",
+                if config.ldm { "on" } else { "off" },
+                tokens,
+                cx,
+                |this, cx| this.do_toggle_ldm(cx),
+            ));
+        }
+        body.into_any_element()
     }
 }

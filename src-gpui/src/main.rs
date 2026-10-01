@@ -1,5 +1,6 @@
 //! optionMusic GPUI — minimal black & white desktop music player.
 
+mod crash;
 mod icons;
 mod model;
 mod now_playing;
@@ -65,7 +66,9 @@ actions!(
         QueueItemUp,
         QueueItemDown,
         QueueJump,
-        ClearQueue
+        ClearQueue,
+        OpenSettings,
+        About
     ]
 );
 
@@ -111,6 +114,7 @@ fn quit(_: &Quit, cx: &mut App) {
 }
 
 fn main() {
+    crash::install();
     application().run(|cx: &mut App| {
         cx.on_action(new_window);
         cx.on_action(quit);
@@ -232,12 +236,50 @@ fn main() {
             KeyBinding::new("ctrl-c", search_input::InputCopy, Some("TextInput")),
             #[cfg(not(target_os = "macos"))]
             KeyBinding::new("ctrl-x", search_input::InputCut, Some("TextInput")),
+            #[cfg(target_os = "macos")]
+            KeyBinding::new("cmd-,", OpenSettings, None),
+            #[cfg(not(target_os = "macos"))]
+            KeyBinding::new("ctrl-,", OpenSettings, None),
         ]);
-        cx.set_menus([Menu::new("optionMusic").items([
-            MenuItem::action("New Window", NewWindow),
-            MenuItem::separator(),
-            MenuItem::action("Quit", Quit),
-        ])]);
+        cx.set_menus([
+            Menu::new("optionMusic").items([
+                MenuItem::action("About optionMusic", About),
+                MenuItem::separator(),
+                MenuItem::action("Settings…", OpenSettings),
+                MenuItem::separator(),
+                MenuItem::action("Quit optionMusic", Quit),
+            ]),
+            Menu::new("File").items([MenuItem::action("New Window", NewWindow)]),
+            Menu::new("Playback").items([
+                MenuItem::action("Play/Pause", PlayPause),
+                MenuItem::action("Stop", Stop),
+                MenuItem::separator(),
+                MenuItem::action("Next", Next),
+                MenuItem::action("Previous", Previous),
+                MenuItem::separator(),
+                MenuItem::action("Loop", CycleLoop),
+                MenuItem::action("Shuffle", Shuffle),
+                MenuItem::separator(),
+                MenuItem::action("Volume Up", VolumeUp),
+                MenuItem::action("Volume Down", VolumeDown),
+                MenuItem::action("Mute", Mute),
+            ]),
+            Menu::new("View").items([
+                MenuItem::action("Library", NavLibrary),
+                MenuItem::action("Artists", NavArtists),
+                MenuItem::action("Albums", NavAlbums),
+                MenuItem::action("Playlists", NavPlaylists),
+                MenuItem::action("Favorites", NavFavorites),
+                MenuItem::action("Shelves", NavShelves),
+                MenuItem::separator(),
+                MenuItem::action("Search", ToggleSearch),
+                MenuItem::action("Queue", ToggleQueue),
+                MenuItem::action("Stage", ToggleStage),
+                MenuItem::action("Lyrics", ToggleLyrics),
+                MenuItem::separator(),
+                MenuItem::action("Focus List", FocusList),
+            ]),
+        ]);
         cx.on_window_closed(|cx, _| {
             if cx.windows().is_empty() {
                 cx.quit();

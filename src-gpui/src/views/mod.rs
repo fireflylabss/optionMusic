@@ -1,3 +1,4 @@
+pub mod about;
 pub mod albums;
 pub mod catalog;
 pub mod overlays;

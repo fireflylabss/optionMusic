@@ -677,6 +677,7 @@ impl RootView {
                         |this, window, cx| {
                             this.settings_open = !this.settings_open;
                             this.context_menu = None;
+                            this.about_open = false;
                             if this.settings_open {
                                 this.overlay_focus.focus(window, cx);
                             }

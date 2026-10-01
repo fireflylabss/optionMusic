@@ -21,12 +21,12 @@ use crate::search_input::{SearchEvent, SearchInput};
 use crate::theme::*;
 use crate::watcher::{self, LibraryWatcher};
 use crate::{
-    BlurList, ClearQueue, CycleLoop, DismissOverlay, FavoriteCurrent, FocusList, ListActivate,
-    ListDown, ListFirst, ListLast, ListUp, MenuActivate, MenuDown, MenuLeft, MenuRight, MenuUp,
-    Mute, NavAlbums, NavArtists, NavFavorites, NavLibrary, NavPlaylists, NavShelves, Next,
-    PlayPause, Previous, QueueItemDown, QueueItemUp, QueueJump, SeekBack, SeekForward, Shuffle,
-    SliderEnd, SliderHome, SliderLeft, SliderRight, Stop, ToggleLyrics, ToggleQueue, ToggleSearch,
-    ToggleStage, VolumeDown, VolumeUp,
+    About, BlurList, ClearQueue, CycleLoop, DismissOverlay, FavoriteCurrent, FocusList,
+    ListActivate, ListDown, ListFirst, ListLast, ListUp, MenuActivate, MenuDown, MenuLeft,
+    MenuRight, MenuUp, Mute, NavAlbums, NavArtists, NavFavorites, NavLibrary, NavPlaylists,
+    NavShelves, Next, OpenSettings, PlayPause, Previous, QueueItemDown, QueueItemUp, QueueJump,
+    SeekBack, SeekForward, Shuffle, SliderEnd, SliderHome, SliderLeft, SliderRight, Stop,
+    ToggleLyrics, ToggleQueue, ToggleSearch, ToggleStage, VolumeDown, VolumeUp,
 };
 
 pub(crate) struct RootView {
@@ -112,6 +112,8 @@ pub(crate) struct RootView {
     /// Library filesystem watcher — present unless init failed.
     pub(crate) _watcher: Option<LibraryWatcher>,
     pub(crate) _watch_scan_task: Option<Task<()>>,
+    pub(crate) about_open: bool,
+    pub(crate) settings_tab: SettingsTab,
 }
 
 impl RootView {
@@ -213,8 +215,11 @@ impl RootView {
             now_playing: NowPlaying::new(),
             _watcher: None,
             _watch_scan_task: None,
+            about_open: false,
+            settings_tab: SettingsTab::General,
         };
         view.start_scan(cx);
+        view.check_crash_recovery(cx);
         view
     }
 
@@ -1241,6 +1246,7 @@ impl RootView {
         self.playlist_picker = None;
         self.pending_confirm = None;
         self.settings_open = false;
+        self.about_open = false;
         if self.name_target.is_some() {
             self.name_target = None;
             self.name_input.update(cx, |input, cx| input.clear(cx));
@@ -2564,11 +2570,19 @@ impl RootView {
             self.confirm_accept_selected = false;
             cx.notify();
         }
+        if self.settings_open {
+            self.settings_tab = self.settings_tab.shift(-1);
+            cx.notify();
+        }
     }
 
     pub(crate) fn menu_right(&mut self, _: &MenuRight, _w: &mut Window, cx: &mut Context<Self>) {
         if self.pending_confirm.is_some() {
             self.confirm_accept_selected = true;
+            cx.notify();
+        }
+        if self.settings_open {
+            self.settings_tab = self.settings_tab.shift(1);
             cx.notify();
         }
     }
@@ -2660,6 +2674,44 @@ impl RootView {
         );
         self.overlay_focus.focus(window, cx);
     }
+
+    /// App-menu "Settings…" (⌘,/Ctrl+,): open the settings dialog.
+    pub(crate) fn open_settings(
+        &mut self,
+        _: &OpenSettings,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.settings_open = true;
+        self.about_open = false;
+        self.context_menu = None;
+        self.playlist_picker = None;
+        self.overlay_focus.focus(window, cx);
+        cx.notify();
+    }
+
+    /// App-menu "About optionMusic": open the about panel.
+    pub(crate) fn open_about(&mut self, _: &About, window: &mut Window, cx: &mut Context<Self>) {
+        self.about_open = true;
+        self.settings_open = false;
+        self.context_menu = None;
+        self.playlist_picker = None;
+        self.overlay_focus.focus(window, cx);
+        cx.notify();
+    }
+
+    /// Switch the Settings dialog to a different tab (chips + arrow keys).
+    pub(crate) fn select_settings_tab(&mut self, tab: SettingsTab, cx: &mut Context<Self>) {
+        self.settings_tab = tab;
+        cx.notify();
+    }
+
+    /// Toast when the previous run left a `.crashed` sentinel behind.
+    pub(crate) fn check_crash_recovery(&mut self, cx: &mut Context<Self>) {
+        if crate::crash::take_crash_flag().is_some() {
+            self.set_status("recovered after a crash — log saved", cx);
+        }
+    }
 }
 
 impl Render for RootView {
@@ -2712,6 +2764,8 @@ impl Render for RootView {
             .on_action(cx.listener(Self::queue_item_down))
             .on_action(cx.listener(Self::queue_jump))
             .on_action(cx.listener(Self::clear_queue))
+            .on_action(cx.listener(Self::open_settings))
+            .on_action(cx.listener(Self::open_about))
             .on_drag_move::<ExternalPaths>(cx.listener(
                 |this: &mut RootView,
                  _event: &gpui::DragMoveEvent<ExternalPaths>,
@@ -2807,6 +2861,10 @@ impl Render for RootView {
             .when_some(self.pending_confirm.clone(), |this, request| {
                 this.child(deferred(self.overlay_scrim(cx, true)))
                     .child(deferred(self.confirm_dialog(request, tokens, cx)).with_priority(3))
+            })
+            .when(self.about_open, |this| {
+                this.child(deferred(self.overlay_scrim(cx, true)))
+                    .child(deferred(self.about_dialog(tokens, cx)).with_priority(2))
             })
             .when(!self.status.is_empty(), |this| {
                 this.child(deferred(self.status_toast(tokens, cx)).with_priority(4))
