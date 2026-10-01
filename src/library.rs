@@ -449,26 +449,12 @@ impl Library {
     }
 
     fn matches_query(&self, track: &Track, query: &str) -> bool {
-        let hay = [
-            track.title.as_deref().unwrap_or(""),
-            track.artist.as_deref().unwrap_or(""),
-            track.album.as_deref().unwrap_or(""),
-            track.genre.as_deref().unwrap_or(""),
+        track_matches_query(
+            track,
+            query,
             &self.artist_name(track),
             &self.album_name(track),
-            &track.year.map(|y| y.to_string()).unwrap_or_default(),
-            &track
-                .path
-                .file_stem()
-                .and_then(|s| s.to_str())
-                .unwrap_or("")
-                .to_lowercase(),
-        ]
-        .join(" ")
-        .to_lowercase();
-        query
-            .split_whitespace()
-            .all(|tok| hay.contains(&tok.to_lowercase()))
+        )
     }
 
     /// Distinct genres present (sorted, case-preserving first occurrence).
@@ -557,6 +543,33 @@ impl Default for Library {
             baseline: None,
         }
     }
+}
+
+/// Token-based search shared by `Library::search`/`matching` and the desktop
+/// radio seed resolution: every whitespace-separated token must appear in the
+/// combined haystack (case-insensitive). `artist`/`album` are the display
+/// names resolved by the caller's artist/album naming rules.
+pub(crate) fn track_matches_query(track: &Track, query: &str, artist: &str, album: &str) -> bool {
+    let hay = [
+        track.title.as_deref().unwrap_or(""),
+        track.artist.as_deref().unwrap_or(""),
+        track.album.as_deref().unwrap_or(""),
+        track.genre.as_deref().unwrap_or(""),
+        artist,
+        album,
+        &track.year.map(|y| y.to_string()).unwrap_or_default(),
+        &track
+            .path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("")
+            .to_lowercase(),
+    ]
+    .join(" ")
+    .to_lowercase();
+    query
+        .split_whitespace()
+        .all(|tok| hay.contains(&tok.to_lowercase()))
 }
 
 /// Walk `root` collecting audio paths plus human-readable walk errors
