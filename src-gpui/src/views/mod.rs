@@ -6,5 +6,6 @@ pub mod player;
 pub mod radio;
 pub mod sidebar;
 pub mod stage;
+pub mod stats;
 pub mod update;
 pub mod visualizer;

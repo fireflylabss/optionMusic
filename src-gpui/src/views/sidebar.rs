@@ -598,6 +598,15 @@ impl RootView {
                         shortcut_hint(7),
                         tokens,
                         cx,
+                    ))
+                    .child(self.side_link(
+                        Page::Stats,
+                        "Stats",
+                        icons::stats(px(18.0)),
+                        None,
+                        shortcut_hint(8),
+                        tokens,
+                        cx,
                     )),
             )
             .child(div().mx(px(10.0)).h(px(1.0)).bg(tokens.border))

@@ -42,6 +42,7 @@ const LOCATE: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 
 const RADIO: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="2"/><path d="M4.9 4.9C1 8.8 1 15.2 4.9 19.1"/><path d="M7.8 7.8c-2.3 2.4-2.3 6.2 0 8.5"/><path d="M16.2 7.8c2.3 2.4 2.3 6.2 0 8.5"/><path d="M19.1 4.9C23 8.8 23 15.2 19.1 19.1"/></svg>"#;
 const VISUALIZER: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 13a2 2 0 0 0 2-2V7a2 2 0 0 1 4 0v13a2 2 0 0 0 4 0V4a2 2 0 0 1 4 0v13a2 2 0 0 0 4 0V9a2 2 0 0 1 4 0v4"/></svg>"#;
 const MOON: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg>"#;
+const STATS: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v16a2 2 0 0 0 2 2h16"/><path d="M8 17v-5"/><path d="M13 17V8"/><path d="M18 17v-2"/></svg>"#;
 
 pub fn play(size: Pixels) -> Svg {
     icon(PLAY, size)
@@ -150,6 +151,9 @@ pub fn visualizer(size: Pixels) -> Svg {
 }
 pub fn moon(size: Pixels) -> Svg {
     icon(MOON, size)
+}
+pub fn stats(size: Pixels) -> Svg {
+    icon(STATS, size)
 }
 
 pub fn styled(icon: Svg, color: impl Into<Hsla>, hover: impl Into<Hsla>) -> Svg {

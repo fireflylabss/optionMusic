@@ -1,4 +1,5 @@
 use std::path::PathBuf;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use gpui::{Entity, Pixels, Point, SharedString, Subscription};
 use serde::{Deserialize, Serialize};
@@ -16,6 +17,7 @@ pub(crate) enum Page {
     Favorites,
     Shelves,
     Radio,
+    Stats,
 }
 
 impl Page {
@@ -28,6 +30,7 @@ impl Page {
             Self::Favorites => "favorites",
             Self::Shelves => "shelves",
             Self::Radio => "radio",
+            Self::Stats => "stats",
         }
     }
 
@@ -39,6 +42,7 @@ impl Page {
             "favorites" => Self::Favorites,
             "shelves" => Self::Shelves,
             "radio" => Self::Radio,
+            "stats" => Self::Stats,
             _ => Self::Library,
         }
     }
@@ -57,6 +61,8 @@ pub(crate) enum FocusedList {
     Shelves,
     ShelfTracks,
     Queue,
+    StatsTracks,
+    StatsHistory,
 }
 
 #[derive(Clone)]
@@ -312,4 +318,26 @@ pub(crate) fn sleep_minutes_from_label(label: &str) -> u64 {
         .and_then(|rest| rest.strip_suffix(" min"))
         .and_then(|mins| mins.parse::<u64>().ok())
         .unwrap_or(0)
+}
+
+/// "3h ago" style label for unix-second timestamps (play history rows).
+pub(crate) fn relative_time(at: u64) -> String {
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or_default();
+    let secs = now.saturating_sub(at);
+    if secs < 60 {
+        "just now".into()
+    } else if secs < 60 * 60 {
+        format!("{}m ago", secs / 60)
+    } else if secs < 24 * 60 * 60 {
+        format!("{}h ago", secs / 3600)
+    } else if secs < 7 * 24 * 3600 {
+        format!("{}d ago", secs / 86400)
+    } else if secs < 30 * 24 * 3600 {
+        format!("{}w ago", secs / (7 * 86400))
+    } else {
+        format!("{}mo ago", secs / (30 * 86400))
+    }
 }

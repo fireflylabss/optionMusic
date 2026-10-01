@@ -11,8 +11,9 @@ use gpui::{
 };
 use optionmusic::cava::CavaBridge;
 use optionmusic::config::{ArtistSource, ReplayGainMode};
-use optionmusic::controller::{CoreController, PlaybackState, SmartShelf, TrackDto};
+use optionmusic::controller::{CoreController, PlaybackState, SmartShelf, StatsView, TrackDto};
 use optionmusic::eq::EqPreset;
+use optionmusic::history::HistoryEntry;
 use optionmusic::rpc::Rpc;
 use optionmusic::saved_playlists::SavedPlaylist;
 
@@ -25,8 +26,8 @@ use crate::{
     About, BlurList, ClearQueue, CycleLoop, DismissOverlay, FavoriteCurrent, FocusList,
     ListActivate, ListDown, ListFirst, ListLast, ListUp, MenuActivate, MenuDown, MenuLeft,
     MenuRight, MenuUp, Mute, NavAlbums, NavArtists, NavFavorites, NavLibrary, NavPlaylists,
-    NavShelves, Next, OpenSettings, PlayPause, Previous, QueueItemDown, QueueItemUp, QueueJump,
-    SeekBack, SeekForward, Shuffle, SleepTimerCycle, SliderEnd, SliderHome, SliderLeft,
+    NavShelves, NavStats, Next, OpenSettings, PlayPause, Previous, QueueItemDown, QueueItemUp,
+    QueueJump, SeekBack, SeekForward, Shuffle, SleepTimerCycle, SliderEnd, SliderHome, SliderLeft,
     SliderRight, Stop, ToggleLyrics, ToggleQueue, ToggleSearch, ToggleStage, VolumeDown, VolumeUp,
 };
 
@@ -144,6 +145,12 @@ pub(crate) struct RootView {
     pub(crate) sleep_menu: Option<Point<Pixels>>,
     /// Keyboard-selected row inside `sleep_menu`.
     pub(crate) sleep_selection: usize,
+    /// Stats page cache — reloaded from `stats.json`/`history.jsonl` on every
+    /// navigate to Page::Stats (and on playback changes while it is open).
+    pub(crate) stats_cache: Option<Rc<StatsView>>,
+    pub(crate) history_cache: Rc<[HistoryEntry]>,
+    pub(crate) stats_scroll_handle: UniformListScrollHandle,
+    pub(crate) stats_history_scroll_handle: UniformListScrollHandle,
 }
 
 impl RootView {
@@ -272,6 +279,10 @@ impl RootView {
             sleep_minutes: 0,
             sleep_menu: None,
             sleep_selection: 0,
+            stats_cache: None,
+            history_cache: Rc::from(Vec::new()),
+            stats_scroll_handle: UniformListScrollHandle::new(),
+            stats_history_scroll_handle: UniformListScrollHandle::new(),
         };
         view.start_scan(cx);
         view.check_crash_recovery(cx);
@@ -420,6 +431,9 @@ impl RootView {
                         });
                     if changed {
                         view.spawn_cover_load(cx);
+                        if view.page == Page::Stats {
+                            view.refresh_stats();
+                        }
                         cx.notify();
                     }
                     view.sync_presence(cx);
@@ -1887,6 +1901,7 @@ impl RootView {
             }
             // Unreachable — the Radio guards below focus the seed field.
             Page::Radio => FocusedList::Tracks,
+            Page::Stats => FocusedList::StatsTracks,
         }
     }
 
@@ -2093,6 +2108,9 @@ impl RootView {
         if self.visualizer {
             self.start_viz(cx);
         }
+        if self.page == Page::Stats {
+            self.refresh_stats();
+        }
         cx.notify();
     }
 
@@ -2159,6 +2177,8 @@ impl RootView {
             FocusedList::Shelves | FocusedList::ShelfTracks => self.shelf_scroll_handle.clone(),
             FocusedList::Playlists => self.playlist_scroll_handle.clone(),
             FocusedList::Queue => self.queue_scroll_handle.clone(),
+            FocusedList::StatsTracks => self.stats_scroll_handle.clone(),
+            FocusedList::StatsHistory => self.stats_history_scroll_handle.clone(),
         }
     }
 
@@ -2174,6 +2194,12 @@ impl RootView {
             FocusedList::Shelves => 3,
             FocusedList::ShelfTracks => self.shelf_tracks.len(),
             FocusedList::Queue => self.playback.queue.len(),
+            FocusedList::StatsTracks => self
+                .stats_cache
+                .as_ref()
+                .map(|stats| stats.top_tracks.len())
+                .unwrap_or_default(),
+            FocusedList::StatsHistory => self.history_cache.len(),
         }
     }
 
@@ -2290,6 +2316,29 @@ impl RootView {
                 };
                 if let Some(shelf) = shelf {
                     self.select_shelf(shelf, cx);
+                }
+            }
+            FocusedList::StatsTracks => {
+                let track_id = self
+                    .stats_cache
+                    .as_ref()
+                    .and_then(|stats| stats.top_tracks.get(row))
+                    .and_then(|entry| entry.track.as_ref())
+                    .map(|track| track.id.clone());
+                if let Some(id) = track_id {
+                    self.play_track(&id, cx);
+                } else {
+                    self.set_status("That track is no longer in the library", cx);
+                }
+            }
+            FocusedList::StatsHistory => {
+                if let Some(entry) = self.history_cache.get(row) {
+                    let id = entry.id.clone();
+                    if self.track_by_id(&id).is_some() {
+                        self.play_track(&id, cx);
+                    } else {
+                        self.set_status("That track is no longer in the library", cx);
+                    }
                 }
             }
         }
@@ -2439,6 +2488,9 @@ impl RootView {
         self.album_tracks = Rc::from(Vec::new());
         self.focused_list = None;
         self.focused_row = None;
+        if page == Page::Stats {
+            self.refresh_stats();
+        }
         // Search stays open and keeps filtering the newly selected page.
         self.save_desktop_prefs(window, cx);
         cx.notify();
@@ -2631,6 +2683,10 @@ impl RootView {
 
     pub(crate) fn nav_shelves(&mut self, _: &NavShelves, w: &mut Window, cx: &mut Context<Self>) {
         self.navigate(Page::Shelves, w, cx);
+    }
+
+    pub(crate) fn nav_stats(&mut self, _: &NavStats, w: &mut Window, cx: &mut Context<Self>) {
+        self.navigate(Page::Stats, w, cx);
     }
 
     pub(crate) fn toggle_stage(
@@ -2994,6 +3050,7 @@ impl Render for RootView {
             .on_action(cx.listener(Self::nav_playlists))
             .on_action(cx.listener(Self::nav_favorites))
             .on_action(cx.listener(Self::nav_shelves))
+            .on_action(cx.listener(Self::nav_stats))
             .on_action(cx.listener(Self::toggle_stage))
             .on_action(cx.listener(Self::toggle_lyrics))
             .on_action(cx.listener(Self::menu_up))

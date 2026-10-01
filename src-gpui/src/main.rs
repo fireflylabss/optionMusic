@@ -73,7 +73,8 @@ actions!(
         Radio,
         CheckForUpdates,
         ToggleVisualizer,
-        SleepTimerCycle
+        SleepTimerCycle,
+        NavStats
     ]
 );
 
@@ -152,6 +153,7 @@ fn main() {
             KeyBinding::new("ctrl-4", NavPlaylists, Some("!TextInput")),
             KeyBinding::new("ctrl-5", NavFavorites, Some("!TextInput")),
             KeyBinding::new("ctrl-6", NavShelves, Some("!TextInput")),
+            KeyBinding::new("ctrl-8", NavStats, Some("!TextInput")),
             #[cfg(target_os = "macos")]
             KeyBinding::new("cmd-1", NavLibrary, Some("!TextInput")),
             #[cfg(target_os = "macos")]
@@ -164,6 +166,8 @@ fn main() {
             KeyBinding::new("cmd-5", NavFavorites, Some("!TextInput")),
             #[cfg(target_os = "macos")]
             KeyBinding::new("cmd-6", NavShelves, Some("!TextInput")),
+            #[cfg(target_os = "macos")]
+            KeyBinding::new("cmd-8", NavStats, Some("!TextInput")),
             KeyBinding::new("ctrl-f", ToggleSearch, None),
             #[cfg(target_os = "macos")]
             KeyBinding::new("cmd-f", ToggleSearch, None),
@@ -295,6 +299,7 @@ fn main() {
                 MenuItem::action("Favorites", NavFavorites),
                 MenuItem::action("Shelves", NavShelves),
                 MenuItem::action("Radio", NavRadio),
+                MenuItem::action("Stats", NavStats),
                 MenuItem::separator(),
                 MenuItem::action("Search", ToggleSearch),
                 MenuItem::action("Queue", ToggleQueue),
