@@ -1,6 +1,7 @@
 //! optionMusic GPUI — minimal black & white desktop music player.
 
 mod icons;
+mod mini;
 mod model;
 mod search_input;
 mod theme;
@@ -63,7 +64,8 @@ actions!(
         QueueItemUp,
         QueueItemDown,
         QueueJump,
-        ClearQueue
+        ClearQueue,
+        ToggleMiniPlayer
     ]
 );
 
@@ -112,6 +114,7 @@ fn main() {
     application().run(|cx: &mut App| {
         cx.on_action(new_window);
         cx.on_action(quit);
+        cx.on_action(mini::toggle_mini_player);
 
         // Media shortcuts are suppressed while the search input is focused so
         // typing letters/arrows edits text instead of triggering playback.
@@ -160,10 +163,14 @@ fn main() {
             KeyBinding::new("cmd-n", NewWindow, None),
             #[cfg(target_os = "macos")]
             KeyBinding::new("cmd-q", Quit, None),
+            #[cfg(target_os = "macos")]
+            KeyBinding::new("cmd-m", ToggleMiniPlayer, None),
             #[cfg(not(target_os = "macos"))]
             KeyBinding::new("ctrl-n", NewWindow, None),
             #[cfg(not(target_os = "macos"))]
             KeyBinding::new("ctrl-q", Quit, None),
+            #[cfg(not(target_os = "macos"))]
+            KeyBinding::new("ctrl-m", ToggleMiniPlayer, None),
             // List navigation (any focused TrackList: tracks, artists, queue…)
             KeyBinding::new("up", ListUp, Some("TrackList")),
             KeyBinding::new("down", ListDown, Some("TrackList")),
@@ -233,6 +240,7 @@ fn main() {
         ]);
         cx.set_menus([Menu::new("optionMusic").items([
             MenuItem::action("New Window", NewWindow),
+            MenuItem::action("Mini Player", ToggleMiniPlayer),
             MenuItem::separator(),
             MenuItem::action("Quit", Quit),
         ])]);
