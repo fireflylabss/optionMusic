@@ -151,6 +151,10 @@ pub(crate) struct RootView {
     pub(crate) history_cache: Rc<[HistoryEntry]>,
     pub(crate) stats_scroll_handle: UniformListScrollHandle,
     pub(crate) stats_history_scroll_handle: UniformListScrollHandle,
+    pub(crate) dl_sheet: Option<crate::downloads::DlSheet>,
+    /// Pump task forwarding `DlEvent`s off the download thread — kept on the
+    /// view (not the sheet) so closing the sheet mid-batch doesn't cancel it.
+    pub(crate) _dl_task: Option<Task<()>>,
 }
 
 impl RootView {
@@ -283,6 +287,8 @@ impl RootView {
             history_cache: Rc::from(Vec::new()),
             stats_scroll_handle: UniformListScrollHandle::new(),
             stats_history_scroll_handle: UniformListScrollHandle::new(),
+            dl_sheet: None,
+            _dl_task: None,
         };
         view.start_scan(cx);
         view.check_crash_recovery(cx);
@@ -1315,6 +1321,7 @@ impl RootView {
         self.playlist_picker = None;
         self.settings_open = false;
         self.sleep_menu = None;
+        self.dl_sheet = None;
         self.overlay_focus.focus(window, cx);
         cx.notify();
     }
@@ -1327,6 +1334,7 @@ impl RootView {
         self.pending_confirm = None;
         self.settings_open = false;
         self.about_open = false;
+        self.dl_sheet = None;
         if self.name_target.is_some() {
             self.name_target = None;
             self.name_input.update(cx, |input, cx| input.clear(cx));
@@ -2840,6 +2848,7 @@ impl RootView {
         self.about_open = false;
         self.context_menu = None;
         self.playlist_picker = None;
+        self.dl_sheet = None;
         self.overlay_focus.focus(window, cx);
         cx.notify();
     }
@@ -2850,6 +2859,7 @@ impl RootView {
         self.settings_open = false;
         self.context_menu = None;
         self.playlist_picker = None;
+        self.dl_sheet = None;
         self.overlay_focus.focus(window, cx);
         cx.notify();
     }
@@ -3076,6 +3086,7 @@ impl Render for RootView {
             .on_action(cx.listener(Self::check_for_updates))
             .on_action(cx.listener(Self::toggle_visualizer))
             .on_action(cx.listener(Self::sleep_timer_cycle))
+            .on_action(cx.listener(Self::on_open_downloader))
             .on_drag_move::<ExternalPaths>(cx.listener(
                 |this: &mut RootView,
                  _event: &gpui::DragMoveEvent<ExternalPaths>,
@@ -3182,6 +3193,10 @@ impl Render for RootView {
             .when_some(self.sleep_menu, |this, position| {
                 this.child(deferred(self.overlay_scrim(cx, false)))
                     .child(deferred(self.sleep_menu_panel(position, tokens, cx)).with_priority(1))
+            })
+            .when(self.dl_sheet.is_some(), |this| {
+                this.child(deferred(self.overlay_scrim(cx, true)))
+                    .child(deferred(self.download_sheet(window, tokens, cx)).with_priority(2))
             })
             .when(!self.status.is_empty(), |this| {
                 this.child(deferred(self.status_toast(tokens, cx)).with_priority(4))
