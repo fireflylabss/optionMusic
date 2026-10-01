@@ -64,7 +64,8 @@ actions!(
         QueueItemUp,
         QueueItemDown,
         QueueJump,
-        ClearQueue
+        ClearQueue,
+        NavStats
     ]
 );
 
@@ -142,6 +143,7 @@ fn main() {
             KeyBinding::new("ctrl-4", NavPlaylists, Some("!TextInput")),
             KeyBinding::new("ctrl-5", NavFavorites, Some("!TextInput")),
             KeyBinding::new("ctrl-6", NavShelves, Some("!TextInput")),
+            KeyBinding::new("ctrl-7", NavStats, Some("!TextInput")),
             #[cfg(target_os = "macos")]
             KeyBinding::new("cmd-1", NavLibrary, Some("!TextInput")),
             #[cfg(target_os = "macos")]
@@ -154,6 +156,8 @@ fn main() {
             KeyBinding::new("cmd-5", NavFavorites, Some("!TextInput")),
             #[cfg(target_os = "macos")]
             KeyBinding::new("cmd-6", NavShelves, Some("!TextInput")),
+            #[cfg(target_os = "macos")]
+            KeyBinding::new("cmd-7", NavStats, Some("!TextInput")),
             KeyBinding::new("ctrl-f", ToggleSearch, None),
             #[cfg(target_os = "macos")]
             KeyBinding::new("cmd-f", ToggleSearch, None),

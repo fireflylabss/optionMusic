@@ -1154,6 +1154,18 @@ impl RootView {
                     "Automatic collections".into()
                 },
             ),
+            Page::Stats => (
+                "Stats".into(),
+                match self.stats_cache.as_ref() {
+                    Some(stats) if stats.total_plays > 0 => format!(
+                        "{} plays · {} listened",
+                        stats.total_plays,
+                        fmt_time(stats.total_secs as f64)
+                    )
+                    .into(),
+                    _ => "No plays recorded yet".into(),
+                },
+            ),
         };
 
         let tools = div()
@@ -1266,6 +1278,7 @@ impl RootView {
                         self.shelves_view(tokens, cx).into_any_element()
                     }
                 }
+                Page::Stats => self.stats_page(tokens, cx),
             }
         };
 
