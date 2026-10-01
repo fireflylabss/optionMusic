@@ -16,6 +16,7 @@ use optionmusic::rpc::Rpc;
 use optionmusic::saved_playlists::SavedPlaylist;
 
 use crate::model::*;
+use crate::now_playing::{NowPlaying, RemoteCommand};
 use crate::search_input::{SearchEvent, SearchInput};
 use crate::theme::*;
 use crate::{
@@ -105,6 +106,8 @@ pub(crate) struct RootView {
     pub(crate) _lyrics_task: Option<Task<()>>,
     pub(crate) _prefs_task: Option<Task<()>>,
     pub(crate) _subscriptions: Vec<Subscription>,
+    /// macOS Now Playing / media-key bridge; no-op on other platforms.
+    pub(crate) now_playing: NowPlaying,
 }
 
 impl RootView {
@@ -203,6 +206,7 @@ impl RootView {
             _lyrics_task: None,
             _prefs_task: None,
             _subscriptions: vec![search_subscription, name_subscription],
+            now_playing: NowPlaying::new(),
         };
         view.start_scan(cx);
         view
@@ -349,6 +353,7 @@ impl RootView {
                         cx.notify();
                     }
                     view.sync_presence(cx);
+                    view.sync_now_playing(cx);
                 })
                 .ok();
             }
@@ -965,6 +970,46 @@ impl RootView {
         }
         self.playback.position = position;
         cx.notify();
+    }
+
+    /// Absolute seek (seconds) — the Control Center / Touch Bar scrubber.
+    pub(crate) fn do_seek_absolute(&mut self, position: f64, cx: &mut Context<Self>) {
+        let position = position.max(0.0);
+        if let Some(controller) = self.controller.as_mut()
+            && let Err(error) = controller.seek(position)
+        {
+            eprintln!("seek failed: {error}");
+        }
+        self.playback.position = position;
+        cx.notify();
+    }
+
+    /// Drain media-key commands enqueued by MPRemoteCommandCenter and push
+    /// the current track to MPNowPlayingInfoCenter. Runs on the poll tick so
+    /// all ObjC work stays off render and command dispatch matches the
+    /// player bar's controller calls.
+    pub(crate) fn sync_now_playing(&mut self, cx: &mut Context<Self>) {
+        for command in self.now_playing.poll_commands() {
+            match command {
+                RemoteCommand::TogglePause => self.do_play_pause(cx),
+                RemoteCommand::Play => {
+                    if self.playback.paused {
+                        self.do_play_pause(cx)
+                    }
+                }
+                RemoteCommand::Pause => {
+                    if !self.playback.paused {
+                        self.do_play_pause(cx)
+                    }
+                }
+                RemoteCommand::Next => self.do_next(cx),
+                RemoteCommand::Previous => self.do_previous(cx),
+                RemoteCommand::Stop => self.do_stop(cx),
+                RemoteCommand::Seek(position) => self.do_seek_absolute(position, cx),
+            }
+        }
+        self.now_playing
+            .sync(&self.playback, self.current_cover.as_deref());
     }
 
     pub(crate) fn do_set_volume(&mut self, fraction: f64, cx: &mut Context<Self>) {

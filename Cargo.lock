@@ -4008,8 +4008,10 @@ dependencies = [
 name = "optionmusic-gpui"
 version = "0.1.7"
 dependencies = [
+ "block",
  "gpui",
  "gpui_platform",
+ "objc",
  "optionmusic",
  "serde",
  "serde_json",
