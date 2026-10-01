@@ -1,0 +1,181 @@
+name: Release Desktop
+
+on:
+  push:
+    tags: ["desktop-v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag (e.g. desktop-v0.1.8-beta); created on this commit if missing."
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.v.outputs.tag }}
+      version: ${{ steps.v.outputs.version }}
+      prerelease: ${{ steps.v.outputs.prerelease }}
+    steps:
+      - name: Resolve release tag and version
+        id: v
+        run: |
+          set -euo pipefail
+          TAG="${{ inputs.tag || github.ref_name }}"
+          case "$TAG" in
+            desktop-v*) ;;
+            *) echo "tag '$TAG' must match desktop-v*" >&2; exit 1 ;;
+          esac
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=${TAG#desktop-v}" >> "$GITHUB_OUTPUT"
+          case "$TAG" in
+            *-*) echo "prerelease=true" >> "$GITHUB_OUTPUT" ;;
+            *)   echo "prerelease=false" >> "$GITHUB_OUTPUT" ;;
+          esac
+
+  macos:
+    needs: version
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install MPV development files
+        run: |
+          brew install mpv pkg-config
+          echo "LIBRARY_PATH=$(brew --prefix)/lib" >> "$GITHUB_ENV"
+          echo "PKG_CONFIG_PATH=$(brew --prefix)/lib/pkgconfig" >> "$GITHUB_ENV"
+      - name: Build optionmusic-gpui
+        working-directory: src-gpui
+        run: cargo build --release --locked
+      - name: Assemble optionMusic.app
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          APP="optionMusic.app"
+          mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
+          cp target/release/optionmusic-gpui "$APP/Contents/MacOS/optionmusic-gpui"
+          sed "s/__VERSION__/$VERSION/g" packaging/macos/Info.plist > "$APP/Contents/Info.plist"
+          if [ -f packaging/macos/icon.icns ]; then
+            cp packaging/macos/icon.icns "$APP/Contents/Resources/icon.icns"
+          fi
+          plutil -lint "$APP/Contents/Info.plist"
+          find "$APP" -type f | sort
+      - name: Build DMG
+        run: |
+          set -euo pipefail
+          mkdir -p dist dmg-root
+          cp -R optionMusic.app dmg-root/
+          cp packaging/macos/README.txt dmg-root/README.txt
+          hdiutil create -volname "optionMusic" -srcfolder dmg-root -ov -format UDZO \
+            dist/optionMusic-macos-arm64.dmg
+          ls -lh dist
+      - uses: actions/upload-artifact@v7
+        with:
+          name: optionmusic-macos-arm64
+          path: dist/
+          if-no-files-found: error
+
+  linux:
+    needs: version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libmpv-dev pkg-config \
+            libasound2-dev libfontconfig-dev libvulkan-dev \
+            libwayland-dev libxkbcommon-dev libxkbcommon-x11-dev \
+            libxcb-xkb-dev libxcb-ewmh-dev libxcb-icccm4-dev libxcb-keysyms1-dev \
+            libxcb-randr0-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev \
+            libxcb1-dev libx11-xcb-dev
+      - name: Build optionmusic-gpui
+        working-directory: src-gpui
+        run: cargo build --release --locked
+      - name: Assemble tarball
+        run: |
+          set -euo pipefail
+          stage="optionmusic-linux-x86_64"
+          mkdir -p "$stage" dist
+          cp target/release/optionmusic-gpui "$stage/"
+          cp packaging/linux/optionmusic.desktop packaging/linux/install.sh \
+             packaging/linux/README.txt "$stage/"
+          cp -R packaging/linux/icons "$stage/"
+          chmod +x "$stage/install.sh" "$stage/optionmusic-gpui"
+          tar -czf "dist/optionmusic-linux-x86_64.tar.gz" "$stage"
+          ls -lh dist
+      - uses: actions/upload-artifact@v7
+        with:
+          name: optionmusic-linux-x86_64
+          path: dist/
+          if-no-files-found: error
+
+  windows:
+    needs: version
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Fetch libmpv dev package
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $url = gh release view --repo shinchiro/mpv-winbuild-cmake --json assets -q '.assets[] | select(.name | test("^mpv-dev-x86_64-[0-9]+-git-[0-9a-f]+\\.7z$")) | .url'
+          if (-not $url) { throw "no mpv-dev-x86_64 asset in latest shinchiro/mpv-winbuild-cmake release" }
+          Write-Host "libmpv package: $url"
+          curl.exe -fSL -o mpv-dev.7z "$url"
+          7z x -y -o"$env:RUNNER_TEMP\mpv-dev" mpv-dev.7z
+          Get-ChildItem "$env:RUNNER_TEMP\mpv-dev"
+          "RUSTFLAGS=-L $env:RUNNER_TEMP\mpv-dev" | Out-File -Append $env:GITHUB_ENV
+          "$env:RUNNER_TEMP\mpv-dev" | Out-File -Append $env:GITHUB_PATH
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-gnu
+      - name: Build optionmusic-gpui
+        working-directory: src-gpui
+        run: cargo build --release --locked --target x86_64-pc-windows-gnu
+      - name: Assemble zip
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          New-Item -ItemType Directory -Force dist, stage | Out-Null
+          Copy-Item target\x86_64-pc-windows-gnu\release\optionmusic-gpui.exe stage\
+          $dll = Get-ChildItem -Recurse -Filter mpv-2.dll "$env:RUNNER_TEMP\mpv-dev" | Select-Object -First 1
+          if (-not $dll) { throw "mpv-2.dll not found inside mpv-dev package" }
+          Copy-Item $dll.FullName stage\mpv-2.dll
+          Copy-Item packaging\windows\README.txt stage\README.txt
+          Compress-Archive -Path stage\* -DestinationPath dist\optionmusic-windows-x86_64.zip
+          Get-ChildItem dist
+      - uses: actions/upload-artifact@v7
+        with:
+          name: optionmusic-windows-x86_64
+          path: dist/
+          if-no-files-found: error
+
+  release:
+    needs: [version, macos, linux, windows]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v7
+        with:
+          path: artifacts
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.version.outputs.tag }}
+          name: optionMusic Desktop ${{ needs.version.outputs.tag }}
+          prerelease: ${{ needs.version.outputs.prerelease == 'true' }}
+          generate_release_notes: true
+          files: |
+            artifacts/**/*.dmg
+            artifacts/**/*.tar.gz
+            artifacts/**/*.zip
