@@ -257,7 +257,34 @@ pub fn resolve_seed(
     stats: &StatsStore,
     seed: u64,
 ) -> Option<usize> {
-    if library.is_empty() {
+    resolve_seed_in(
+        library.tracks(),
+        |t| library.artist_name(t),
+        |t| library.album_name(t),
+        query,
+        artist,
+        genre,
+        stats,
+        seed,
+    )
+}
+
+/// Track-slice variant of [`resolve_seed`] for callers that own their track
+/// list without holding a `Library` (the desktop `CoreController`).
+/// `artist_of`/`album_of` must resolve display names the same way
+/// `Library::artist_name`/`album_name` do.
+#[allow(clippy::too_many_arguments)]
+pub fn resolve_seed_in(
+    tracks: &[Track],
+    artist_of: impl Fn(&Track) -> String,
+    album_of: impl Fn(&Track) -> String,
+    query: Option<&str>,
+    artist: Option<&str>,
+    genre: Option<&str>,
+    stats: &StatsStore,
+    seed: u64,
+) -> Option<usize> {
+    if tracks.is_empty() {
         return None;
     }
     let mut rng = seed ^ 0x9e3779b97f4a7c15;
@@ -270,14 +297,32 @@ pub fn resolve_seed(
     };
 
     if artist.is_some() || genre.is_some() {
-        return pick(&library.filter(genre, None, artist, None), &mut rng);
+        let idx: Vec<usize> = tracks
+            .iter()
+            .enumerate()
+            .filter(|(_, t)| {
+                genre.is_none_or(|g| {
+                    t.genre
+                        .as_deref()
+                        .map(|tg| tg.eq_ignore_ascii_case(g.trim()))
+                        .unwrap_or(false)
+                }) && artist.is_none_or(|a| artist_of(t) == a)
+            })
+            .map(|(i, _)| i)
+            .collect();
+        return pick(&idx, &mut rng);
     }
     if let Some(q) = query.map(str::trim).filter(|s| !s.is_empty()) {
-        return pick(&library.search(q), &mut rng);
+        let idx: Vec<usize> = tracks
+            .iter()
+            .enumerate()
+            .filter(|(_, t)| crate::library::track_matches_query(t, q, &artist_of(t), &album_of(t)))
+            .map(|(i, _)| i)
+            .collect();
+        return pick(&idx, &mut rng);
     }
     // Fallback: most-played track still in the library, else random.
-    let index_of: HashMap<String, usize> = library
-        .tracks()
+    let index_of: HashMap<String, usize> = tracks
         .iter()
         .enumerate()
         .map(|(i, t)| (t.path.to_string_lossy().into_owned(), i))
@@ -287,7 +332,7 @@ pub fn resolve_seed(
             return Some(i);
         }
     }
-    Some((xorshift(&mut rng) as usize) % library.len())
+    Some((xorshift(&mut rng) as usize) % tracks.len())
 }
 
 #[cfg(test)]

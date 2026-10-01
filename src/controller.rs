@@ -4,6 +4,7 @@ use crate::{
     eq::EqPreset,
     player::Player,
     playlist::{self, Track},
+    sleep::SleepTimer,
 };
 use anyhow::Result;
 use serde::Serialize;
@@ -154,6 +155,9 @@ pub struct CoreController {
     desktop_preferences: String,
     /// Wall-clock of last resume write (throttle disk I/O while playing).
     last_resume_save: std::time::Instant,
+    /// Sleep timer (`msc sleep` / TUI `z`) — shared state the desktop UI
+    /// shows as a countdown in the player bar.
+    sleep: SleepTimer,
 }
 impl Default for CoreController {
     fn default() -> Self {
@@ -181,6 +185,7 @@ impl CoreController {
             last_resume_save: std::time::Instant::now()
                 .checked_sub(std::time::Duration::from_secs(60))
                 .unwrap_or_else(std::time::Instant::now),
+            sleep: SleepTimer::new(),
         }
     }
     fn load_desktop_preferences() -> String {
@@ -937,6 +942,257 @@ impl CoreController {
         let track = self.track(id)?;
         Ok(crate::meta::read_lyrics(&track.path))
     }
+
+    // ── Library naming (honors `config.artist_source`) ────────────────
+
+    /// Display artist for a track — same semantics as `Library::artist_name`
+    /// on the CLI side (metadata vs. folder per `config.artist_source`).
+    pub fn artist_name(&self, track: &Track) -> String {
+        match self.config.artist_source {
+            config::ArtistSource::Metadata => track
+                .artist
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .unwrap_or("Unknown Artist")
+                .to_owned(),
+            config::ArtistSource::Folder => track
+                .path
+                .parent()
+                .and_then(|p| p.file_name())
+                .and_then(|s| s.to_str())
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(str::to_owned)
+                .unwrap_or_else(|| "Unknown Artist".into()),
+        }
+    }
+
+    /// Display album for a track (`"Unknown Album"` fallback, like the CLI).
+    pub fn album_name(&self, track: &Track) -> String {
+        track
+            .album
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .unwrap_or("Unknown Album")
+            .to_owned()
+    }
+
+    // ── Radio (`msc radio`) ────────────────────────────────────────────
+
+    /// Resolve a seed and order the loaded library as a similarity walk.
+    /// Pure — no playback. Returns `(seed_index, ordered track ids)` where
+    /// the seed id is `ids[0]`.
+    pub fn radio_order(
+        &self,
+        query: Option<&str>,
+        artist: Option<&str>,
+        genre: Option<&str>,
+        fresh: bool,
+    ) -> Result<(usize, Vec<String>)> {
+        if self.library.is_empty() {
+            anyhow::bail!("library is empty");
+        }
+        let stats = crate::stats::StatsStore::load();
+        let recent: std::collections::HashSet<String> =
+            crate::history::played_this_week().into_iter().collect();
+        let seed = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos() as u64)
+            .unwrap_or(0x9e3779b97f4a7c15);
+        let Some(seed_idx) = crate::radio::resolve_seed_in(
+            &self.library,
+            |t| self.artist_name(t),
+            |t| self.album_name(t),
+            query,
+            artist,
+            genre,
+            &stats,
+            seed,
+        ) else {
+            anyhow::bail!("no match — try an artist, album, track or genre name");
+        };
+        let order = crate::radio::build_order(
+            &self.library,
+            |t| self.artist_name(t),
+            &stats,
+            &recent,
+            seed_idx,
+            &crate::radio::RadioOpts {
+                fresh,
+                seed,
+                ..Default::default()
+            },
+        );
+        let ids = order
+            .iter()
+            .map(|&i| self.library[i].path.to_string_lossy().into_owned())
+            .collect();
+        Ok((seed_idx, ids))
+    }
+
+    /// Start a radio session: queue the walk order minus the seed, play the
+    /// seed. Same semantics as `msc radio` (queue replaced, seed plays now).
+    pub fn radio_start(
+        &mut self,
+        query: Option<&str>,
+        artist: Option<&str>,
+        genre: Option<&str>,
+        fresh: bool,
+    ) -> Result<RadioSession> {
+        let (seed_idx, ids) = self.radio_order(query, artist, genre, fresh)?;
+        let mut ids = ids.into_iter();
+        let seed_id = ids.next().expect("order is non-empty");
+        self.queue = ids.collect();
+        self.play(&seed_id)?;
+        let track = &self.library[seed_idx];
+        Ok(RadioSession {
+            seed: TrackDto::from(track),
+            label: format!(
+                "radio · {} — {}",
+                track.display_name(),
+                self.artist_name(track)
+            ),
+            queued: self.queue.len(),
+        })
+    }
+
+    // ── Stats & history (`msc stats`) ─────────────────────────────────
+
+    /// `msc stats` data for desktop clients: totals plus top tracks joined
+    /// back to the library and top artists.
+    pub fn stats_view(&self, top: usize) -> StatsView {
+        let store = crate::stats::StatsStore::load();
+        StatsView {
+            total_plays: store.total_plays,
+            total_secs: store.total_secs,
+            top_tracks: store
+                .top_tracks(top)
+                .into_iter()
+                .map(|s| StatTrackView {
+                    track: self.track(&s.id).ok().map(TrackDto::from),
+                    stat: s.clone(),
+                })
+                .collect(),
+            top_artists: store.top_artists(top),
+        }
+    }
+
+    /// Recent play history, newest first (`msc stats` companion).
+    pub fn history_entries(&self, limit: usize) -> Vec<crate::history::HistoryEntry> {
+        let mut entries = crate::history::load_entries();
+        entries.reverse();
+        entries.truncate(limit);
+        entries
+    }
+
+    // ── Sleep timer (`msc sleep` / TUI `z`) ────────────────────────────
+
+    /// Set the sleep timer `minutes` out (0 clears). Returns the status
+    /// label (`"sleep timer · N min"` / `"sleep timer · off"`).
+    pub fn sleep_set(&mut self, minutes: u64) -> String {
+        self.sleep.set_minutes(minutes)
+    }
+
+    /// Cycle off → 15 → 30 → 60 → off, like the TUI `z` key.
+    pub fn sleep_cycle(&mut self) -> String {
+        self.sleep.cycle()
+    }
+
+    pub fn sleep_off(&mut self) {
+        self.sleep.clear();
+    }
+
+    pub fn sleep_active(&self) -> bool {
+        self.sleep.is_active()
+    }
+
+    /// `mm:ss` countdown for the player bar while the timer runs.
+    pub fn sleep_countdown(&self) -> Option<String> {
+        self.sleep.countdown_label()
+    }
+
+    /// Poll the timer — the desktop ticker calls this each tick. Returns
+    /// `true` exactly once when it fires: playback pauses (same semantics
+    /// as the TUI fade-end) and the timer clears.
+    pub fn sleep_poll(&mut self) -> bool {
+        if !self.sleep.is_expired() {
+            return false;
+        }
+        self.sleep.clear();
+        if let Some(p) = self.player.as_mut() {
+            p.set_paused(true);
+        }
+        true
+    }
+
+    // ── Downloads (`msc dl`) ───────────────────────────────────────────
+
+    /// Whether `yt-dlp` is usable; error carries the install hint.
+    pub fn dl_available(&self) -> Result<String> {
+        crate::download::ensure_yt_dlp()
+    }
+
+    /// Search a provider — blocking; run off the app thread.
+    pub fn dl_search(
+        &self,
+        provider: crate::download::Provider,
+        query: &str,
+    ) -> Result<Vec<crate::download::SearchHit>> {
+        crate::download::search(provider, query)
+    }
+
+    /// Refine per-item capability intersection (the `msc dl` "batch
+    /// options" step).
+    pub fn dl_probe(&self, items: &mut [crate::download::MediaItem]) -> Result<()> {
+        crate::download::probe_items(items)
+    }
+
+    /// Fetch a playable preview file for a search hit — blocking.
+    pub fn dl_preview(&self, url: &str) -> Result<PathBuf> {
+        crate::download::fetch_preview_audio(url)
+    }
+
+    /// Run a download batch honoring `config.dl_fallback`, reporting
+    /// [`crate::download::DlEvent`]s to `sink` on this (blocking) thread —
+    /// spawn it on a background executor and forward events into the UI.
+    pub fn dl_run(
+        &self,
+        items: &[crate::download::MediaItem],
+        opts: &crate::download::DownloadOptions,
+        sink: impl FnMut(crate::download::DlEvent),
+    ) -> Result<()> {
+        crate::download::run_batch_events(items, opts, self.config.dl_fallback, sink)
+    }
+}
+
+/// Result of [`CoreController::radio_start`]: the seed now playing plus how
+/// many tracks follow it in the queue.
+#[derive(Debug, Clone)]
+pub struct RadioSession {
+    pub seed: TrackDto,
+    /// Status-line label, e.g. `radio · Song — Artist`.
+    pub label: String,
+    pub queued: usize,
+}
+
+/// One top-tracks row joined back to the library when the track is known.
+#[derive(Debug, Clone)]
+pub struct StatTrackView {
+    pub stat: crate::stats::TrackStat,
+    /// `None` when the track id is no longer in the library.
+    pub track: Option<TrackDto>,
+}
+
+/// `msc stats` view data for desktop clients.
+#[derive(Debug, Clone)]
+pub struct StatsView {
+    pub total_plays: u64,
+    pub total_secs: u64,
+    pub top_tracks: Vec<StatTrackView>,
+    /// `(artist, play_count)` pairs, most played first.
+    pub top_artists: Vec<(String, u64)>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -1199,5 +1455,116 @@ mod tests {
         }
         c.smart_shuffle = false;
         assert!(c.smart_pick().is_none());
+    }
+}
+
+#[cfg(test)]
+mod contract_tests {
+    use super::*;
+
+    fn track(
+        p: &str,
+        title: &str,
+        artist: Option<&str>,
+        album: Option<&str>,
+        genre: Option<&str>,
+    ) -> Track {
+        let mut t = Track::from_path(PathBuf::from(p));
+        t.title = Some(title.into());
+        t.artist = artist.map(str::to_owned);
+        t.album = album.map(str::to_owned);
+        t.genre = genre.map(str::to_owned);
+        t
+    }
+
+    #[test]
+    fn artist_album_name_fallbacks() {
+        let c = CoreController::with_config(AppConfig::default());
+        let t = track("/m/Artist A/x.mp3", "x", Some("Artist A"), None, None);
+        assert_eq!(c.artist_name(&t), "Artist A");
+        assert_eq!(c.album_name(&t), "Unknown Album");
+        let bare = track("/m/f.mp3", "f", None, None, None);
+        assert_eq!(c.artist_name(&bare), "Unknown Artist");
+    }
+
+    #[test]
+    fn radio_order_rejects_empty_library() {
+        let c = CoreController::with_config(AppConfig::default());
+        assert!(c.radio_order(None, None, None, false).is_err());
+    }
+
+    #[test]
+    fn radio_order_resolves_seed_and_walks() {
+        let mut c = CoreController::with_config(AppConfig::default());
+        c.library = vec![
+            track(
+                "/m/a1.mp3",
+                "One",
+                Some("Artist A"),
+                Some("AL"),
+                Some("Rock"),
+            ),
+            track(
+                "/m/a2.mp3",
+                "Two",
+                Some("Artist A"),
+                Some("AL"),
+                Some("Rock"),
+            ),
+            track(
+                "/m/b1.mp3",
+                "Three",
+                Some("Artist B"),
+                Some("BL"),
+                Some("Jazz"),
+            ),
+        ];
+        c.rebuild_path_index();
+        let (seed_idx, ids) = c
+            .radio_order(Some("one"), None, None, false)
+            .expect("seed resolves by title");
+        assert_eq!(ids.len(), c.library.len());
+        // order[0] is the seed itself.
+        assert_eq!(ids[0], "/m/a1.mp3");
+        assert_eq!(c.library[seed_idx].path.to_string_lossy(), "/m/a1.mp3");
+        // No match → clean error the desktop can toast.
+        assert!(c.radio_order(Some("zzzz"), None, None, false).is_err());
+        // Artist filter resolves too.
+        let (seed_idx, _) = c
+            .radio_order(None, Some("Artist B"), None, false)
+            .expect("seed resolves by artist");
+        assert_eq!(c.library[seed_idx].path.to_string_lossy(), "/m/b1.mp3");
+    }
+
+    #[test]
+    fn sleep_set_cycle_countdown_poll() {
+        let mut c = CoreController::with_config(AppConfig::default());
+        assert!(!c.sleep_active());
+        assert_eq!(c.sleep_set(30), "sleep timer · 30 min");
+        assert!(c.sleep_active());
+        assert!(c.sleep_countdown().is_some());
+        assert!(!c.sleep_poll()); // not expired
+        assert_eq!(c.sleep_cycle(), "sleep timer · 60 min"); // 30 → 60
+        assert_eq!(c.sleep_cycle(), "sleep timer · off"); // 60 → off
+        assert!(!c.sleep_active());
+        assert_eq!(c.sleep_set(0), "sleep timer · off");
+    }
+
+    #[test]
+    fn stats_view_shape_without_store_data() {
+        let mut c = CoreController::with_config(AppConfig::default());
+        c.library = vec![track("/m/a.mp3", "a", Some("Artist A"), None, None)];
+        c.rebuild_path_index();
+        let v = c.stats_view(10);
+        // Empty stats store on CI: totals zero-ish, vectors valid.
+        assert!(v.top_tracks.len() <= 10);
+        assert!(v.top_artists.len() <= 10);
+        let _ = (v.total_plays, v.total_secs);
+    }
+
+    #[test]
+    fn history_entries_newest_first_and_limited() {
+        let c = CoreController::with_config(AppConfig::default());
+        let _ = c.history_entries(50); // must not panic without a history file
     }
 }

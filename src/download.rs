@@ -912,17 +912,51 @@ fn run_captured(yt: &str, args: &[String]) -> std::result::Result<(), String> {
     Err(combined)
 }
 
-pub fn run_batch(
+/// Progress events emitted while a download batch runs — consumed by
+/// clients that render their own progress UI (desktop) instead of the
+/// `print_info`-style console output `run_batch` produces.
+#[derive(Debug, Clone)]
+pub enum DlEvent {
+    /// A precondition warning (e.g. ffmpeg missing).
+    Warning { text: String },
+    /// Batch is starting.
+    BatchStarted {
+        total: usize,
+        kind: &'static str,
+        output_dir: PathBuf,
+    },
+    /// Work on item `index` (0-based) began.
+    ItemStarted { index: usize, title: String },
+    /// A yt-dlp pass (`"video"`/`"audio"`) for the item began.
+    PassStarted { index: usize, pass: &'static str },
+    /// A pass failed; the item counts as failed at the end.
+    PassFailed {
+        index: usize,
+        pass: &'static str,
+        error: String,
+    },
+    /// Item finished; `ok` is false when any pass failed.
+    ItemFinished { index: usize, ok: bool },
+    /// All items processed — `Err` from the batch call reports failures too.
+    BatchFinished { total: usize, failed: usize },
+}
+
+fn run_batch_core(
     items: &[MediaItem],
     opts: &DownloadOptions,
     fallback: DlFallbackMode,
+    emit: &mut dyn FnMut(DlEvent),
 ) -> Result<()> {
     let yt = ensure_yt_dlp()?;
     if opts.kind.wants_audio() && !ffmpeg_available() {
-        print_warn("ffmpeg not found — audio extract/convert may fail");
+        emit(DlEvent::Warning {
+            text: "ffmpeg not found — audio extract/convert may fail".into(),
+        });
     }
     if (opts.embed_thumbnail || opts.embed_subs || opts.embed_metadata) && !ffmpeg_available() {
-        print_warn("ffmpeg not found — embed may fail");
+        emit(DlEvent::Warning {
+            text: "ffmpeg not found — embed may fail".into(),
+        });
     }
 
     fs::create_dir_all(&opts.output_dir).with_context(|| {
@@ -932,52 +966,126 @@ pub fn run_batch(
         )
     })?;
 
-    print_info(&format!("items     {}", items.len()));
-    print_info(&format!("kind      {}", opts.kind.label()));
-    print_info(&format!("output    {}", opts.output_dir.display()));
-    println!();
+    emit(DlEvent::BatchStarted {
+        total: items.len(),
+        kind: opts.kind.label(),
+        output_dir: opts.output_dir.clone(),
+    });
 
     let mut failed = 0usize;
     for (i, item) in items.iter().enumerate() {
-        println!(
-            "  {} [{}/{}] {}",
-            "↓".with(BRIGHT),
-            i + 1,
-            items.len(),
-            item.title.as_str().with(GRAY)
-        );
+        emit(DlEvent::ItemStarted {
+            index: i,
+            title: item.title.clone(),
+        });
 
         let mut ok = true;
         if opts.kind.wants_video() {
-            print_info("pass      video");
+            emit(DlEvent::PassStarted {
+                index: i,
+                pass: "video",
+            });
             if let Err(e) = run_one_pass(&yt, &item.url, opts, Pass::Video, fallback) {
-                print_warn(&format!("video failed: {e:#}"));
+                emit(DlEvent::PassFailed {
+                    index: i,
+                    pass: "video",
+                    error: format!("{e:#}"),
+                });
                 ok = false;
             }
         }
         if opts.kind.wants_audio() {
-            print_info("pass      audio");
+            emit(DlEvent::PassStarted {
+                index: i,
+                pass: "audio",
+            });
             if let Err(e) = run_one_pass(&yt, &item.url, opts, Pass::Audio, fallback) {
-                print_warn(&format!("audio failed: {e:#}"));
+                emit(DlEvent::PassFailed {
+                    index: i,
+                    pass: "audio",
+                    error: format!("{e:#}"),
+                });
                 ok = false;
             }
         }
         if !ok {
             failed += 1;
-            print_warn(&format!("failed: {}", item.title));
         }
-        println!();
+        emit(DlEvent::ItemFinished { index: i, ok });
     }
 
+    emit(DlEvent::BatchFinished {
+        total: items.len(),
+        failed,
+    });
     if failed > 0 {
         bail!("{failed}/{} download(s) failed", items.len());
     }
+    Ok(())
+}
+
+/// [`DlEvent`] → the same console output `run_batch` always produced.
+fn print_dl_event(ev: &DlEvent, items: &[MediaItem]) {
+    match ev {
+        DlEvent::Warning { text } => print_warn(text),
+        DlEvent::BatchStarted {
+            total,
+            kind,
+            output_dir,
+        } => {
+            print_info(&format!("items     {total}"));
+            print_info(&format!("kind      {kind}"));
+            print_info(&format!("output    {}", output_dir.display()));
+            println!();
+        }
+        DlEvent::ItemStarted { index, title } => {
+            println!(
+                "  {} [{}/{}] {}",
+                "↓".with(BRIGHT),
+                index + 1,
+                items.len(),
+                title.as_str().with(GRAY)
+            );
+        }
+        DlEvent::PassStarted { pass, .. } => print_info(&format!("pass      {pass}")),
+        DlEvent::PassFailed { pass, error, .. } => print_warn(&format!("{pass} failed: {error}")),
+        DlEvent::ItemFinished { index, ok } => {
+            if !ok {
+                print_warn(&format!("failed: {}", items[*index].title));
+            }
+            println!();
+        }
+        // Success line is printed by `run_batch` after the core returns.
+        DlEvent::BatchFinished { .. } => {}
+    }
+}
+
+pub fn run_batch(
+    items: &[MediaItem],
+    opts: &DownloadOptions,
+    fallback: DlFallbackMode,
+) -> Result<()> {
+    run_batch_core(items, opts, fallback, &mut |ev| print_dl_event(&ev, items))?;
     print_success(&format!(
         "downloaded {} → {}",
         items.len(),
         opts.output_dir.display()
     ));
     Ok(())
+}
+
+/// Event-reporting variant of [`run_batch`]: same engine and failure
+/// semantics, but progress reaches `sink` as [`DlEvent`]s on the calling
+/// (blocking) thread — desktop clients spawn it on a background executor
+/// and forward events into the UI.
+pub fn run_batch_events(
+    items: &[MediaItem],
+    opts: &DownloadOptions,
+    fallback: DlFallbackMode,
+    sink: impl FnMut(DlEvent),
+) -> Result<()> {
+    let mut sink = sink;
+    run_batch_core(items, opts, fallback, &mut sink)
 }
 
 pub fn run_download(req: &DownloadRequest, fallback: DlFallbackMode) -> Result<()> {
