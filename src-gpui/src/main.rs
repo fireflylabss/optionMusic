@@ -2,6 +2,7 @@
 
 mod crash;
 mod icons;
+mod mini;
 mod model;
 mod now_playing;
 mod search_input;
@@ -74,7 +75,8 @@ actions!(
         CheckForUpdates,
         ToggleVisualizer,
         SleepTimerCycle,
-        NavStats
+        NavStats,
+        ToggleMiniPlayer
     ]
 );
 
@@ -124,6 +126,7 @@ fn main() {
     application().run(|cx: &mut App| {
         cx.on_action(new_window);
         cx.on_action(quit);
+        cx.on_action(mini::toggle_mini_player);
 
         // Media shortcuts are suppressed while the search input is focused so
         // typing letters/arrows edits text instead of triggering playback.
@@ -175,10 +178,14 @@ fn main() {
             KeyBinding::new("cmd-n", NewWindow, None),
             #[cfg(target_os = "macos")]
             KeyBinding::new("cmd-q", Quit, None),
+            #[cfg(target_os = "macos")]
+            KeyBinding::new("cmd-m", ToggleMiniPlayer, None),
             #[cfg(not(target_os = "macos"))]
             KeyBinding::new("ctrl-n", NewWindow, None),
             #[cfg(not(target_os = "macos"))]
             KeyBinding::new("ctrl-q", Quit, None),
+            #[cfg(not(target_os = "macos"))]
+            KeyBinding::new("ctrl-m", ToggleMiniPlayer, None),
             // List navigation (any focused TrackList: tracks, artists, queue…)
             KeyBinding::new("up", ListUp, Some("TrackList")),
             KeyBinding::new("down", ListDown, Some("TrackList")),
@@ -306,6 +313,7 @@ fn main() {
                 MenuItem::action("Stage", ToggleStage),
                 MenuItem::action("Lyrics", ToggleLyrics),
                 MenuItem::action("Visualizer", ToggleVisualizer),
+                MenuItem::action("Mini Player", ToggleMiniPlayer),
                 MenuItem::separator(),
                 MenuItem::action("Focus List", FocusList),
             ]),

@@ -3018,6 +3018,9 @@ impl RootView {
 impl Render for RootView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let tokens = tokens();
+        if crate::mini::is_mini_window(window) {
+            return self.mini_shell(tokens, cx);
+        }
         // Height available to the stage column (viewport minus titlebar and
         // player bar) — the hero cover is sized from it.
         let stage_h = f32::from(window.viewport_size().height) - 118.0;

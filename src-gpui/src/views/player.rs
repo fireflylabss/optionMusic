@@ -212,6 +212,16 @@ impl RootView {
             .child(self.player_track(tokens, cx))
             .child(self.player_center(tokens, cx))
             .child(self.player_volume(tokens, cx))
+            .child(self.icon_button(
+                "mini-player",
+                "Mini player",
+                icons::styled(icons::mini(px(16.0)), tokens.mute, tokens.ink),
+                |_this: &mut RootView, _window, cx: &mut Context<RootView>| {
+                    cx.defer(crate::mini::toggle_active_window)
+                },
+                tokens,
+                cx,
+            ))
     }
 
     /// Sleep-timer control: moon button cycles off → 15 → 30 → 60 → off
