@@ -9,6 +9,7 @@ use gpui::{
     ScrollHandle, ScrollStrategy, SharedString, Subscription, Task, UniformListScrollHandle,
     Window, deferred, div, prelude::*, px,
 };
+use optionmusic::cava::CavaBridge;
 use optionmusic::config::{ArtistSource, ReplayGainMode};
 use optionmusic::controller::{CoreController, PlaybackState, SmartShelf, TrackDto};
 use optionmusic::eq::EqPreset;
@@ -112,6 +113,15 @@ pub(crate) struct RootView {
     /// Library filesystem watcher — present unless init failed.
     pub(crate) _watcher: Option<LibraryWatcher>,
     pub(crate) _watch_scan_task: Option<Task<()>>,
+    /// Spectrum strip above the player bar (persisted in desktop prefs).
+    pub(crate) visualizer: bool,
+    /// Live cava bridge — `None` while disabled or when cava is unavailable.
+    pub(crate) viz_bridge: Option<CavaBridge>,
+    /// Latest spectrum frame rendered by `visualizer_strip`.
+    pub(crate) viz_levels: Vec<f32>,
+    /// Set while cava's input methods are being probed off-thread.
+    pub(crate) viz_starting: bool,
+    pub(crate) _viz_task: Option<Task<()>>,
 }
 
 impl RootView {
@@ -213,6 +223,11 @@ impl RootView {
             now_playing: NowPlaying::new(),
             _watcher: None,
             _watch_scan_task: None,
+            visualizer: false,
+            viz_bridge: None,
+            viz_levels: Vec::new(),
+            viz_starting: false,
+            _viz_task: None,
         };
         view.start_scan(cx);
         view
@@ -338,11 +353,12 @@ impl RootView {
 
     pub(crate) fn start_poll(&mut self, cx: &mut Context<Self>) {
         self._poll_task = Some(cx.spawn(async move |this, cx| {
+            // Interval is chosen per tick: ~30fps while a live cava bridge
+            // animates the spectrum strip, 200ms otherwise — same ticker.
+            let mut interval = Duration::from_millis(200);
             loop {
-                cx.background_executor()
-                    .timer(Duration::from_millis(200))
-                    .await;
-                this.update(cx, |view, cx| {
+                cx.background_executor().timer(interval).await;
+                let Ok(next) = this.update(cx, |view, cx| {
                     let changed = view
                         .controller
                         .as_mut()
@@ -361,8 +377,14 @@ impl RootView {
                     }
                     view.sync_presence(cx);
                     view.sync_now_playing(cx);
-                })
-                .ok();
+                    if view.viz_sync_frame() {
+                        cx.notify();
+                    }
+                    view.viz_tick_interval()
+                }) else {
+                    break;
+                };
+                interval = next;
             }
         }));
     }
@@ -1990,6 +2012,10 @@ impl RootView {
             Some("lyrics") => Some(StagePanel::Lyrics),
             _ => None,
         };
+        self.visualizer = prefs.visualizer;
+        if self.visualizer {
+            self.start_viz(cx);
+        }
         cx.notify();
     }
 
@@ -2005,6 +2031,7 @@ impl RootView {
                 StagePanel::Queue => "queue".into(),
                 StagePanel::Lyrics => "lyrics".into(),
             }),
+            visualizer: self.visualizer,
         };
         self._prefs_task = Some(cx.spawn(async move |this, cx| {
             cx.background_executor()
@@ -2712,6 +2739,7 @@ impl Render for RootView {
             .on_action(cx.listener(Self::queue_item_down))
             .on_action(cx.listener(Self::queue_jump))
             .on_action(cx.listener(Self::clear_queue))
+            .on_action(cx.listener(Self::toggle_visualizer))
             .on_drag_move::<ExternalPaths>(cx.listener(
                 |this: &mut RootView,
                  _event: &gpui::DragMoveEvent<ExternalPaths>,
@@ -2769,6 +2797,9 @@ impl Render for RootView {
                                         this.child(self.stage(tokens, stage_h, cx))
                                     }),
                             )
+                            .when(self.visualizer, |this| {
+                                this.child(self.visualizer_strip(tokens))
+                            })
                             .child(self.player_bar(tokens, cx)),
                     ),
             )

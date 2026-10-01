@@ -65,7 +65,8 @@ actions!(
         QueueItemUp,
         QueueItemDown,
         QueueJump,
-        ClearQueue
+        ClearQueue,
+        ToggleVisualizer
     ]
 );
 
@@ -232,6 +233,7 @@ fn main() {
             KeyBinding::new("ctrl-c", search_input::InputCopy, Some("TextInput")),
             #[cfg(not(target_os = "macos"))]
             KeyBinding::new("ctrl-x", search_input::InputCut, Some("TextInput")),
+            KeyBinding::new("v", ToggleVisualizer, Some("!TextInput")),
         ]);
         cx.set_menus([Menu::new("optionMusic").items([
             MenuItem::action("New Window", NewWindow),
