@@ -20,7 +20,7 @@ jobs:
       - name: Install MPV development files
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends libmpv-dev pkg-config
+          sudo apt-get install -y --no-install-recommends libmpv-dev libsqlite3-dev pkg-config
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
@@ -38,7 +38,7 @@ jobs:
       - name: Install MPV development files
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends libmpv-dev pkg-config
+          sudo apt-get install -y --no-install-recommends libmpv-dev libsqlite3-dev pkg-config
       - name: Read MSRV from Cargo.toml
         id: msrv
         run: echo "version=$(sed -n 's/^rust-version *= *"\(.*\)"/\1/p' Cargo.toml)" >>"$GITHUB_OUTPUT"

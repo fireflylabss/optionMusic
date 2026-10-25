@@ -6,70 +6,94 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Tag to publish (e.g. v0.2.5). Empty = latest release tag."
-        required: false
-        default: ""
+        description: "Published release tag (e.g. v0.3.0-beta)"
+        type: string
+        required: true
+  workflow_call:
+    inputs:
+      tag:
+        type: string
+        required: true
+    secrets:
+      AUR_SSH_PRIVATE_KEY:
+        required: true
 
 permissions:
-  contents: write
+  contents: read
+
+concurrency:
+  group: aur-publish
+  cancel-in-progress: false
 
 jobs:
   aur:
-    name: Update AUR package
+    name: Update stillmusic and stillmusic-bin
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v7
-        with:
-          ref: master
-          fetch-depth: 0
-          token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Resolve version tag
-        id: ver
+      - name: Resolve exact release tag
+        id: release
         env:
-          INPUT_TAG: ${{ inputs.tag }}
-          RELEASE_TAG: ${{ github.event.release.tag_name }}
-          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag || github.event.release.tag_name }}
         run: |
           set -euo pipefail
-          TAG="${INPUT_TAG:-}"
-          if [[ -z "$TAG" ]]; then
-            TAG="${RELEASE_TAG:-}"
-          fi
-          if [[ -z "$TAG" ]]; then
-            TAG="$(gh release view --json tagName -q .tagName)"
-          fi
-          if [[ -z "$TAG" ]]; then
-            echo "No tag to publish" >&2
-            exit 1
-          fi
-          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
-
-      - name: Bump PKGBUILD + .SRCINFO
+          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-(alpha|beta|stable)$ ]]
+          echo "tag=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+      - name: Check new package recipes are available
+        id: recipes
         run: |
-          chmod +x packaging/aur/bump.sh
-          ./packaging/aur/bump.sh "${{ steps.ver.outputs.tag }}"
-
-      - name: Commit packaging bump on master
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add packaging/aur/PKGBUILD packaging/aur/.SRCINFO
-          if git diff --cached --quiet; then
-            echo "packaging already up to date"
+          if [[ -f packaging/aur/stillmusic/PKGBUILD && -f packaging/aur/stillmusic-bin/PKGBUILD ]]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
           else
-            git commit -m "chore(aur): bump to ${{ steps.ver.outputs.version }}"
-            git push origin HEAD:master
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "New package recipes are not on the default branch yet; publish manually once committed."
           fi
-
-      - name: Publish to AUR
+      - name: Verify published release and checksum
+        if: steps.recipes.outputs.ready == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+        run: |
+          set -euo pipefail
+          [[ "$(gh release view "$RELEASE_TAG" --json isDraft --jq .isDraft)" == false ]]
+          archive="stillmusic-${RELEASE_TAG}-x86_64-unknown-linux-gnu.tar.gz"
+          gh release download "$RELEASE_TAG" --pattern "$archive" --pattern SHA256SUMS --dir "$RUNNER_TEMP/release"
+          cd "$RUNNER_TEMP/release"
+          [[ "$(wc -l < SHA256SUMS)" -eq 1 ]]
+          [[ "$(awk '{print $2}' SHA256SUMS)" == "$archive" ]]
+          sha256sum --check SHA256SUMS
+      - name: Update both package recipes and generated metadata
+        if: steps.recipes.outputs.ready == 'true'
+        env:
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+        run: |
+          docker run --rm -v "$GITHUB_WORKSPACE:/work" -w /work \
+            -e RELEASE_TAG -e BUILD_UID="$(id -u)" -e BUILD_GID="$(id -g)" \
+            archlinux:base-devel bash -euc '
+              pacman -Syu --noconfirm --needed curl git python
+              groupadd -g "$BUILD_GID" builder
+              useradd -m -u "$BUILD_UID" -g "$BUILD_GID" builder
+              runuser -u builder -- bash packaging/aur/bump.sh "$RELEASE_TAG"
+            '
+      - name: Publish stillmusic source package
+        if: steps.recipes.outputs.ready == 'true'
         uses: KSXGitHub/github-actions-deploy-aur@v4.2.0
         with:
-          pkgname: optionmusic
-          pkgbuild: ./packaging/aur/PKGBUILD
+          pkgname: stillmusic
+          asset_dir: ./packaging/aur/stillmusic
           commit_username: horizzon3507
           commit_email: horizzon3507@users.noreply.github.com
           ssh_private_key: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
-          commit_message: Update to ${{ steps.ver.outputs.version }}
+          commit_message: Update to ${{ steps.release.outputs.tag }}
+      - name: Publish stillmusic-bin binary package
+        if: steps.recipes.outputs.ready == 'true'
+        uses: KSXGitHub/github-actions-deploy-aur@v4.2.0
+        with:
+          pkgname: stillmusic-bin
+          asset_dir: ./packaging/aur/stillmusic-bin
+          commit_username: horizzon3507
+          commit_email: horizzon3507@users.noreply.github.com
+          ssh_private_key: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+          commit_message: Update to ${{ steps.release.outputs.tag }}
