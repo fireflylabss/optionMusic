@@ -47,6 +47,20 @@ pub enum CliEq {
     Rock,
     Vocal,
     Lofi,
+    /// Reduce bass and low-mid buildup
+    Acoustic,
+    /// Gentle low-mid and treble reduction
+    Jazz,
+    /// Subtle bass and upper-mid reduction
+    Classical,
+    /// Scoop mids to emphasize bass and highs
+    Electronic,
+    /// Reduce muddy low mids
+    Pop,
+    /// Reduce low rumble and high hiss
+    Speech,
+    /// Soften bright treble
+    Warm,
 }
 
 impl CliEq {
@@ -59,6 +73,13 @@ impl CliEq {
             Self::Rock => EqPreset::Rock,
             Self::Vocal => EqPreset::Vocal,
             Self::Lofi => EqPreset::Lofi,
+            Self::Acoustic => EqPreset::Acoustic,
+            Self::Jazz => EqPreset::Jazz,
+            Self::Classical => EqPreset::Classical,
+            Self::Electronic => EqPreset::Electronic,
+            Self::Pop => EqPreset::Pop,
+            Self::Speech => EqPreset::Speech,
+            Self::Warm => EqPreset::Warm,
         }
     }
 }
@@ -92,16 +113,24 @@ impl CliEq {
   msc sleep 30            arm the sleep timer (off to clear)\n\
   msc radio               endless queue built from your library\n\
   msc radio \"artist\"      seed by search · --artist · --genre · --fresh\n\
+  msc radio save NAME     save the seed as a station (query/artist/genre/fresh)\n\
+  msc radio load NAME     play a saved station (ls lists, rm deletes)\n\
+  msc radio --dislike TRACK-ID\n\
+                          count a skip+dislike for TRACK-ID and rebuild the mix\n\
   msc doctor              check yt-dlp / ffmpeg / cava on PATH\n\
 \n\
 Playback keys (press ? / h in the player for the full sidebar):\n\
-  space        pause / resume          n / p        next / previous\n\
+  space        pause / resume          n / p        next (skip) / previous\n\
+  d            dislike track + skip    (radio: penalizes track+artist 7 days)\n\
   ← →          seek ±5s                { }          seek ±60s\n\
   + / −        volume                  m            mute\n\
   e            cycle EQ                [ ]          speed\n\
   , / .        pitch                   0            reset speed/pitch\n\
   o            cycle repeat (off→all→one)\n\
   l            playlist sidebar        r            shuffle one-shot\n\
+  J / K        move track in list      a / A        play next / append end\n\
+  D            clear (keep current)    u / Ctrl+Z   undo queue edit\n\
+  g            jump to current track\n\
   x            smart shuffle           y            lyrics panel\n\
   z            sleep timer             f            filename line\n\
   v            cava on/off             c            settings sidebar\n\
@@ -315,6 +344,12 @@ pub enum Command {
         action: LibraryCmd,
     },
 
+    /// Manage local lyrics and search LRCLIB online
+    Lyrics {
+        #[command(subcommand)]
+        command: crate::lyrics_manager::LyricsCommand,
+    },
+
     /// Browse the library and play from a tree (artists → albums → tracks)
     #[command(visible_alias = "br")]
     Browse {
@@ -338,9 +373,19 @@ pub enum Command {
         arg: Option<String>,
     },
 
-    /// Radio: endless queue generated from your library by similarity
+    /// Radio: endless queue generated from your library by similarity.
+    ///
+    /// Station verbs (run `msc radio --help` for examples):
+    /// `save NAME` stores the seed flags as a station, `load NAME` plays
+    /// one back, `ls` lists stations, `rm NAME` deletes one. `d` (dislike)
+    /// and `n` (skip) in the player count as negative feedback: the track
+    /// and its artist are penalized in the similarity walk for 7 days.
     #[command(visible_aliases = ["rd", "mix"])]
     Radio {
+        /// Radio station action: save the seed, load one back, list, delete.
+        #[command(subcommand)]
+        action: Option<RadioCmd>,
+
         /// Seed search (matches title / artist / album / genre)
         #[arg(value_name = "QUERY")]
         seed: Option<String>,
@@ -356,6 +401,17 @@ pub enum Command {
         /// Prefer rarely/never-played tracks (rediscovery mode)
         #[arg(long)]
         fresh: bool,
+
+        /// Non-interactive negative feedback: count a skip + dislike for
+        /// TRACK-ID (absolute path, as in `msc library paths`), then build
+        /// the mix. The track and its artist are penalized for 7 days.
+        #[arg(long, value_name = "TRACK-ID")]
+        dislike: Option<String>,
+
+        /// Non-interactive negative feedback: count a skip for TRACK-ID
+        /// (absolute path), then build the mix. Penalized for 7 days.
+        #[arg(long, value_name = "TRACK-ID")]
+        skip: Option<String>,
 
         /// Volume 0–100 (default: last used, else 80)
         #[arg(
@@ -391,9 +447,16 @@ pub enum Command {
         loop_file: bool,
     },
 
-    /// Check external tools (yt-dlp, ffmpeg, cava) on PATH
+    /// Check environment: libmpv, audio backend, tools, dirs, config, data
     #[command(visible_aliases = ["doc", "check"])]
     Doctor,
+
+    /// Backup / restore config, playlists, stats, history and the library index
+    #[command(visible_alias = "backup")]
+    Sync {
+        #[command(subcommand)]
+        action: SyncCmd,
+    },
 
     /// Print version
     #[command(visible_alias = "ver")]
@@ -449,11 +512,110 @@ pub enum LibraryCmd {
     /// Print only absolute paths (for scripts / xargs)
     #[command(visible_aliases = ["p"])]
     Paths,
+    /// List configured library folders (music_dirs + default)
+    #[command(visible_aliases = ["dirs", "folders"])]
+    Roots,
+}
+
+/// `msc radio` station management: named seeds stored as one TOML each in
+/// `~/.option/music/stations/`. Persistent flags per station: the positional
+/// query plus `--artist` / `--genre` / `--fresh`.
+#[derive(Debug, Subcommand)]
+pub enum RadioCmd {
+    /// Save the current seed flags as a station.
+    /// Example: `msc radio save morning "daft punk" --fresh`
+    Save {
+        /// Station name
+        name: String,
+        /// Seed search (matches title / artist / album / genre)
+        #[arg(value_name = "QUERY")]
+        query: Option<String>,
+        /// Seed the radio from an artist
+        #[arg(long, value_name = "NAME")]
+        artist: Option<String>,
+        /// Seed the radio from a genre tag
+        #[arg(long, value_name = "GENRE")]
+        genre: Option<String>,
+        /// Prefer rarely/never-played tracks (rediscovery mode)
+        #[arg(long)]
+        fresh: bool,
+    },
+    /// Play a saved station. Extra seed flags override the stored ones.
+    /// Example: `msc radio load morning --fresh`
+    #[command(visible_alias = "play")]
+    Load {
+        /// Station name
+        name: String,
+        /// Seed search override (default: the stored query)
+        #[arg(value_name = "QUERY")]
+        query: Option<String>,
+        /// Seed artist override (default: the stored artist)
+        #[arg(long, value_name = "NAME")]
+        artist: Option<String>,
+        /// Seed genre override (default: the stored genre)
+        #[arg(long, value_name = "GENRE")]
+        genre: Option<String>,
+        /// Rediscovery mode (on when given or stored)
+        #[arg(long)]
+        fresh: bool,
+    },
+    /// List saved stations (`NAME  seed description`)
+    #[command(visible_aliases = ["l"])]
+    Ls,
+    /// Delete a saved station
+    #[command(visible_aliases = ["del", "delete"])]
+    Rm {
+        /// Station name
+        name: String,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum SyncCmd {
+    /// Write a .tar.gz backup (config, playlists, stats, stations, history, index)
+    Export {
+        /// Output archive path (must end in .tar.gz)
+        archive: PathBuf,
+        /// Overwrite the archive when it already exists
+        #[arg(long = "force")]
+        force: bool,
+    },
+    /// Restore a .tar.gz backup
+    Import {
+        /// Backup archive path
+        archive: PathBuf,
+        /// Overwrite existing data files
+        #[arg(long = "force")]
+        force: bool,
+    },
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn every_eq_preset_parses_for_play_and_radio() {
+        for value in CliEq::value_variants() {
+            let name = value.to_possible_value().unwrap();
+            for subcommand in ["play", "radio"] {
+                let parsed =
+                    Cli::try_parse_from(["msc", subcommand, "--eq", name.get_name()]).unwrap();
+                let actual = match parsed.command {
+                    Some(Command::Play { eq, .. }) | Some(Command::Radio { eq, .. }) => {
+                        eq.unwrap().to_preset()
+                    }
+                    other => panic!("unexpected command: {other:?}"),
+                };
+                assert_eq!(actual, value.to_preset());
+            }
+        }
+        assert_eq!(
+            CliEq::value_variants().len(),
+            crate::eq::EqPreset::ALL.len()
+        );
+        assert!(Cli::try_parse_from(["msc", "play", "--eq", "unknown"]).is_err());
+    }
     use clap::Parser;
 
     #[test]
@@ -725,6 +887,56 @@ mod tests {
     }
 
     #[test]
+    fn parses_radio_station_save_load() {
+        match Cli::parse_from(["msc", "radio", "save", "morning", "--artist", "X"]).command {
+            Some(Command::Radio { action, .. }) => match action {
+                Some(RadioCmd::Save { name, artist, .. }) => {
+                    assert_eq!(name, "morning");
+                    assert_eq!(artist.as_deref(), Some("X"));
+                }
+                other => panic!("expected radio save, got {other:?}"),
+            },
+            _ => panic!("expected radio save"),
+        }
+        match Cli::parse_from(["msc", "radio", "load", "morning"]).command {
+            Some(Command::Radio { action, .. }) => match action {
+                Some(RadioCmd::Load { name, .. }) => assert_eq!(name, "morning"),
+                other => panic!("expected radio load, got {other:?}"),
+            },
+            _ => panic!("expected radio load"),
+        }
+        match Cli::parse_from(["msc", "radio", "ls"]).command {
+            Some(Command::Radio { action, .. }) => {
+                assert!(matches!(action, Some(RadioCmd::Ls)));
+            }
+            _ => panic!("expected radio ls"),
+        }
+        match Cli::parse_from(["msc", "radio", "rm", "morning"]).command {
+            Some(Command::Radio { action, .. }) => match action {
+                Some(RadioCmd::Rm { name }) => assert_eq!(name, "morning"),
+                other => panic!("expected radio rm, got {other:?}"),
+            },
+            _ => panic!("expected radio rm"),
+        }
+    }
+
+    #[test]
+    fn parses_radio_feedback_flags() {
+        match Cli::parse_from(["msc", "radio", "--dislike", "/m/a.mp3"]).command {
+            Some(Command::Radio { dislike, .. }) => {
+                assert_eq!(dislike.as_deref(), Some("/m/a.mp3"));
+            }
+            _ => panic!("expected radio --dislike"),
+        }
+        match Cli::parse_from(["msc", "radio", "--skip", "/m/a.mp3"]).command {
+            Some(Command::Radio { skip, .. }) => {
+                assert_eq!(skip.as_deref(), Some("/m/a.mp3"));
+            }
+            _ => panic!("expected radio --skip"),
+        }
+    }
+
+    #[test]
     fn subcommand_names_cover_every_command_and_alias() {
         for word in ["play", "p", "doctor", "doc", "check", "radio", "rd", "help"] {
             assert!(is_subcommand(word), "{word} should be a subcommand");
@@ -744,5 +956,36 @@ mod tests {
             Cli::parse_from(["msc", "check"]).command,
             Some(Command::Doctor)
         ));
+    }
+
+    #[test]
+    fn parses_sync_export_import() {
+        match Cli::parse_from(["msc", "sync", "export", "b.tar.gz"]).command {
+            Some(Command::Sync { action }) => match action {
+                SyncCmd::Export { archive, force } => {
+                    assert_eq!(archive, PathBuf::from("b.tar.gz"));
+                    assert!(!force);
+                }
+                SyncCmd::Import { .. } => panic!("expected export"),
+            },
+            _ => panic!("expected sync export"),
+        }
+        match Cli::parse_from(["msc", "sync", "export", "b.tar.gz", "--force"]).command {
+            Some(Command::Sync { action }) => match action {
+                SyncCmd::Export { force, .. } => assert!(force),
+                SyncCmd::Import { .. } => panic!("expected export"),
+            },
+            _ => panic!("expected sync export --force"),
+        }
+        match Cli::parse_from(["msc", "backup", "import", "b.tar.gz", "--force"]).command {
+            Some(Command::Sync { action }) => match action {
+                SyncCmd::Import { archive, force } => {
+                    assert_eq!(archive, PathBuf::from("b.tar.gz"));
+                    assert!(force);
+                }
+                SyncCmd::Export { .. } => panic!("expected import"),
+            },
+            _ => panic!("expected backup import"),
+        }
     }
 }

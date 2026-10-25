@@ -1,9 +1,9 @@
-//! Session control shared by every playback surface.
+//! Session control shared by the TUI and tests.
 //!
-//! The TUI loop in `main.rs` used to own all of this; it lives here so the
-//! desktop shell (and tests) drive tracks, stats, persistence and key
-//! bindings through exactly the same code instead of re-deriving the
-//! semantics (3s previous-track grace, once-per-track stats, resume fields).
+//! The TUI loop in `main.rs` used to own all of this; it lives here so both
+//! drive tracks, stats, persistence and key bindings through exactly the same
+//! code instead of re-deriving the semantics (3s previous-track grace,
+//! once-per-track stats, resume fields).
 
 use std::time::Duration;
 
@@ -11,9 +11,9 @@ use anyhow::Result;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MediaKeyCode};
 
 use crate::config::RepeatMode;
-use crate::lyrics::{LyricsLoader, LyricsQuery};
+use crate::lyrics::LyricsQuery;
 use crate::player::Player;
-use crate::playlist::{Playlist, Track};
+use crate::playlist::{Playlist, QueueUndo, Track};
 use crate::smart_shuffle::RecentWindow;
 use crate::stats::{StatsStore, should_count_play};
 use crate::ui::SessionUi;
@@ -92,6 +92,62 @@ pub fn maybe_count_stats(
             &artist,
             max_pos.as_secs(),
         );
+        if let Some(sent) =
+            crate::scrobble::notify_listen(&artist, &track.display_name(), track.album.as_deref())
+        {
+            store.record_scrobble(sent);
+        }
+        *counted = true;
+    }
+}
+
+/// Radio 2.0 negative feedback for the outgoing track.
+///
+/// `disliked` (`d` key or `--dislike` flag) always implies a skip: the track
+/// gets `record_feedback` (7-day similarity penalty for the track + artist)
+/// and a `disliked` history line. A plain early exit (`n` / next before the
+/// counting threshold) records a `skipped` history line + feedback without
+/// the extra dislike weight. A track that passed the counting threshold (or
+/// played to the end) records a `played` history line instead. History and
+/// stats writes are best-effort — a full disk must never break playback.
+pub fn record_track_outcome(
+    store: &mut StatsStore,
+    track: &Track,
+    max_pos: Duration,
+    dur: Option<Duration>,
+    counted: &mut bool,
+    disliked: bool,
+) {
+    let id = track.path.to_string_lossy().into_owned();
+    if id.is_empty() {
+        return;
+    }
+    let artist = track.artist.clone().unwrap_or_default();
+    if disliked {
+        // Dislike skips the play count on purpose: the track was rejected.
+        store.record_feedback(&id, &track.display_name(), &artist, true);
+        let _ = crate::history::record_dislike(&id);
+        *counted = true;
+        return;
+    }
+    if should_count_play(max_pos.as_secs_f64(), dur.map(|d| d.as_secs_f64())) {
+        if !*counted {
+            store.record_play(&id, &track.display_name(), &artist, max_pos.as_secs());
+            if let Some(sent) = crate::scrobble::notify_listen(
+                &artist,
+                &track.display_name(),
+                track.album.as_deref(),
+            ) {
+                store.record_scrobble(sent);
+            }
+            *counted = true;
+        }
+        let _ = crate::history::record_play(&id);
+    } else {
+        // Early exit before the threshold: a skip, not a completed listen.
+        // The play is not counted; the track is still penalized for 7 days.
+        store.record_feedback(&id, &track.display_name(), &artist, false);
+        let _ = crate::history::record_skip(&id);
         *counted = true;
     }
 }
@@ -122,6 +178,12 @@ pub fn advance_index(
 
 /// Advance to the next track (counts stats for the old one, resets per-track
 /// state). Returns `false` when the playlist ended.
+///
+/// `radio_mode` selects Radio 2.0 outcome accounting: an early exit via `n`
+/// records a `skipped` history line + negative feedback (7-day walk penalty)
+/// instead of silently dropping the event; completed listens record `played`.
+/// `disliked` forces the dislike path (skip + double penalty). Non-radio
+/// sessions keep the legacy behaviour (count-or-nothing).
 #[allow(clippy::too_many_arguments)]
 pub fn go_next(
     player: &mut Player,
@@ -135,16 +197,61 @@ pub fn go_next(
     stats_max_pos: &mut Duration,
     stats_dur: &mut Option<Duration>,
     stats_counted: &mut bool,
-    lyrics: &mut LyricsLoader,
+) -> Result<bool> {
+    go_next_radio(
+        player,
+        playlist,
+        ui,
+        index,
+        loop_mode,
+        smart,
+        recent,
+        stats_store,
+        stats_max_pos,
+        stats_dur,
+        stats_counted,
+        false,
+        false,
+    )
+}
+
+/// [`go_next`] with Radio 2.0 outcome flags. New function (instead of a new
+/// parameter on `go_next`) so existing callers keep their current shape.
+#[allow(clippy::too_many_arguments)]
+pub fn go_next_radio(
+    player: &mut Player,
+    playlist: &Playlist,
+    ui: &mut SessionUi,
+    index: &mut usize,
+    loop_mode: LoopMode,
+    smart: bool,
+    recent: &mut RecentWindow,
+    stats_store: &mut StatsStore,
+    stats_max_pos: &mut Duration,
+    stats_dur: &mut Option<Duration>,
+    stats_counted: &mut bool,
+    radio_mode: bool,
+    disliked: bool,
 ) -> Result<bool> {
     if let Some(track) = playlist.get(*index) {
-        maybe_count_stats(
-            stats_store,
-            track,
-            *stats_max_pos,
-            *stats_dur,
-            stats_counted,
-        );
+        if radio_mode {
+            record_track_outcome(
+                stats_store,
+                track,
+                *stats_max_pos,
+                *stats_dur,
+                stats_counted,
+                disliked,
+            );
+        } else {
+            maybe_count_stats(
+                stats_store,
+                track,
+                *stats_max_pos,
+                *stats_dur,
+                stats_counted,
+            );
+        }
     }
     let Some(next) = advance_index(
         playlist.len(),
@@ -161,12 +268,18 @@ pub fn go_next(
     *stats_max_pos = Duration::ZERO;
     *stats_dur = None;
     *stats_counted = false;
-    lyrics.clear();
     if let Some(t) = playlist.get(*index) {
         player.play_file(&t.path)?;
         ui.toast_track(t.display_name());
+        scrobble_now_playing(t);
     }
     Ok(true)
+}
+
+/// Fire ListenBrainz `playing_now` for a track (no-op without a token).
+fn scrobble_now_playing(track: &Track) {
+    let artist = track.artist.clone().unwrap_or_default();
+    crate::scrobble::notify_now_playing(&artist, &track.display_name(), track.album.as_deref());
 }
 
 /// Previous-track behaviour shared by `p` and MPRIS `Previous`: restart the
@@ -185,16 +298,164 @@ pub fn go_prev(
         if let Some(t) = playlist.get(*index) {
             player.play_file(&t.path)?;
             ui.toast_track(t.display_name());
+            scrobble_now_playing(t);
         }
     } else if player.is_idle() {
         if let Some(t) = playlist.get(*index) {
             player.play_file(&t.path)?;
             ui.toast_track(t.display_name());
+            scrobble_now_playing(t);
         }
     } else {
         let _ = player.seek(Duration::ZERO);
     }
     Ok(())
+}
+
+/// Editable-queue helpers shared by the TUI loop. All mutations snapshot
+/// into `undo` first so `u` / Ctrl+Z restores order + current + cursor.
+pub fn queue_snapshot(undo: &mut QueueUndo, playlist: &Playlist, index: usize, ui: &SessionUi) {
+    undo.push(playlist.tracks(), index, ui.list_cursor());
+}
+
+pub fn queue_undo(
+    undo: &mut QueueUndo,
+    playlist: &mut Playlist,
+    index: &mut usize,
+    recent: &mut RecentWindow,
+    ui: &mut SessionUi,
+) -> bool {
+    let Some((tracks, current, cursor)) = undo.pop() else {
+        return false;
+    };
+    playlist.replace_tracks(tracks);
+    *index = current.min(playlist.len().saturating_sub(1));
+    *recent = RecentWindow::new(playlist.len());
+    recent.push(*index);
+    ui.list_set_cursor(cursor);
+    true
+}
+
+pub fn queue_reorder_step(
+    playlist: &mut Playlist,
+    ui: &mut SessionUi,
+    index: &mut usize,
+    undo: &mut QueueUndo,
+    recent: &mut RecentWindow,
+    delta: i32,
+) -> bool {
+    let cursor = ui.list_cursor();
+    if cursor >= playlist.len() {
+        return false;
+    }
+    queue_snapshot(undo, playlist, *index, ui);
+    match playlist.reorder_step(cursor, delta, index) {
+        Some(next_cursor) => {
+            *recent = RecentWindow::new(playlist.len());
+            recent.push(*index);
+            ui.list_set_cursor(next_cursor);
+            true
+        }
+        None => {
+            let _ = undo.pop();
+            false
+        }
+    }
+}
+
+pub fn queue_play_next(
+    playlist: &mut Playlist,
+    ui: &mut SessionUi,
+    index: &mut usize,
+    undo: &mut QueueUndo,
+    recent: &mut RecentWindow,
+) -> bool {
+    let cursor = ui.list_cursor();
+    if cursor >= playlist.len() || *index >= playlist.len() {
+        return false;
+    }
+    queue_snapshot(undo, playlist, *index, ui);
+    match playlist.move_to_next(cursor, *index) {
+        Some((current, moved)) => {
+            *index = current;
+            *recent = RecentWindow::new(playlist.len());
+            recent.push(*index);
+            ui.list_set_cursor(moved);
+            true
+        }
+        None => {
+            let _ = undo.pop();
+            false
+        }
+    }
+}
+
+pub fn queue_append_end(
+    playlist: &mut Playlist,
+    ui: &mut SessionUi,
+    index: &mut usize,
+    undo: &mut QueueUndo,
+    recent: &mut RecentWindow,
+) -> bool {
+    let cursor = ui.list_cursor();
+    if cursor >= playlist.len() || *index >= playlist.len() {
+        return false;
+    }
+    queue_snapshot(undo, playlist, *index, ui);
+    match playlist.move_to_end(cursor, *index) {
+        Some((current, moved)) => {
+            *index = current;
+            *recent = RecentWindow::new(playlist.len());
+            recent.push(*index);
+            ui.list_set_cursor(moved);
+            true
+        }
+        None => {
+            let _ = undo.pop();
+            false
+        }
+    }
+}
+
+pub fn queue_clear(
+    playlist: &mut Playlist,
+    ui: &mut SessionUi,
+    index: &mut usize,
+    undo: &mut QueueUndo,
+    recent: &mut RecentWindow,
+) -> bool {
+    if *index >= playlist.len() {
+        return false;
+    }
+    queue_snapshot(undo, playlist, *index, ui);
+    if !playlist.clear_keep_current(*index) {
+        let _ = undo.pop();
+        return false;
+    }
+    *index = 0;
+    *recent = RecentWindow::new(playlist.len());
+    recent.push(0);
+    ui.list_set_cursor(0);
+    true
+}
+
+pub fn queue_shuffle(
+    playlist: &mut Playlist,
+    ui: &mut SessionUi,
+    index: &mut usize,
+    undo: &mut QueueUndo,
+    recent: &mut RecentWindow,
+) {
+    let current_path = playlist.get(*index).map(|t| t.path.clone());
+    queue_snapshot(undo, playlist, *index, ui);
+    playlist.shuffle();
+    if let Some(path) = current_path
+        && let Some(new_idx) = playlist.tracks().iter().position(|t| t.path == path)
+    {
+        *index = new_idx;
+    }
+    *recent = RecentWindow::new(playlist.len());
+    recent.push(*index);
 }
 
 /// Lyrics lookup context from track tags (filename title fallback).
@@ -243,6 +504,7 @@ pub enum Action {
     Quit,
     Next,
     Prev,
+    Dislike,
     List,
     Shuffle,
     Stop,
@@ -250,6 +512,7 @@ pub enum Action {
     Help,
     Settings,
     TogglePath,
+    Lyrics,
     Jump(usize),
     VolChanged(u8),
     Muted(bool),
@@ -260,9 +523,15 @@ pub enum Action {
     CavaToggle,
     LoopCycle,
     SmartShuffle,
-    LyricsToggle,
     SleepCycle,
     Seeked,
+    PlayNext,
+    AppendEnd,
+    ClearQueue,
+    Undo,
+    JumpToCurrent,
+    MoveUp,
+    MoveDown,
 }
 
 /// Keys the open playlist owns for cursor movement. Single clear owner:
@@ -275,8 +544,6 @@ pub fn list_nav_key(code: KeyCode) -> bool {
         code,
         KeyCode::Up
             | KeyCode::Down
-            | KeyCode::Left
-            | KeyCode::Right
             | KeyCode::PageUp
             | KeyCode::PageDown
             | KeyCode::Home
@@ -288,8 +555,21 @@ pub fn list_nav_key(code: KeyCode) -> bool {
 }
 
 pub fn handle_key(key: KeyEvent, player: &mut Player) -> Action {
-    if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('c') {
-        return Action::Quit;
+    if key.modifiers.contains(KeyModifiers::CONTROL) {
+        match key.code {
+            KeyCode::Char('c') => return Action::Quit,
+            KeyCode::Char('z') => return Action::Undo,
+            _ => {}
+        }
+    }
+    if key.modifiers.contains(KeyModifiers::SHIFT) {
+        match key.code {
+            KeyCode::Up => return Action::MoveUp,
+            KeyCode::Down => return Action::MoveDown,
+            KeyCode::Char('J') => return Action::MoveDown,
+            KeyCode::Char('K') => return Action::MoveUp,
+            _ => {}
+        }
     }
 
     match key.code {
@@ -365,11 +645,19 @@ pub fn handle_key(key: KeyEvent, player: &mut Player) -> Action {
         KeyCode::Char('r') => Action::Shuffle,
         KeyCode::Char('o') => Action::LoopCycle,
         KeyCode::Char('x') => Action::SmartShuffle,
-        KeyCode::Char('y') => Action::LyricsToggle,
         KeyCode::Char('z') => Action::SleepCycle,
         KeyCode::Char('f') => Action::TogglePath,
+        KeyCode::Char('y') => Action::Lyrics,
+        KeyCode::Char('J') => Action::MoveDown,
+        KeyCode::Char('K') => Action::MoveUp,
+        KeyCode::Char('a') => Action::PlayNext,
+        KeyCode::Char('A') => Action::AppendEnd,
+        KeyCode::Char('D') => Action::ClearQueue,
+        KeyCode::Char('d') => Action::Dislike,
+        KeyCode::Char('g') => Action::JumpToCurrent,
         KeyCode::Char('v') => Action::CavaToggle,
         KeyCode::Char('c') => Action::Settings,
+        KeyCode::Char('u') => Action::Undo,
         KeyCode::Char('q') | KeyCode::Esc => Action::Quit,
         KeyCode::Char('h') | KeyCode::Char('?') => Action::Help,
         KeyCode::Char(c) if c.is_ascii_digit() && c != '0' => {
@@ -418,5 +706,111 @@ mod tests {
         assert!(list_nav_key(KeyCode::Char('j')));
         assert!(!list_nav_key(KeyCode::Char('l')));
         assert!(!list_nav_key(KeyCode::Esc));
+    }
+
+    fn key(code: KeyCode) -> KeyEvent {
+        KeyEvent::new(code, KeyModifiers::empty())
+    }
+
+    fn shifted(code: KeyCode) -> KeyEvent {
+        KeyEvent::new(code, KeyModifiers::SHIFT)
+    }
+
+    fn ctrl(code: KeyCode) -> KeyEvent {
+        KeyEvent::new(code, KeyModifiers::CONTROL)
+    }
+
+    #[test]
+    fn existing_transport_keys_unchanged() {
+        let mut player = Player::new(80, 1.0, 0.0).expect("mpv");
+        assert!(matches!(
+            handle_key(key(KeyCode::Char('n')), &mut player),
+            Action::Next
+        ));
+        assert!(matches!(
+            handle_key(key(KeyCode::Char('p')), &mut player),
+            Action::Prev
+        ));
+        assert!(matches!(
+            handle_key(key(KeyCode::Char('l')), &mut player),
+            Action::List
+        ));
+        assert!(matches!(
+            handle_key(key(KeyCode::Char('o')), &mut player),
+            Action::LoopCycle
+        ));
+        assert!(matches!(
+            handle_key(key(KeyCode::Char('r')), &mut player),
+            Action::Shuffle
+        ));
+        assert!(matches!(
+            handle_key(key(KeyCode::Char('j')), &mut player),
+            Action::None
+        ));
+        assert!(matches!(
+            handle_key(key(KeyCode::Char('k')), &mut player),
+            Action::None
+        ));
+        assert!(matches!(
+            handle_key(key(KeyCode::Down), &mut player),
+            Action::Next
+        ));
+        assert!(matches!(
+            handle_key(key(KeyCode::Up), &mut player),
+            Action::Prev
+        ));
+        assert!(matches!(
+            handle_key(key(KeyCode::Char('y')), &mut player),
+            Action::Lyrics
+        ));
+    }
+
+    #[test]
+    fn queue_edit_keys() {
+        let mut player = Player::new(80, 1.0, 0.0).expect("mpv");
+        assert!(matches!(
+            handle_key(key(KeyCode::Char('J')), &mut player),
+            Action::MoveDown
+        ));
+        assert!(matches!(
+            handle_key(key(KeyCode::Char('K')), &mut player),
+            Action::MoveUp
+        ));
+        assert!(matches!(
+            handle_key(shifted(KeyCode::Up), &mut player),
+            Action::MoveUp
+        ));
+        assert!(matches!(
+            handle_key(shifted(KeyCode::Down), &mut player),
+            Action::MoveDown
+        ));
+        assert!(matches!(
+            handle_key(key(KeyCode::Char('a')), &mut player),
+            Action::PlayNext
+        ));
+        assert!(matches!(
+            handle_key(key(KeyCode::Char('A')), &mut player),
+            Action::AppendEnd
+        ));
+        assert!(matches!(
+            handle_key(key(KeyCode::Char('D')), &mut player),
+            Action::ClearQueue
+        ));
+        assert!(matches!(
+            handle_key(key(KeyCode::Char('g')), &mut player),
+            Action::JumpToCurrent
+        ));
+        assert!(matches!(
+            handle_key(key(KeyCode::Char('u')), &mut player),
+            Action::Undo
+        ));
+        assert!(matches!(
+            handle_key(ctrl(KeyCode::Char('z')), &mut player),
+            Action::Undo
+        ));
+        assert!(matches!(
+            handle_key(key(KeyCode::Char('z')), &mut player),
+            Action::SleepCycle
+        ));
     }
 }

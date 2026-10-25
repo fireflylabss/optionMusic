@@ -2,19 +2,22 @@
 //!
 //! Tree navigation: artists → albums → tracks, with genre/year filters,
 //! unified search, favorites, and an in-memory queue the player runs through.
-//! Nothing here touches the desktop; it reuses the shared [`crate::library::Library`].
+//! It reuses the shared [`crate::library::Library`].
 
 use std::io::{self, Write};
+use std::path::PathBuf;
+use std::sync::mpsc::{Receiver, channel};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 use crossterm::cursor::{Hide, MoveTo, Show};
 use crossterm::event::{self, Event, KeyCode, KeyEventKind};
-use crossterm::style::{Color, Print, ResetColor, SetBackgroundColor, SetForegroundColor};
+use crossterm::style::{Print, ResetColor, SetBackgroundColor, SetForegroundColor};
 use crossterm::terminal::{
     Clear, ClearType, EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
 };
 use crossterm::{execute, queue};
+use unicode_width::UnicodeWidthStr;
 
 use crate::config::AppConfig;
 use crate::library::{AlbumGroup, ArtistGroup, Library};
@@ -22,32 +25,10 @@ use crate::player::Player;
 use crate::rpc::Rpc;
 use crate::ui::fmt_time;
 
-// ── Palette (compact B&W, same family as the player) ─────────
-const BG_FOCUS: Color = Color::Rgb {
-    r: 215,
-    g: 215,
-    b: 215,
-};
-const FG_ON_FOCUS: Color = Color::Rgb {
-    r: 12,
-    g: 12,
-    b: 12,
-};
-const FG_TITLE: Color = Color::Rgb {
-    r: 235,
-    g: 235,
-    b: 235,
-};
-const FG_BODY: Color = Color::Rgb {
-    r: 180,
-    g: 180,
-    b: 180,
-};
-const FG_MUTED: Color = Color::Rgb {
-    r: 100,
-    g: 100,
-    b: 100,
-};
+// ── Palette (rice-aware; falls back to the classic B&W greys) ─────
+fn theme() -> crate::rice::UiTheme {
+    crate::rice::load().0
+}
 
 enum Level {
     Artists,
@@ -58,6 +39,17 @@ enum Level {
 /// Running browse session: owns the player so `enter` can start playback and
 /// the tree can keep reacting while music plays.
 pub fn run(library: Library, favorites_only: bool, enable_cava: bool) -> Result<()> {
+    run_with_roots(library, Vec::new(), favorites_only, enable_cava)
+}
+
+/// Browse with a live filesystem watcher: `roots` are observed and the
+/// tree refreshes incrementally when audio files change on disk.
+pub fn run_with_roots(
+    library: Library,
+    roots: Vec<PathBuf>,
+    favorites_only: bool,
+    enable_cava: bool,
+) -> Result<()> {
     // Saved playback prefs are the defaults here too (same as `play`).
     let prefs = AppConfig::load();
     let mut player = Player::new(prefs.volume, prefs.speed, 0.0).context("cannot open player")?;
@@ -68,7 +60,7 @@ pub fn run(library: Library, favorites_only: bool, enable_cava: bool) -> Result<
 
     let mut session = Session::new(library, favorites_only, player, enable_cava);
     session.enter()?;
-    session.run()
+    session.run_watched(if roots.is_empty() { None } else { Some(roots) })
 }
 
 struct Session {
@@ -377,14 +369,13 @@ impl Session {
     }
 
     fn visible_rows(&self) -> usize {
+        let top = if self.searching || self.msg.is_some() {
+            3
+        } else {
+            2
+        };
         crossterm::terminal::size()
-            .map(|(_, rows)| {
-                let rows = rows as usize;
-                if rows < 4 {
-                    return 10;
-                }
-                rows - 4
-            })
+            .map(|(_, rows)| (rows as usize).saturating_sub(top + 2))
             .unwrap_or(10)
     }
 
@@ -441,12 +432,54 @@ impl Session {
 
     // ── Event loop ────────────────────────────────────────────
 
-    fn run(&mut self) -> Result<()> {
+    /// Incremental refresh after a watcher event: new/removed files merge
+    /// into the tree, stale cursors clamp, queue indices rebuild by path.
+    fn refresh_from_disk(&mut self, roots: &[PathBuf]) {
+        let before = self.library.len();
+        let res = if roots.len() == 1 {
+            self.library.refresh()
+        } else {
+            self.library.refresh_roots(roots)
+        };
+        let Ok(delta) = res else { return };
+        if delta.added == 0 && delta.removed == 0 && delta.changed == 0 {
+            return;
+        }
+        self.cursor = 0;
+        self.scroll = 0;
+        self.queue.clear();
+        self.queue_cursor = None;
+        self.queue_sel = None;
+        self.set_msg(format!(
+            "library +{} -{} · {} tracks",
+            delta.added,
+            delta.removed,
+            self.library.len(),
+        ));
+        let _ = before;
+    }
+
+    fn run_watched(&mut self, roots: Option<Vec<PathBuf>>) -> Result<()> {
+        // Live watcher: filesystem changes refresh the tree incrementally.
+        let watch: Option<(Vec<PathBuf>, Receiver<()>)> = roots.map(|rts| {
+            let (tx, rx) = channel::<()>();
+            match crate::watch::spawn_watcher(rts.clone(), move || {
+                let _ = tx.send(());
+            }) {
+                Ok(_handle) => (rts, rx),
+                Err(_) => (rts, channel::<()>().1),
+            }
+        });
         let mut quit = false;
         let mut rpc = Rpc::new();
         let cfg = AppConfig::load();
         let _ = rpc.sync(cfg.discord_rpc, &cfg.discord_rpc_id);
         loop {
+            if let Some((rts, rx)) = watch.as_ref() {
+                while rx.try_recv().is_ok() {
+                    self.refresh_from_disk(rts);
+                }
+            }
             self.paint()?;
             self.auto_advance();
 
@@ -659,65 +692,71 @@ impl Session {
         items: &[String],
         def: Option<usize>,
     ) -> Result<Option<String>> {
+        if items.is_empty() {
+            return Ok(None);
+        }
         let mut cursor = def.unwrap_or(0).min(items.len().saturating_sub(1));
         loop {
             let mut out = io::stdout();
+            let (width, height) = crossterm::terminal::size().unwrap_or((80, 24));
+            let (width, height) = (width as usize, height as usize);
             queue!(out, Clear(ClearType::All), MoveTo(0, 0)).ok();
-            queue!(
-                out,
-                SetForegroundColor(FG_TITLE),
-                Print(format!("♪  {title}")),
-                ResetColor
-            )
-            .ok();
-            queue!(out, MoveTo(0, 1)).ok();
-            queue!(
-                out,
-                SetForegroundColor(FG_MUTED),
-                Print(format!("  {}", blurb.join(" · "))),
-                ResetColor
-            )
-            .ok();
-
-            let visible = (crossterm::terminal::size()
-                .map(|(_, r)| r as usize)
-                .unwrap_or(20))
-            .saturating_sub(3);
+            if height >= 4 {
+                queue!(
+                    out,
+                    SetForegroundColor(theme().cursor),
+                    Print(truncate(&format!("♪  {title}"), width)),
+                    ResetColor
+                )
+                .ok();
+                queue!(out, MoveTo(0, 1)).ok();
+                queue!(
+                    out,
+                    SetForegroundColor(theme().title),
+                    Print(truncate(&format!("  {}", blurb.join(" · ")), width)),
+                    ResetColor
+                )
+                .ok();
+            }
+            let top = if height >= 4 { 2 } else { 0 };
+            let visible = height.saturating_sub(top + usize::from(height > 1));
             let scroll = if cursor >= visible {
                 cursor + 1 - visible
             } else {
                 0
             };
             for (i, item) in items.iter().enumerate().skip(scroll).take(visible) {
-                queue!(out, MoveTo(0, 2 + (i - scroll) as u16)).ok();
+                queue!(out, MoveTo(0, (top + i - scroll) as u16)).ok();
                 if i == cursor {
                     let line = format!("  ▸ {}", item);
                     queue!(
                         out,
-                        SetBackgroundColor(BG_FOCUS),
-                        SetForegroundColor(FG_ON_FOCUS),
-                        Print(line),
+                        SetBackgroundColor(theme().focus_bg),
+                        SetForegroundColor(theme().focus_fg),
+                        Print(truncate(&line, width)),
                         ResetColor
                     )
                     .ok();
                 } else {
                     queue!(
                         out,
-                        SetForegroundColor(FG_BODY),
-                        Print(format!("    {item}")),
+                        SetForegroundColor(theme().body),
+                        Print(truncate(&format!("    {item}"), width)),
                         ResetColor
                     )
                     .ok();
                 }
             }
-            queue!(out, MoveTo(0, 2 + visible as u16)).ok();
-            queue!(
-                out,
-                SetForegroundColor(FG_MUTED),
-                Print("  ↑↓ move · enter select · esc cancel"),
-                ResetColor
-            )
-            .ok();
+            if height > 1 {
+                queue!(out, MoveTo(0, (height - 1) as u16)).ok();
+                queue!(
+                    out,
+                    SetForegroundColor(theme().title),
+                    Print(truncate("  ↑↓ move · enter select · esc cancel", width)),
+                    ResetColor
+                )
+                .ok();
+            }
             out.flush().ok();
 
             match read_key()? {
@@ -755,25 +794,43 @@ impl Session {
 
         let mut out = io::stdout();
         queue!(out, Clear(ClearType::All)).ok();
-        let width = crossterm::terminal::size()
-            .map(|(w, _)| {
-                let w = w as usize;
-                if w < 8 { 80 } else { w }
-            })
-            .unwrap_or(80);
+        let (width, height) = crossterm::terminal::size().unwrap_or((80, 24));
+        let (width, height) = (width as usize, height as usize);
+        if height < 6 {
+            if height > 0 {
+                let title = if self.searching {
+                    format!("search › {}█", self.search)
+                } else {
+                    rows.get(self.cursor)
+                        .map(|r| self.row_line(r, self.cursor))
+                        .unwrap_or_else(|| "library empty".into())
+                };
+                queue!(out, MoveTo(0, 0), Print(truncate(&title, width))).ok();
+            }
+            if height > 1 {
+                queue!(
+                    out,
+                    MoveTo(0, (height - 1) as u16),
+                    Print(truncate("enter play · / search · q quit", width))
+                )
+                .ok();
+            }
+            return out.flush().context("flush browse");
+        }
 
         // header
         queue!(
             out,
             MoveTo(0, 0),
-            SetForegroundColor(FG_TITLE),
-            Print("♪  browse".to_string()),
-            SetForegroundColor(FG_MUTED),
-            Print(format!(
-                "  ·  {} · {} track{}",
-                self.library.root().display(),
-                self.library.len(),
-                if self.library.len() == 1 { "" } else { "s" }
+            SetForegroundColor(theme().cursor),
+            Print(truncate(
+                &format!(
+                    "♪  browse  ·  {} · {} track{}",
+                    self.library.root().display(),
+                    self.library.len(),
+                    if self.library.len() == 1 { "" } else { "s" }
+                ),
+                width
             )),
             ResetColor
         )
@@ -801,8 +858,8 @@ impl Session {
         queue!(
             out,
             MoveTo(0, 1),
-            SetForegroundColor(FG_MUTED),
-            Print(format!("  {}", filter_line)),
+            SetForegroundColor(theme().title),
+            Print(truncate(&format!("  {}", filter_line), width)),
             ResetColor
         )
         .ok();
@@ -821,8 +878,8 @@ impl Session {
                 queue!(
                     out,
                     MoveTo(0, 2),
-                    SetForegroundColor(FG_TITLE),
-                    Print(format!("  {}", m)),
+                    SetForegroundColor(theme().cursor),
+                    Print(truncate(&format!("  {}", m), width)),
                     ResetColor
                 )
                 .ok();
@@ -835,9 +892,8 @@ impl Session {
             queue!(
                 out,
                 MoveTo(0, 2),
-                SetForegroundColor(FG_TITLE),
-                Print(format!("  search › {}", self.search)),
-                Print("█"),
+                SetForegroundColor(theme().cursor),
+                Print(truncate(&format!("  search › {}█", self.search), width)),
                 ResetColor
             )
             .ok();
@@ -847,15 +903,18 @@ impl Session {
         }
 
         // body rows
-        let visible = self.visible_rows();
+        let visible = height.saturating_sub(top + 2);
         if self.queue_view {
             let n = self.queue.len();
             if n == 0 {
                 queue!(
                     out,
                     MoveTo(0, top as u16),
-                    SetForegroundColor(FG_MUTED),
-                    Print("  queue empty — press `a` in the tree to add tracks"),
+                    SetForegroundColor(theme().title),
+                    Print(truncate(
+                        "  queue empty — press `a` in the tree to add tracks",
+                        width
+                    )),
                     ResetColor
                 )
                 .ok();
@@ -869,14 +928,20 @@ impl Session {
                         let padded = pad(&line, width);
                         queue!(
                             out,
-                            SetBackgroundColor(BG_FOCUS),
-                            SetForegroundColor(FG_ON_FOCUS),
+                            SetBackgroundColor(theme().focus_bg),
+                            SetForegroundColor(theme().focus_fg),
                             Print(padded),
                             ResetColor
                         )
                         .ok();
                     } else {
-                        queue!(out, SetForegroundColor(FG_BODY), Print(line), ResetColor).ok();
+                        queue!(
+                            out,
+                            SetForegroundColor(theme().body),
+                            Print(truncate(&line, width)),
+                            ResetColor
+                        )
+                        .ok();
                     }
                 }
             }
@@ -884,8 +949,8 @@ impl Session {
             queue!(
                 out,
                 MoveTo(0, top as u16),
-                SetForegroundColor(FG_MUTED),
-                Print("  nothing here"),
+                SetForegroundColor(theme().title),
+                Print(truncate("  nothing here", width)),
                 ResetColor
             )
             .ok();
@@ -897,14 +962,20 @@ impl Session {
                     let padded = pad(&line, width);
                     queue!(
                         out,
-                        SetBackgroundColor(BG_FOCUS),
-                        SetForegroundColor(FG_ON_FOCUS),
+                        SetBackgroundColor(theme().focus_bg),
+                        SetForegroundColor(theme().focus_fg),
                         Print(padded),
                         ResetColor
                     )
                     .ok();
                 } else {
-                    queue!(out, SetForegroundColor(FG_BODY), Print(line), ResetColor).ok();
+                    queue!(
+                        out,
+                        SetForegroundColor(theme().body),
+                        Print(truncate(&line, width)),
+                        ResetColor
+                    )
+                    .ok();
                 }
             }
         }
@@ -919,8 +990,8 @@ impl Session {
         queue!(
             out,
             MoveTo(0, foot_top),
-            SetForegroundColor(FG_MUTED),
-            Print(format!("  ▶ {}", truncate(&now, width.saturating_sub(2)))),
+            SetForegroundColor(theme().title),
+            Print(truncate(&format!("  ▶ {}", now), width)),
             ResetColor
         )
         .ok();
@@ -932,8 +1003,8 @@ impl Session {
         queue!(
             out,
             MoveTo(0, foot_top + 1),
-            SetForegroundColor(FG_MUTED),
-            Print(format!("  {}", truncate(hints, width.saturating_sub(2)))),
+            SetForegroundColor(theme().title),
+            Print(truncate(&format!("  {}", hints), width)),
             ResetColor
         )
         .ok();
@@ -1003,27 +1074,51 @@ fn read_key() -> Result<KeyCode> {
 }
 
 fn pad(s: &str, width: usize) -> String {
-    let len = s.chars().count();
-    if len >= width {
-        truncate(s, width)
-    } else {
-        format!("{}{}", s, " ".repeat(width - len))
-    }
+    let text = truncate(s, width);
+    let len = UnicodeWidthStr::width(text.as_str());
+    format!("{}{}", text, " ".repeat(width.saturating_sub(len)))
 }
 
 fn truncate(s: &str, max: usize) -> String {
+    let clean: String = s
+        .chars()
+        .map(|c| if c.is_control() { ' ' } else { c })
+        .collect();
+    if UnicodeWidthStr::width(clean.as_str()) <= max {
+        return clean;
+    }
     if max == 0 {
         return String::new();
     }
-    let count = s.chars().count();
-    if count <= max {
-        s.to_string()
-    } else if max <= 1 {
-        "…".into()
-    } else {
-        let take = max - 1;
-        let mut out: String = s.chars().take(take).collect();
-        out.push('…');
-        out
+    let mut result = String::new();
+    for c in clean.chars() {
+        result.push(c);
+        if UnicodeWidthStr::width(result.as_str()) + 1 > max {
+            result.pop();
+            break;
+        }
+    }
+    result.push('…');
+    result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn unicode_labels_fit_terminal_cells() {
+        for width in 0..40 {
+            for text in [
+                "日本語 title",
+                "e\u{301} cafe",
+                "☀\u{fe0f} music",
+                "line\nnext\x1b[2J",
+            ] {
+                assert!(UnicodeWidthStr::width(truncate(text, width).as_str()) <= width);
+                assert_eq!(UnicodeWidthStr::width(pad(text, width).as_str()), width);
+                assert!(!truncate(text, width).chars().any(char::is_control));
+            }
+        }
     }
 }

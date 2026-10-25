@@ -1,7 +1,7 @@
-//! Synced/plain lyrics: `.lrc` sidecar first, then the lrclib public API.
+//! Synced/plain lyrics: managed selection, local files, then online providers.
 //!
 //! Responses are cached under `~/.option/music/cache/lyrics/`. Everything is
-//! best-effort and English-only: failures yield `no lyrics found`.
+//! best-effort: playback failures yield `no lyrics found`; manager errors are explicit.
 
 use std::fs;
 use std::path::Path;
@@ -129,16 +129,23 @@ fn parse_timestamp(tag: &str) -> Option<Duration> {
         },
     };
     let secs: u64 = secs_str.trim().parse().ok()?;
-    let frac: f64 = if frac_str.trim().is_empty() {
-        0.0
-    } else {
-        let digits = frac_str.trim();
-        let scale = 10f64.powi(digits.len() as i32);
-        digits.parse::<f64>().ok()? / scale
-    };
-    Some(Duration::from_secs_f64(
-        mins as f64 * 60.0 + secs as f64 + frac,
-    ))
+    if secs >= 60 {
+        return None;
+    }
+    let digits = frac_str.trim();
+    if !digits.bytes().all(|byte| byte.is_ascii_digit()) {
+        return None;
+    }
+    let mut nanos = 0u32;
+    for index in 0..9 {
+        nanos = nanos * 10
+            + digits
+                .as_bytes()
+                .get(index)
+                .map_or(0, |byte| (byte - b'0') as u32);
+    }
+    let seconds = mins.checked_mul(60)?.checked_add(secs)?;
+    Some(Duration::new(seconds, nanos))
 }
 
 /// Split an LRC line body on inline `<time> word` tags (Enhanced-LRC).
@@ -269,7 +276,7 @@ pub fn word_progress_fraction(
     } else if let Some(ns) = next_start {
         ns
     } else {
-        word.time + Duration::from_secs_f64(2.0)
+        word.time.saturating_add(Duration::from_secs(2))
     };
     if end <= word.time {
         return 1.0;
@@ -354,7 +361,7 @@ pub fn active_line_index(lines: &[LrcLine], pos: Duration) -> Option<usize> {
     active
 }
 
-fn percent_encode(s: &str) -> String {
+pub(crate) fn percent_encode(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for b in s.bytes() {
         if b.is_ascii_alphanumeric() || b"-_.~".contains(&b) {
@@ -395,26 +402,84 @@ fn lrclib_url(artist: &str, title: &str, album: &str, duration: Option<f64>) -> 
     url
 }
 
-/// Fetch lrclib JSON over HTTPS. Returns the raw body.
-fn fetch_lrclib(artist: &str, title: &str, album: &str, duration: Option<f64>) -> Option<String> {
-    let url = lrclib_url(artist, title, album, duration);
+fn http_get(url: &str) -> Option<String> {
+    http_get_with(url, &[])
+}
+
+fn http_get_with(url: &str, headers: &[(&str, &str)]) -> Option<String> {
     let agent: ureq::Agent = ureq::Agent::config_builder()
-        .timeout_connect(Some(Duration::from_secs(4)))
-        .timeout_global(Some(Duration::from_secs(6)))
+        .timeout_connect(Some(Duration::from_secs(3)))
+        .timeout_global(Some(Duration::from_secs(5)))
         .user_agent(concat!("stillmusic/", env!("CARGO_PKG_VERSION")))
         .build()
         .into();
-    let body = agent
-        .get(&url)
-        .call()
-        .ok()?
-        .body_mut()
-        .read_to_string()
-        .ok()?;
+    let mut req = agent.get(url);
+    for (key, value) in headers {
+        req = req.header(*key, *value);
+    }
+    let body = req.call().ok()?.body_mut().read_to_string().ok()?;
     if body.trim().is_empty() || body.contains("\"statusCode\":404") {
         return None;
     }
     Some(body)
+}
+
+/// Fetch lrclib JSON over HTTPS. Exact `/api/get` first, then `/api/search`
+/// when the signature misses (different album tag, live vs studio length).
+fn fetch_lrclib(artist: &str, title: &str, album: &str, duration: Option<f64>) -> Option<String> {
+    let exact = http_get(&lrclib_url(artist, title, album, duration));
+    if exact
+        .as_deref()
+        .is_some_and(|body| !from_lrclib_body(body).is_empty())
+    {
+        return exact;
+    }
+    let q = format!("{} {}", artist.trim(), title.trim());
+    let url = format!(
+        "https://lrclib.net/api/search?q={}",
+        percent_encode(q.trim())
+    );
+    let body = http_get(&url)?;
+    pick_lrclib_search(&body, duration)
+}
+
+/// Choose one record from an lrclib search array. Prefer synced lyrics, then
+/// the duration closest to the file when we know it.
+fn pick_lrclib_search(body: &str, duration: Option<f64>) -> Option<String> {
+    let hits: Vec<serde_json::Value> = serde_json::from_str(body).ok()?;
+    let mut best: Option<(i32, &serde_json::Value)> = None;
+    for hit in &hits {
+        let synced = hit
+            .get("syncedLyrics")
+            .and_then(|s| s.as_str())
+            .unwrap_or("");
+        let plain = hit
+            .get("plainLyrics")
+            .and_then(|s| s.as_str())
+            .unwrap_or("");
+        if synced.trim().is_empty() && plain.trim().is_empty() {
+            continue;
+        }
+        let mut score = if synced.trim().is_empty() { 0 } else { 100 };
+        if let (Some(want), Some(got)) = (
+            duration.filter(|d| *d > 0.0),
+            hit.get("duration").and_then(|d| d.as_f64()),
+        ) {
+            let delta = (want - got).abs();
+            if delta <= 2.0 {
+                score += 40;
+            } else if delta <= 8.0 {
+                score += 15;
+            } else if delta > 30.0 {
+                score -= 30;
+            }
+        }
+        if best.as_ref().is_none_or(|(s, _)| score > *s) {
+            best = Some((score, hit));
+        }
+    }
+    let (_, hit) = best?;
+    serde_json::to_string(hit).ok()
 }
 
 fn split_plain(text: &str) -> Vec<String> {
@@ -425,7 +490,7 @@ fn split_plain(text: &str) -> Vec<String> {
         .collect()
 }
 
-fn from_lrclib_body(body: &str) -> ResolvedLyrics {
+pub(crate) fn from_lrclib_body(body: &str) -> ResolvedLyrics {
     let v: serde_json::Value = match serde_json::from_str(body) {
         Ok(v) => v,
         Err(_) => return ResolvedLyrics::empty(),
@@ -450,10 +515,11 @@ fn from_lrclib_body(body: &str) -> ResolvedLyrics {
     ResolvedLyrics::empty()
 }
 
-/// Resolve lyrics for a track: sidecar `.lrc` → cache → embedded → lrclib.
+/// Resolve lyrics for a track: sidecar `.lrc` → cache → embedded → online.
+/// Online order is lrclib, then NetEase, then lyrics.ovh.
 /// Sidecar `.txt` and embedded text surface as plain lines.
 ///
-/// Blocks on the network when only lrclib can answer; interactive callers
+/// Blocks on the network when only a provider can answer; interactive callers
 /// should use [`LyricsLoader`] instead.
 pub fn resolve_lyrics(
     path: &Path,
@@ -469,7 +535,7 @@ pub fn resolve_lyrics(
 }
 
 /// Lyrics reachable without network I/O: sidecar → cache → embedded tags.
-/// `None` means only lrclib can still answer.
+/// `None` means only an online provider can still answer.
 pub fn resolve_local(
     path: &Path,
     artist: &str,
@@ -477,9 +543,11 @@ pub fn resolve_local(
     album: &str,
     duration: Option<f64>,
 ) -> Option<ResolvedLyrics> {
+    if let Ok(Some(lyrics)) = read_managed(path) {
+        return Some(lyrics);
+    }
     // 1. Local `.lrc` sidecar next to the file.
-    let stem = path.with_extension("");
-    let sidecar = stem.with_extension("lrc");
+    let sidecar = path.with_extension("lrc");
     if let Ok(text) = fs::read_to_string(&sidecar) {
         let lines = parse_lrc(&text);
         if !lines.is_empty() {
@@ -498,12 +566,11 @@ pub fn resolve_local(
             });
         }
     }
-    // 2. Cached lrclib response.
+    // 2. Cached provider response (lrclib, netease, or ovh).
     let cached = cache_path(artist, title, album, duration);
     if let Ok(body) = fs::read_to_string(&cached) {
-        let mut r = from_lrclib_body(&body);
+        let r = from_stored_body(&body);
         if !r.is_empty() {
-            r.source = "cache".into();
             return Some(r);
         }
     }
@@ -527,32 +594,287 @@ pub fn resolve_local(
     None
 }
 
-fn cache_path(artist: &str, title: &str, album: &str, duration: Option<f64>) -> std::path::PathBuf {
+pub(crate) fn cache_path(
+    artist: &str,
+    title: &str,
+    album: &str,
+    duration: Option<f64>,
+) -> std::path::PathBuf {
     let key = cache_key(artist, title, album, duration);
     lyrics_cache_dir().join(format!("{key}.json"))
 }
 
-/// lrclib lookup (needs artist + title); caches the raw body on a hit.
+/// Managed selections survive cache cleanup and never modify the music file.
+pub fn managed_path(path: &Path) -> std::path::PathBuf {
+    managed_path_in(&config::config_dir().join("lyrics"), path)
+}
+
+fn managed_path_in(root: &Path, path: &Path) -> std::path::PathBuf {
+    let identity = fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    let key = stable_cache_key(&[
+        identity.as_os_str().as_encoded_bytes(),
+        b"lyrics-selection-v1",
+    ]);
+    root.join(format!("{key}.json"))
+}
+
+fn read_managed_file(path: &Path) -> anyhow::Result<Option<ResolvedLyrics>> {
+    use anyhow::Context;
+    let body = match fs::read_to_string(path) {
+        Ok(body) => body,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error).context("Cannot read saved lyrics"),
+    };
+    let document: serde_json::Value = serde_json::from_str(&body)
+        .context("Saved lyrics JSON is malformed; reimport or remove the selection")?;
+    anyhow::ensure!(
+        document.get("version").and_then(|v| v.as_u64()) == Some(1),
+        "Unsupported saved lyrics version"
+    );
+    let lyrics = from_stored_body(&body);
+    anyhow::ensure!(!lyrics.is_empty(), "Saved lyrics contain no usable text");
+    Ok(Some(lyrics))
+}
+
+pub fn read_managed(track: &Path) -> anyhow::Result<Option<ResolvedLyrics>> {
+    read_managed_file(&managed_path(track))
+}
+
+pub fn save_managed(track: &Path, lyrics: &ResolvedLyrics) -> anyhow::Result<()> {
+    save_managed_file(&managed_path(track), lyrics)
+}
+
+fn save_managed_file(path: &Path, lyrics: &ResolvedLyrics) -> anyhow::Result<()> {
+    anyhow::ensure!(!lyrics.is_empty(), "Cannot save empty lyrics");
+    let body = serde_json::json!({
+        "version": 1,
+        "source": lyrics.source,
+        "syncedLyrics": lrc_from_lines(&lyrics.lines),
+        "plainLyrics": lyrics.plain.join("\n"),
+    });
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    option_sdk::atomic_write(path, serde_json::to_vec_pretty(&body)?.as_slice())?;
+    Ok(())
+}
+
+/// Online lookup. Synced lyrics win: lrclib, then NetEase. lyrics.ovh is
+/// plain text and only used when neither synced source hits. A title is
+/// enough for lrclib and NetEase; ovh also needs an artist.
 pub fn fetch_remote(
     artist: &str,
     title: &str,
     album: &str,
     duration: Option<f64>,
 ) -> Option<ResolvedLyrics> {
-    if artist.trim().is_empty() || title.trim().is_empty() {
+    if title.trim().is_empty() {
         return None;
     }
-    let body = fetch_lrclib(artist, title, album, duration)?;
-    let r = from_lrclib_body(&body);
-    if r.is_empty() {
-        return None;
+    let mut plain: Option<ResolvedLyrics> = None;
+    if let Some(body) = fetch_lrclib(artist, title, album, duration) {
+        let got = from_lrclib_body(&body);
+        if !got.lines.is_empty() {
+            store_cache(&got, artist, title, album, duration);
+            return Some(got);
+        }
+        if !got.is_empty() {
+            plain = Some(got);
+        }
     }
+    if let Some(got) = fetch_netease(artist, title, duration) {
+        if !got.lines.is_empty() {
+            store_cache(&got, artist, title, album, duration);
+            return Some(got);
+        }
+        if plain.is_none() && !got.is_empty() {
+            plain = Some(got);
+        }
+    }
+    if plain.is_none() {
+        plain = fetch_ovh(artist, title);
+    }
+    plain.inspect(|got| {
+        store_cache(got, artist, title, album, duration);
+    })
+}
+
+fn store_cache(
+    lyrics: &ResolvedLyrics,
+    artist: &str,
+    title: &str,
+    album: &str,
+    duration: Option<f64>,
+) {
+    let body = serde_json::json!({
+        "source": lyrics.source,
+        "syncedLyrics": lrc_from_lines(&lyrics.lines),
+        "plainLyrics": lyrics.plain.join("\n"),
+    });
     let cached = cache_path(artist, title, album, duration);
     if let Some(dir) = cached.parent() {
         let _ = fs::create_dir_all(dir);
     }
-    let _ = option_sdk::atomic_write(&cached, body.as_bytes());
-    Some(r)
+    if let Ok(text) = serde_json::to_string(&body) {
+        let _ = option_sdk::atomic_write(&cached, text.as_bytes());
+    }
+}
+
+pub(crate) fn from_stored_body(body: &str) -> ResolvedLyrics {
+    let mut lyrics = from_lrclib_body(body);
+    if lyrics.is_empty() {
+        return lyrics;
+    }
+    if let Ok(v) = serde_json::from_str::<serde_json::Value>(body)
+        && let Some(source) = v.get("source").and_then(|s| s.as_str())
+        && !source.is_empty()
+        && source != "lrclib"
+    {
+        lyrics.source = source.to_string();
+    }
+    lyrics
+}
+
+pub(crate) fn lrc_from_lines(lines: &[LrcLine]) -> String {
+    let mut out = String::new();
+    for line in lines {
+        let stamp = lrc_stamp(line.time);
+        out.push('[');
+        out.push_str(&stamp);
+        out.push(']');
+        if line.words.is_empty() {
+            out.push(' ');
+            out.push_str(&line.text);
+        } else {
+            for word in &line.words {
+                out.push_str(" <");
+                out.push_str(&lrc_stamp(word.time));
+                out.push_str("> ");
+                out.push_str(&word.text);
+            }
+        }
+        out.push('\n');
+    }
+    out
+}
+
+fn lrc_stamp(time: Duration) -> String {
+    let ms = time.as_millis();
+    let minutes = ms / 60_000;
+    let seconds = (ms % 60_000) as f64 / 1000.0;
+    format!("{minutes:02}:{seconds:05.2}")
+}
+
+/// NetEase song id whose title and duration best match the file.
+fn pick_netease_id(body: &str, title: &str, duration: Option<f64>) -> Option<i64> {
+    let v: serde_json::Value = serde_json::from_str(body).ok()?;
+    let songs = v.pointer("/result/songs")?.as_array()?;
+    let mut best: Option<(i32, i64)> = None;
+    for song in songs {
+        let Some(id) = song.get("id").and_then(|id| id.as_i64()) else {
+            continue;
+        };
+        let name = song.get("name").and_then(|s| s.as_str()).unwrap_or("");
+        let mut score = if name.eq_ignore_ascii_case(title.trim()) {
+            50
+        } else if name.to_lowercase().contains(&title.trim().to_lowercase()) {
+            15
+        } else {
+            0
+        };
+        if let (Some(want), Some(got_ms)) = (
+            duration.filter(|d| *d > 0.0),
+            song.get("duration").and_then(|d| d.as_f64()),
+        ) {
+            let delta = (want - got_ms / 1000.0).abs();
+            if delta <= 3.0 {
+                score += 40;
+            } else if delta <= 10.0 {
+                score += 10;
+            } else if delta > 45.0 {
+                score -= 25;
+            }
+        }
+        if best.as_ref().is_none_or(|(s, _)| score > *s) {
+            best = Some((score, id));
+        }
+    }
+    best.map(|(_, id)| id)
+}
+
+fn fetch_netease(artist: &str, title: &str, duration: Option<f64>) -> Option<ResolvedLyrics> {
+    let q = format!("{} {}", artist.trim(), title.trim());
+    let search = format!(
+        "https://music.163.com/api/search/get?s={}&type=1&limit=6&offset=0",
+        percent_encode(q.trim())
+    );
+    let body = http_get_with(
+        &search,
+        &[
+            ("Referer", "https://music.163.com/"),
+            ("User-Agent", "Mozilla/5.0"),
+        ],
+    )?;
+    let id = pick_netease_id(&body, title, duration)?;
+    let lyric_url = format!("https://music.163.com/api/song/lyric?id={id}&lv=1&kv=1&tv=-1");
+    let body = http_get_with(
+        &lyric_url,
+        &[
+            ("Referer", "https://music.163.com/"),
+            ("User-Agent", "Mozilla/5.0"),
+        ],
+    )?;
+    let v: serde_json::Value = serde_json::from_str(&body).ok()?;
+    let lrc = v
+        .pointer("/lrc/lyric")
+        .and_then(|s| s.as_str())
+        .unwrap_or("");
+    if lrc.trim().is_empty() || lrc.contains("纯音乐，请欣赏") {
+        return None;
+    }
+    let lines = parse_lrc(lrc);
+    if lines.is_empty() {
+        return None;
+    }
+    Some(ResolvedLyrics {
+        lines,
+        plain: Vec::new(),
+        source: "netease".into(),
+    })
+}
+
+fn from_ovh_body(body: &str) -> ResolvedLyrics {
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(body) else {
+        return ResolvedLyrics::empty();
+    };
+    let text = v.get("lyrics").and_then(|s| s.as_str()).unwrap_or("");
+    let plain = split_plain(text);
+    if plain.is_empty() {
+        return ResolvedLyrics::empty();
+    }
+    ResolvedLyrics {
+        lines: Vec::new(),
+        plain,
+        source: "ovh".into(),
+    }
+}
+
+fn fetch_ovh(artist: &str, title: &str) -> Option<ResolvedLyrics> {
+    if artist.trim().is_empty() || title.trim().is_empty() {
+        return None;
+    }
+    let url = format!(
+        "https://api.lyrics.ovh/v1/{}/{}",
+        percent_encode(artist.trim()),
+        percent_encode(title.trim())
+    );
+    let body = http_get(&url)?;
+    let lyrics = from_ovh_body(&body);
+    if lyrics.is_empty() {
+        None
+    } else {
+        Some(lyrics)
+    }
 }
 
 /// What to look up for a track. Owned so it can cross into a worker thread.
@@ -568,14 +890,14 @@ pub struct LyricsQuery {
 /// Resolution state of the lyrics panel.
 #[derive(Debug, Clone, PartialEq)]
 pub enum LyricsState {
-    /// A worker thread is talking to lrclib.
+    /// A worker thread is talking to the online providers.
     Loading,
     Ready(ResolvedLyrics),
     Missing,
 }
 
 /// Non-blocking lyrics resolution for interactive surfaces: local sources are
-/// read inline, lrclib runs on a worker thread while the UI keeps drawing.
+/// read inline, online providers run on a worker thread while the UI keeps drawing.
 #[derive(Debug, Default)]
 pub struct LyricsLoader {
     key: Option<String>,
@@ -595,7 +917,7 @@ impl LyricsLoader {
         self.rx = None;
     }
 
-    /// State for `query`, starting or polling the lrclib worker as needed.
+    /// State for `query`, starting or polling the provider worker as needed.
     /// Never blocks on the network.
     pub fn state(&mut self, key: &str, query: impl FnOnce() -> LyricsQuery) -> &LyricsState {
         if self.key.as_deref() != Some(key) {
@@ -612,7 +934,7 @@ impl LyricsLoader {
     }
 
     fn spawn(&mut self, q: LyricsQuery) {
-        if q.artist.trim().is_empty() || q.title.trim().is_empty() {
+        if q.title.trim().is_empty() {
             self.state = Some(LyricsState::Missing);
             return;
         }
@@ -643,6 +965,99 @@ impl LyricsLoader {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn managed_selection_roundtrip_and_cleanup_preserve_originals() {
+        let root = std::env::temp_dir().join(format!(
+            "stillmusic-managed-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let audio = root.join("track.mp3");
+        let sidecar = root.join("track.lrc");
+        fs::write(&audio, b"audio fixture").unwrap();
+        fs::write(&sidecar, "[00:01.00] original").unwrap();
+        let selected = managed_path_in(&root.join("managed"), &audio);
+        assert_eq!(read_managed_file(&selected).unwrap(), None);
+        let lyrics = ResolvedLyrics {
+            lines: parse_lrc("[00:02.00] <00:02.00> chosen <00:03.00> words"),
+            plain: Vec::new(),
+            source: "lrclib:42".into(),
+        };
+        save_managed_file(&selected, &lyrics).unwrap();
+        assert_eq!(read_managed_file(&selected).unwrap(), Some(lyrics));
+        assert!(save_managed_file(&selected, &ResolvedLyrics::empty()).is_err());
+        fs::remove_file(&selected).unwrap();
+        assert_eq!(fs::read(&audio).unwrap(), b"audio fixture");
+        assert_eq!(fs::read_to_string(sidecar).unwrap(), "[00:01.00] original");
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn malformed_and_future_managed_documents_fail_without_rewriting() {
+        let root = std::env::temp_dir().join(format!(
+            "stillmusic-corrupt-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let path = root.join("selection.json");
+        for body in [
+            "{broken",
+            r#"{"version":2,"plainLyrics":"future"}"#,
+            r#"{"version":1,"plainLyrics":""}"#,
+        ] {
+            fs::write(&path, body).unwrap();
+            assert!(read_managed_file(&path).is_err());
+            assert_eq!(fs::read_to_string(&path).unwrap(), body);
+        }
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn malformed_timestamps_and_overflows_are_rejected_without_panicking() {
+        for stamp in [
+            "00:01.NaN",
+            "00:01.inf",
+            "00:01.-1",
+            "00:60.00",
+            "18446744073709551615:00",
+            "999999999999999999999:00",
+            "00:01.1e2",
+        ] {
+            assert_eq!(parse_timestamp(stamp), None, "{stamp}");
+            assert!(parse_lrc(&format!("[{stamp}] text")).is_empty());
+        }
+        assert_eq!(
+            parse_timestamp("00:01.123456789123"),
+            Some(Duration::new(1, 123456789))
+        );
+        let line = LrcLine {
+            time: Duration::MAX,
+            text: "edge".into(),
+            words: vec![LyricWord {
+                time: Duration::MAX,
+                text: "edge".into(),
+            }],
+        };
+        assert_eq!(word_progress_fraction(&line, 0, Duration::MAX, None), 1.0);
+    }
+
+    #[test]
+    fn managed_key_is_the_same_for_relative_and_absolute_existing_paths() {
+        let absolute = std::env::current_dir().unwrap().join("Cargo.toml");
+        assert_eq!(
+            managed_path_in(Path::new("/fixture"), Path::new("Cargo.toml")),
+            managed_path_in(Path::new("/fixture"), &absolute)
+        );
+    }
 
     #[test]
     fn parses_basic_lrc_with_centis() {
@@ -740,6 +1155,44 @@ mod tests {
         let r = from_lrclib_body(body);
         assert!(r.lines.is_empty());
         assert_eq!(r.plain, vec!["line one", "line two"]);
+    }
+
+    #[test]
+    fn netease_pick_prefers_title_and_duration() {
+        let body = r#"{"result":{"songs":[
+            {"id":1,"name":"Other","duration":400000},
+            {"id":2,"name":"One More Time","duration":320000},
+            {"id":3,"name":"One More Time","duration":90000}
+        ]}}"#;
+        assert_eq!(pick_netease_id(body, "One More Time", Some(320.0)), Some(2));
+    }
+
+    #[test]
+    fn ovh_body_splits_plain_lines() {
+        let body = r#"{"lyrics":"\nline one\n\nline two\n"}"#;
+        let lyrics = from_ovh_body(body);
+        assert_eq!(lyrics.source, "ovh");
+        assert_eq!(lyrics.plain, vec!["line one", "line two"]);
+    }
+
+    #[test]
+    fn stored_body_keeps_provider_source() {
+        let body = r#"{"source":"netease","syncedLyrics":"[00:01.00] hi\n","plainLyrics":""}"#;
+        let lyrics = from_stored_body(body);
+        assert_eq!(lyrics.source, "netease");
+        assert_eq!(lyrics.lines[0].text, "hi");
+    }
+
+    #[test]
+    fn search_pick_prefers_synced_near_duration() {
+        let body = r#"[
+            {"trackName":"A","duration":400,"syncedLyrics":null,"plainLyrics":"plain"},
+            {"trackName":"B","duration":201,"syncedLyrics":"[00:01.00] hi\n","plainLyrics":"hi"},
+            {"trackName":"C","duration":90,"syncedLyrics":"[00:01.00] other\n","plainLyrics":"other"}
+        ]"#;
+        let picked = pick_lrclib_search(body, Some(200.0)).unwrap();
+        let r = from_lrclib_body(&picked);
+        assert_eq!(r.lines[0].text, "hi");
     }
 
     #[test]

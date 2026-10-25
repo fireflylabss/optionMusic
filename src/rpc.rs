@@ -10,8 +10,13 @@ use discord_rich_presence::{
     activity::{Activity, ActivityType, Assets, Timestamps},
 };
 
-/// Built-in Discord application id (the "still" app registered at
-/// discord.dev/developers). `discord_rpc_id` in config.toml overrides it.
+/// Rich Presence is paused. The client and config fields stay so a later
+/// cut can turn this back on without a schema change. `sync` ignores the
+/// enabled flag while this is true and drops any open IPC socket.
+pub const TEMPORARILY_DISABLED: bool = true;
+
+/// Existing Discord application id registered at discord.dev/developers.
+/// `discord_rpc_id` in config.toml overrides it.
 const BUILT_IN_CLIENT_ID: &str = "1548415534012432404";
 
 /// Min delay between reconnect attempts while Discord is unreachable.
@@ -54,6 +59,7 @@ impl Rpc {
     /// Follow the config toggle live. Returns a one-shot warning message when
     /// enabled but no client id is available (none registered / configured).
     pub fn sync(&mut self, enabled: bool, client_id: &str) -> Option<&'static str> {
+        let enabled = enabled && !TEMPORARILY_DISABLED;
         let id = if client_id.is_empty() {
             BUILT_IN_CLIENT_ID
         } else {

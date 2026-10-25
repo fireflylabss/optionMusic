@@ -492,42 +492,42 @@ impl DlFallbackMode {
     }
 }
 
-/// Docked lyrics strip position (`lyrics_pos` in config.toml).
+/// Whether the lyrics face is allowed (`lyrics_pos` in config.toml).
+///
+/// `right` and `left` both mean on. Older files that say `above` / `below`
+/// still load as on. The face fills the center column; a wide terminal
+/// puts it beside the player.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
-#[serde(rename_all = "lowercase")]
 pub enum LyricsPos {
-    /// Strip above the "option MUSIC" header block (top of player area).
+    /// Lyrics face allowed. `above` is an old name for this.
     #[default]
-    Above,
-    /// Strip below the footer shortcut chip row (bottom of screen area).
-    Below,
-    /// Strip hidden — `y` re-opens below.
+    #[serde(rename = "right", alias = "above")]
+    Right,
+    /// Lyrics face allowed. `below` is an old name for this.
+    #[serde(rename = "left", alias = "below")]
+    Left,
+    /// Face hidden — `y` turns it back on.
+    #[serde(rename = "hidden")]
     Hidden,
 }
 
 impl LyricsPos {
     pub fn label(self) -> &'static str {
         match self {
-            Self::Above => "above",
-            Self::Below => "below",
             Self::Hidden => "hidden",
+            Self::Right | Self::Left => "on",
         }
     }
 
     pub fn next(self) -> Self {
         match self {
-            Self::Above => Self::Below,
-            Self::Below => Self::Hidden,
-            Self::Hidden => Self::Above,
+            Self::Hidden => Self::Right,
+            Self::Right | Self::Left => Self::Hidden,
         }
     }
 
     pub fn prev(self) -> Self {
-        match self {
-            Self::Above => Self::Hidden,
-            Self::Below => Self::Above,
-            Self::Hidden => Self::Below,
-        }
+        self.next()
     }
 }
 
@@ -691,7 +691,7 @@ impl Default for AppConfig {
             toast_stack: false,
             artist_source: ArtistSource::Metadata,
             replaygain: ReplayGainMode::Off,
-            lyrics_pos: LyricsPos::Above,
+            lyrics_pos: LyricsPos::Right,
             music_dirs: Vec::new(),
             favorites: Vec::new(),
             resume_track: String::new(),

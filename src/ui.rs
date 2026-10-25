@@ -8,20 +8,19 @@ use crossterm::{
     cursor::{Hide, MoveTo, Show},
     event::{DisableMouseCapture, EnableMouseCapture},
     execute, queue,
-    style::{Color, Print, ResetColor, SetBackgroundColor, SetForegroundColor, Stylize},
+    style::{Color, Print, ResetColor, SetForegroundColor, Stylize},
     terminal::{
         BeginSynchronizedUpdate, Clear, ClearType, EndSynchronizedUpdate, EnterAlternateScreen,
         LeaveAlternateScreen, disable_raw_mode, enable_raw_mode, size,
     },
 };
 
+use unicode_width::UnicodeWidthStr;
+
 use crate::cava::CavaBridge;
 use crate::config::{Accent, AppConfig, CavaStyle, LyricsPos, ToastPos};
-use crate::lyrics::{
-    LrcLine, active_word_index, active_word_progress, ease_lyric_offset, lyric_window_start,
-    sung_letters, sung_word_count,
-};
-use crate::settings::{self, SettingsAction, SettingsUi};
+use crate::lyrics::LrcLine;
+use crate::settings::{self, SETTINGS_SIDEBAR_W, SettingsAction, SettingsUi};
 
 // ── Palette ─────────────────────────────────────────────────────
 pub const WHITE: Color = Color::White;
@@ -109,6 +108,84 @@ pub enum PanelSide {
 pub const PLAYER_MIN_W: usize = 34;
 /// Terminal columns needed to dock the list: player min + list + margins.
 pub const LIST_DOCK_MIN_COLS: usize = PLAYER_MIN_W + LIST_SIDEBAR_W + 4;
+/// Narrowest a rail may shrink before it collapses to a badge row.
+pub const RAIL_MIN_W: usize = 12;
+/// Badge shown when a rail collapses on tiny terminals.
+pub const RAIL_COLLAPSED_HINT: &str = "···";
+
+/// Resolved horizontal layout: every region owns disjoint columns that
+/// always sum to exactly `cols`. Rails never overlap the player, each
+/// other, or the terminal edge — on tiny screens rails shrink, then the
+/// player clamps to its minimum, then rails collapse to a badge.
+#[derive(Debug, Clone, Copy)]
+pub struct Layout {
+    pub cols: usize,
+    pub left_w: usize,
+    pub content_x0: usize,
+    pub content_cols: usize,
+    pub right_w: usize,
+    /// True when the left rail collapsed (only a badge paints).
+    pub left_collapsed: bool,
+    /// True when the right rail collapsed.
+    pub right_collapsed: bool,
+}
+
+impl Layout {
+    pub fn resolve(cols: usize, left_want: usize, right_want: usize) -> Self {
+        let cols = cols.max(1);
+        let player_min = PLAYER_MIN_W.min(cols);
+        let mut left_w = left_want.min(cols);
+        let mut right_w = right_want.min(cols.saturating_sub(left_w));
+        // Pass 1: fit both rails + player minimum.
+        let mut free = cols.saturating_sub(left_w + right_w);
+        if free < player_min {
+            // Pass 2: shrink rails down to RAIL_MIN_W, biggest first.
+            let mut need = player_min.saturating_sub(free);
+            while need > 0 && (left_w > RAIL_MIN_W || right_w > RAIL_MIN_W) {
+                if left_w >= right_w && left_w > RAIL_MIN_W {
+                    left_w -= 1;
+                } else if right_w > RAIL_MIN_W {
+                    right_w -= 1;
+                } else if left_w > RAIL_MIN_W {
+                    left_w -= 1;
+                } else {
+                    break;
+                }
+                need -= 1;
+            }
+            free = cols.saturating_sub(left_w + right_w);
+        }
+        // Pass 3: still no room — collapse rails to badges, smaller first,
+        // until the player fits (or nothing is left to collapse).
+        let mut left_collapsed = false;
+        let mut right_collapsed = false;
+        while free < player_min && (left_w > 0 || right_w > 0) {
+            if left_w > 0 && left_w <= right_w {
+                left_w = 0;
+                left_collapsed = left_want > 0;
+            } else if right_w > 0 {
+                right_w = 0;
+                right_collapsed = right_want > 0;
+            } else if left_w > 0 {
+                left_w = 0;
+                left_collapsed = left_want > 0;
+            } else {
+                break;
+            }
+            free = cols.saturating_sub(left_w + right_w);
+        }
+        let content_cols = free.max(1);
+        Self {
+            cols,
+            left_w,
+            content_x0: left_w,
+            content_cols,
+            right_w,
+            left_collapsed,
+            right_collapsed,
+        }
+    }
+}
 
 /// Clickable region resolved from the last drawn frame.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -277,14 +354,15 @@ pub struct FrameState<'a> {
     pub sleep_label: Option<&'a str>,
     /// Smart shuffle indicator for the status line.
     pub smart_shuffle: bool,
-    /// Lyrics docked strip: title, synced lines (with word timings),
-    /// plain fallback, absolute active index, status, word clock.
+    /// Lyrics face (`y`): synced lines, plain fallback, active index, status.
     pub lyrics_open: bool,
     pub lyrics_title: &'a str,
     pub lyrics_synced: &'a [LrcLine],
     pub lyrics_plain: &'a [String],
     pub lyrics_active: Option<usize>,
     pub lyrics_status: Option<&'a str>,
+    /// Provider label (`lrclib`, `netease`, `ovh`, `sidecar`, `embedded`).
+    pub lyrics_source: Option<&'a str>,
     pub lyrics_now: Duration,
     pub list_names: &'a [String],
     pub toast: Option<&'a str>,
@@ -307,10 +385,12 @@ pub struct SessionUi {
     /// Help card pop timestamps (geometry-only animation, never blocks input).
     help_opened_at: Option<Instant>,
     help_closed_at: Option<Instant>,
+    /// Help rail scroll offset (internal scroll when sections > height).
+    help_scroll: usize,
     /// List card pop timestamps (same geometry-only pop as `?` / `c`).
     list_opened_at: Option<Instant>,
     list_closed_at: Option<Instant>,
-    /// Lyrics docked strip (`y` toggles, `Esc`/`y` hides).
+    /// Current lyric in the gap under the title (`y` toggles).
     show_lyrics: bool,
     /// Strip pop timestamps (geometry-only, never blocks input).
     lyrics_opened_at: Option<Instant>,
@@ -319,13 +399,12 @@ pub struct SessionUi {
     lyrics_manual: Option<usize>,
     /// Smooth window top (float rows, eased toward target each frame).
     lyrics_smooth: f64,
-    /// Last active line (line-change transition clock).
-    lyrics_last_active: Option<usize>,
-    lyrics_line_since: Option<Instant>,
     /// Track key the lyric window follows (reset on change).
     lyrics_track_key: String,
     /// Active lyric row (terminal y) from the last paint, for click resume.
     lyrics_active_row: Option<u16>,
+    /// Body rows the last lyrics card actually drew. Scroll uses this.
+    lyrics_shown: usize,
     /// Path line under the track title (session-persistent; `f` toggles).
     show_path: bool,
     /// When true, Drop skips terminal restore (after explicit leave()).
@@ -400,6 +479,7 @@ impl SessionUi {
             help_side_at_open: None,
             help_opened_at: None,
             help_closed_at: None,
+            help_scroll: 0,
             list_opened_at: None,
             list_closed_at: None,
             show_lyrics: false,
@@ -407,10 +487,9 @@ impl SessionUi {
             lyrics_closed_at: None,
             lyrics_manual: None,
             lyrics_smooth: 0.0,
-            lyrics_last_active: None,
-            lyrics_line_since: None,
             lyrics_track_key: String::new(),
             lyrics_active_row: None,
+            lyrics_shown: 1,
             show_path: false,
             detached: false,
             t0: now,
@@ -497,6 +576,24 @@ impl SessionUi {
         self.settings.pointer_over_pane(col, row)
     }
 
+    /// Wheel over the settings rail.
+    pub fn settings_scroll_by(&mut self, delta: i32) {
+        self.settings.scroll_by(delta, 0);
+    }
+
+    /// Wheel over the help rail.
+    pub fn pointer_over_help(&self, col: u16, row: u16) -> bool {
+        self.help_contains(col, row)
+    }
+
+    /// Wheel over any open rail (list / settings / help). Used to route
+    /// wheel events to the rail instead of seeking the player.
+    pub fn pointer_over_rail(&self, col: u16, row: u16) -> bool {
+        self.pointer_over_list(col, row)
+            || self.pointer_over_settings(col, row)
+            || self.pointer_over_help(col, row)
+    }
+
     /// Restore the real terminal and detach Drop cleanup.
     pub fn leave(mut self) -> io::Result<()> {
         if let Some(ref mut c) = self.cava {
@@ -551,6 +648,10 @@ impl SessionUi {
         if !self.config.toast_stack {
             self.toasts.clear();
         }
+        let msg = msg
+            .chars()
+            .map(|c| if c.is_control() { ' ' } else { c })
+            .collect();
         self.toasts.push_back(ToastItem {
             text: msg,
             kind,
@@ -738,6 +839,7 @@ impl SessionUi {
             self.help_side_at_open = Some(self.free_side_for_help());
         }
         self.show_help = !self.show_help;
+        self.help_scroll = 0;
         let now = Instant::now();
         if self.show_help {
             self.help_opened_at = Some(now);
@@ -786,22 +888,26 @@ impl SessionUi {
         self.show_path
     }
 
-    /// Docked lyrics strip (`y` toggles, `Esc`/`y` hides).
-    /// Hidden config re-opens below so `y` never dead-ends.
-    pub fn toggle_lyrics(&mut self) {
+    /// Lyrics face (`y` toggles). Hidden config turns back on.
+    pub fn try_toggle_lyrics(&mut self) -> bool {
         if self.show_lyrics {
             self.close_lyrics();
-        } else {
-            if self.config.lyrics_pos == LyricsPos::Hidden {
-                self.config.lyrics_pos = LyricsPos::Below;
-                let _ = self.config.save();
-            }
-            self.show_lyrics = true;
-            let now = Instant::now();
-            self.lyrics_opened_at = Some(now);
-            self.lyrics_closed_at = None;
-            self.lyrics_manual = None;
+            return true;
         }
+        if self.config.lyrics_pos == LyricsPos::Hidden {
+            self.config.lyrics_pos = LyricsPos::Right;
+            let _ = self.config.save();
+        }
+        self.show_lyrics = true;
+        let now = Instant::now();
+        self.lyrics_opened_at = Some(now);
+        self.lyrics_closed_at = None;
+        self.lyrics_manual = None;
+        true
+    }
+
+    pub fn toggle_lyrics(&mut self) {
+        let _ = self.try_toggle_lyrics();
     }
 
     pub fn close_lyrics(&mut self) {
@@ -849,15 +955,9 @@ impl SessionUi {
         }
     }
 
-    /// Line-change transition 0..=1 (~120ms slide/fade). LDM: instant.
-    fn lyrics_line_progress(&self, ldm: bool) -> f64 {
-        if ldm {
-            return 1.0;
-        }
-        match self.lyrics_line_since {
-            Some(t) => ease_out_cubic(t.elapsed().as_secs_f64() / 0.12),
-            None => 1.0,
-        }
+    /// Scroll the card by the number of body rows it last painted.
+    pub fn lyrics_scroll_view(&mut self, delta: i32, total: usize) {
+        self.lyrics_scroll_by(delta, total, self.lyrics_shown.max(1));
     }
 
     /// Manual scroll of the lyric window (Up/Down/wheel). Sets a manual
@@ -880,22 +980,15 @@ impl SessionUi {
     }
 
     /// Reset follow state on track change (auto-follow resumes).
-    fn note_lyrics_track(&mut self, key: &str, active: Option<usize>) {
+    fn note_lyrics_track(&mut self, key: &str) {
         if key != self.lyrics_track_key {
             self.lyrics_track_key = key.to_string();
             self.lyrics_manual = None;
             self.lyrics_smooth = 0.0;
-            self.lyrics_last_active = active;
-            self.lyrics_line_since = Some(Instant::now());
-        } else if self.lyrics_last_active != active {
-            self.lyrics_last_active = active;
-            self.lyrics_line_since = Some(Instant::now());
         }
     }
 
-    /// Click inside the docked lyrics (wheel target + active-line resume).
-    /// Covers both the lyric lines (wherever `lyrics_pos` puts them) and
-    /// the pinned header row below the footer.
+    /// Click inside the lyrics card (wheel target + active-line resume).
     pub fn lyrics_contains(&self, col: u16, row: u16) -> bool {
         if self.show_lyrics {
             if self
@@ -923,306 +1016,59 @@ impl SessionUi {
         self.lyrics_active_row.map(|r| r == row).unwrap_or(false)
     }
 
-    /// Pinned lyrics header row — always painted BELOW the footer chip row,
-    /// whatever `lyrics_pos` says. Dim label + manual/follow hint, same B&W
-    /// style. Returns the next free `y`.
-    fn paint_lyrics_header(
+    /// One lyric in the blank row under the title. The row exists either way.
+    fn paint_lyric_line(
         &mut self,
         out: &mut impl Write,
-        y: usize,
-        content_x0: usize,
-        content_cols: usize,
-        block_w: usize,
-    ) -> io::Result<usize> {
-        let manual = self.lyrics_manual.is_some();
-        let head = if manual {
-            "lyrics · scrolled · enter follow".to_string()
-        } else {
-            "lyrics · y hide".to_string()
-        };
-        let cx0 = content_x0 + content_cols.saturating_sub(block_w) / 2;
-        let hw = head.chars().count().min(block_w);
-        let hx = cx0 + block_w.saturating_sub(hw) / 2;
-        queue!(
-            out,
-            MoveTo(hx as u16, y as u16),
-            SetForegroundColor(DIM),
-            Print(truncate(&head, block_w)),
-            ResetColor
-        )?;
-        let strip_w = block_w.min(content_cols).max(1);
-        let strip_x = cx0.min(content_x0 + content_cols.saturating_sub(1));
-        self.hits.lyrics_head = Some(HitRect {
-            x: strip_x as u16,
-            y: y as u16,
-            w: strip_w as u16,
-            h: 1,
-        });
-        Ok(y + 1)
-    }
-
-    /// Docked lyric LINES painter (no header). Rows are centered in the
-    /// player block (`block_w` wide); returns the next free `y`. `body_h`
-    /// is the reserved body height (inner gaps + lyric rows, 0..=5); fixed
-    /// so the player reflows without jumps. Karaoke motion is geometry-only:
-    /// active-line slide-in + upcoming fade-up, frozen pulse rules kept
-    /// (no ambient shimmer here). LDM: instant open, stepped highlight.
-    #[allow(clippy::too_many_arguments)]
-    fn paint_lyrics_body(
-        &mut self,
-        out: &mut impl Write,
-        mut y: usize,
-        content_x0: usize,
-        content_cols: usize,
-        block_w: usize,
+        y: u16,
+        region_x: usize,
+        region_w: usize,
         state: &FrameState<'_>,
-        shown: usize,
-        body_h: usize,
-        line_prog: f64,
-        ldm: bool,
-    ) -> io::Result<usize> {
-        let rows_avail = body_h;
-        let cx0 = content_x0 + content_cols.saturating_sub(block_w) / 2;
-        let strip_y0 = y;
-        // Inner breathing room above the lyric lines (was the 2 gaps
-        // between header and lines when the strip was one block).
-        let gap_rows = rows_avail.min(2);
-        y += gap_rows;
-        let body_rows = rows_avail.saturating_sub(gap_rows).min(shown);
+        max_w: usize,
+    ) -> io::Result<()> {
+        self.lyrics_shown = 1;
+        self.hits.lyrics_head = None;
         let synced = state.lyrics_synced;
         let plain = state.lyrics_plain;
-        let total = if synced.is_empty() {
-            plain.len()
-        } else {
+        let total = if !synced.is_empty() {
             synced.len()
-        };
-        // Smooth window: eased float from draw bookkeeping.
-        let start_f = self
-            .lyrics_smooth
-            .clamp(0.0, total.saturating_sub(body_rows.max(1)) as f64);
-        let start = (start_f.round() as usize)
-            .min(total.saturating_sub(body_rows.max(1).min(total.max(1))));
-        let start = if total <= body_rows { 0 } else { start };
-        // When idle before the first line, hold the head of the song.
-        let start = if state.lyrics_active.is_none()
-            && self.lyrics_manual.is_none()
-            && !synced.is_empty()
-        {
-            0
         } else {
-            start
+            plain.len()
         };
-        self.lyrics_active_row = None;
-        let y0_body = y;
-        for i in 0..body_rows {
-            let idx = start + i;
-            let row_y = y0_body + i;
-            if !synced.is_empty() {
-                if idx >= synced.len() {
-                    break;
-                }
-                let line = &synced[idx];
-                let is_active = Some(idx) == state.lyrics_active;
-                // Upcoming lines fade up: next line GRAY, deeper DIM.
-                // Past lines rest at GRAY so the sung history stays readable.
-                let base = if is_active {
-                    BRIGHT
-                } else if let Some(a) = state.lyrics_active {
-                    if idx < a || idx == a + 1 { GRAY } else { DIM }
-                } else if idx == start {
-                    GRAY
-                } else {
-                    DIM
-                };
-                // Slide-in on line change (~120ms, geometry only).
-                let mut slide = 0usize;
-                if is_active && !ldm && line_prog < 1.0 {
-                    slide = ((1.0 - line_prog) * 2.0).round() as usize;
-                }
-                if is_active && !line.words.is_empty() {
-                    let sung = sung_word_count(line, state.lyrics_now);
-                    let active_w = active_word_index(line, state.lyrics_now);
-                    // Next line start bounds the final word sweep.
-                    let next_start = synced.get(idx + 1).map(|n| n.time);
-                    // LDM degrades to per-word steps (no intra-word split).
-                    let active_frac = if ldm {
-                        None
-                    } else {
-                        active_w.and_then(|aw| {
-                            active_word_progress(line, state.lyrics_now, next_start)
-                                .filter(|(i, _)| *i == aw)
-                                .map(|(_, f)| f)
-                        })
-                    };
-                    let full: String = line
-                        .words
-                        .iter()
-                        .map(|w| w.text.as_str())
-                        .collect::<Vec<_>>()
-                        .join(" ");
-                    let full_w = full.chars().count().min(block_w);
-                    let mut wx = cx0 + block_w.saturating_sub(full_w) / 2 + slide;
-                    if is_active {
-                        self.lyrics_active_row = Some(row_y as u16);
-                    }
-                    for (wi, w) in line.words.iter().enumerate() {
-                        let is_sung = wi < sung;
-                        let is_cur = Some(wi) == active_w;
-                        if wi > 0 {
-                            queue!(
-                                out,
-                                MoveTo(wx as u16, row_y as u16),
-                                SetForegroundColor(DIM),
-                                Print(" "),
-                                ResetColor
-                            )?;
-                            wx += 1;
-                        }
-                        if is_cur && !ldm {
-                            // Live per-letter sweep: sung letters BRIGHT,
-                            // current letter invert, rest DIM — same row,
-                            // precomputed widths so no layout jitter.
-                            let chars: Vec<char> = w.text.chars().collect();
-                            let n = chars.len();
-                            let done = sung_letters(n, active_frac.unwrap_or(0.0)).min(n);
-                            let sung_s: String = chars[..done].iter().collect();
-                            let cur_s: String = if done < n {
-                                chars[done].to_string()
-                            } else {
-                                String::new()
-                            };
-                            let rest_s: String = if done < n {
-                                chars.iter().skip(done + 1).collect()
-                            } else {
-                                String::new()
-                            };
-                            if !sung_s.is_empty() {
-                                queue!(
-                                    out,
-                                    MoveTo(wx as u16, row_y as u16),
-                                    SetForegroundColor(BRIGHT),
-                                    Print(&sung_s),
-                                    ResetColor
-                                )?;
-                                wx += sung_s.chars().count();
-                            }
-                            if !cur_s.is_empty() {
-                                queue!(
-                                    out,
-                                    MoveTo(wx as u16, row_y as u16),
-                                    SetBackgroundColor(BRIGHT),
-                                    SetForegroundColor(Color::Black),
-                                    Print(&cur_s),
-                                    ResetColor
-                                )?;
-                                wx += 1;
-                            }
-                            if !rest_s.is_empty() {
-                                queue!(
-                                    out,
-                                    MoveTo(wx as u16, row_y as u16),
-                                    SetForegroundColor(DIM),
-                                    Print(&rest_s),
-                                    ResetColor
-                                )?;
-                                wx += rest_s.chars().count();
-                            }
-                        } else {
-                            let wt = truncate(&w.text, block_w);
-                            if is_cur {
-                                // LDM stepped highlight: bright, no invert.
-                                queue!(
-                                    out,
-                                    MoveTo(wx as u16, row_y as u16),
-                                    SetForegroundColor(BRIGHT),
-                                    Print(&wt),
-                                    ResetColor
-                                )?;
-                            } else if is_sung {
-                                queue!(
-                                    out,
-                                    MoveTo(wx as u16, row_y as u16),
-                                    SetForegroundColor(BRIGHT),
-                                    Print(&wt),
-                                    ResetColor
-                                )?;
-                            } else {
-                                queue!(
-                                    out,
-                                    MoveTo(wx as u16, row_y as u16),
-                                    SetForegroundColor(DIM),
-                                    Print(&wt),
-                                    ResetColor
-                                )?;
-                            }
-                            wx += w.text.chars().count();
-                        }
-                        let _ = base;
-                    }
-                } else {
-                    let marker = if is_active { "› " } else { "  " };
-                    let text = format!(
-                        "{marker}{}",
-                        truncate(&line.text, block_w.saturating_sub(2))
-                    );
-                    let tw = text.chars().count().min(block_w);
-                    let tx = cx0 + block_w.saturating_sub(tw) / 2 + slide;
-                    if is_active {
-                        self.lyrics_active_row = Some(row_y as u16);
-                    }
-                    queue!(
-                        out,
-                        MoveTo(tx as u16, row_y as u16),
-                        SetForegroundColor(base),
-                        Print(truncate(&text, block_w)),
-                        ResetColor
-                    )?;
-                }
-            } else if !plain.is_empty() {
-                // Plain (untimed) lyrics: static scrollable list, same strip.
-                if idx >= plain.len() {
-                    break;
-                }
-                let text = format!("  {}", truncate(&plain[idx], block_w.saturating_sub(2)));
-                let tw = text.chars().count().min(block_w);
-                let tx = cx0 + block_w.saturating_sub(tw) / 2;
-                queue!(
-                    out,
-                    MoveTo(tx as u16, row_y as u16),
-                    SetForegroundColor(GRAY),
-                    Print(truncate(&text, block_w)),
-                    ResetColor
-                )?;
-            } else {
-                // `no lyrics found` dim status stays in the same strip.
-                if i == 0 {
-                    let msg = truncate(state.lyrics_status.unwrap_or("no lyrics found"), block_w);
-                    let mw = msg.chars().count().min(block_w);
-                    let mx = cx0 + block_w.saturating_sub(mw) / 2;
-                    queue!(
-                        out,
-                        MoveTo(mx as u16, row_y as u16),
-                        SetForegroundColor(DIM),
-                        Print(&msg),
-                        ResetColor
-                    )?;
-                }
+        let (text, bright) = if total == 0 {
+            (
+                state.lyrics_status.unwrap_or("no lyrics found").to_string(),
+                false,
+            )
+        } else {
+            let followed = state.lyrics_active.unwrap_or(0).min(total - 1);
+            let idx = self.lyrics_manual.unwrap_or(followed).min(total - 1);
+            if total <= 1 {
+                self.lyrics_manual = None;
+            } else if let Some(manual) = self.lyrics_manual {
+                self.lyrics_manual = Some(manual.min(total - 1));
             }
-        }
-        y = y0_body + body_rows;
-        // Hit rect covers the whole strip (wheel target; active-row resume).
-        let strip_w = block_w.min(content_cols).max(1);
-        let strip_x = cx0.min(content_x0 + content_cols.saturating_sub(1));
-        self.hits.lyrics_pane = Some(HitRect {
-            x: strip_x as u16,
-            y: strip_y0 as u16,
-            w: strip_w as u16,
-            h: (y.saturating_sub(strip_y0)).max(1) as u16,
-        });
-        Ok(y)
+            self.lyrics_smooth = idx as f64;
+            let line = if !synced.is_empty() {
+                synced[idx].text.clone()
+            } else {
+                plain[idx].clone()
+            };
+            (line, true)
+        };
+        let shown = truncate(&text, max_w.max(1));
+        let color = if bright { BRIGHT } else { DIM };
+        let x = paint_in_region(out, y, region_x, region_w, &[Span::fg(color, &shown)])?;
+        let w = str_width(&shown).min(region_w) as u16;
+        self.lyrics_active_row = Some(y);
+        self.hits.lyrics_pane = if self.show_lyrics && w > 0 {
+            Some(HitRect { x, y, w, h: 1 })
+        } else {
+            None
+        };
+        Ok(())
     }
 
-    /// Toggle cava background (no-op toast if binary missing).
     pub fn toggle_cava(&mut self) -> &'static str {
         if self.cava.is_some() {
             if let Some(mut c) = self.cava.take() {
@@ -1315,6 +1161,26 @@ impl SessionUi {
         let max = list_scroll_max_for(self.list_total, vis);
         self.list_scroll = ((ratio.clamp(0.0, 1.0) * max as f64).round() as usize).min(max);
         self.clamp_cursor_to_view();
+    }
+
+    /// Help rail scroll (plain offset; the paint clamps to content).
+    pub fn help_scroll_by(&mut self, delta: i32) {
+        if delta == 0 {
+            return;
+        }
+        if delta < 0 {
+            self.help_scroll = self.help_scroll.saturating_sub((-delta) as usize);
+        } else {
+            self.help_scroll = self.help_scroll.saturating_add(delta as usize);
+        }
+    }
+
+    pub fn help_scroll_to_top(&mut self) {
+        self.help_scroll = 0;
+    }
+
+    pub fn help_scroll_to_bottom(&mut self) {
+        self.help_scroll = usize::MAX;
     }
 
     /// Move the cursor by `delta` rows (keyboard ±1); the window follows.
@@ -1624,6 +1490,103 @@ impl SessionUi {
         }
     }
 
+    fn paint_compact_player(
+        &mut self,
+        out: &mut impl Write,
+        state: &FrameState<'_>,
+        rows: usize,
+        x: usize,
+        width: usize,
+        lyrics_on: bool,
+    ) -> io::Result<()> {
+        self.hits.lyrics_pane = None;
+        self.hits.lyrics_head = None;
+        self.lyrics_active_row = None;
+        if rows == 0 || width == 0 {
+            return Ok(());
+        }
+        let title = truncate(state.track_name, width);
+        paint_in_region(out, 0, x, width, &[Span::fg(BRIGHT, &title)])?;
+        let mut y = 1;
+        if rows >= 3 {
+            let times = format!(
+                "{} / {}",
+                fmt_time(state.pos),
+                state
+                    .duration
+                    .map(fmt_time)
+                    .unwrap_or_else(|| "--:--".into())
+            );
+            paint_in_region(out, y, x, width, &[Span::fg(DIM, &times)])?;
+            y += 1;
+        }
+        if rows >= 4 && width >= 8 {
+            let bar_w = width.min(36);
+            let (filled, knob, empty) = progress_parts(state.pos, state.duration, bar_w);
+            let start = paint_in_region(
+                out,
+                y,
+                x,
+                width,
+                &[
+                    Span::fg(BRIGHT, &filled),
+                    Span::fg(BRIGHT, &knob),
+                    Span::fg(DARK, &empty),
+                ],
+            )?;
+            self.hits.progress = Some(HitRect {
+                x: start,
+                y,
+                w: bar_w as u16,
+                h: 1,
+            });
+            y += 1;
+        }
+        if rows >= 2 {
+            let status = if state.stopped {
+                "stopped"
+            } else if state.paused {
+                "paused"
+            } else {
+                "playing"
+            };
+            let controls = truncate(
+                &format!(
+                    "{status}  {}/{}  {}%",
+                    state.index, state.total, state.volume
+                ),
+                width,
+            );
+            let start = paint_in_region(out, y, x, width, &[Span::fg(GRAY, &controls)])?;
+            self.hits.play_pause = Some(HitRect {
+                x: start,
+                y,
+                w: str_width(&controls) as u16,
+                h: 1,
+            });
+            y += 1;
+        }
+        if lyrics_on && (y as usize) < rows {
+            self.note_lyrics_track(if state.track_path.is_empty() {
+                state.track_name
+            } else {
+                state.track_path
+            });
+            self.paint_lyric_line(out, y, x, width, state, width)?;
+            y += 1;
+        }
+        if (y as usize) < rows {
+            paint_in_region(
+                out,
+                y,
+                x,
+                width,
+                &[Span::fg(DIM, "space pause · c settings · ? help")],
+            )?;
+        }
+        Ok(())
+    }
+
     /// Full-frame redraw — compact, centered, lightly animated.
     pub fn draw(&mut self, state: &FrameState<'_>) -> io::Result<()> {
         self.expire_toast();
@@ -1647,8 +1610,8 @@ impl SessionUi {
         let t = self.t0.elapsed().as_secs_f64();
         let playing = !state.paused && !state.stopped;
         let ldm = self.config.ldm;
-        let accent = accent_color(&self.config.accent);
-        let accent_dim = dim_accent(accent);
+        let (rice, rice_active) = crate::rice::load();
+        let (accent, accent_dim) = rice.accent_for(&self.config.accent, rice_active);
 
         let intro = if ldm {
             1.0
@@ -1678,505 +1641,484 @@ impl SessionUi {
             self.show_list = false;
         }
 
-        // Slot policy: the list floats as a compact card on the left — the
-        // center block never shifts and never squeezes under `PLAYER_MIN_W`.
-        // Settings/help are always overlays with fixed anchors.
-        let content_x0 = 0usize;
-        let content_cols = cols;
-        // Overlay geometry only — never subtracted from the player region.
-        let help_full_w = if help_visual {
-            HELP_SIDEBAR_W.min(cols.saturating_sub(4)).max(12.min(cols))
+        // Slot policy: the list floats as a compact card — the center
+        // block never shifts. Lyrics take that column (`y`), or sit beside
+        // it once the terminal is wide enough to read both.
+        if self.config.lyrics_pos == LyricsPos::Hidden {
+            self.show_lyrics = false;
+        }
+        let lyrics_on =
+            state.lyrics_open && self.config.lyrics_pos != LyricsPos::Hidden && !self.preview;
+        // Horizontal layout: one pass resolves disjoint columns for the
+        // left rail, the player, and the right rail — they always sum to
+        // exactly `cols`, so nothing ever paints over anything else, no
+        // matter how small the terminal gets.
+        let list_want = if list_visual {
+            LIST_SIDEBAR_W.min(cols.saturating_sub(4)).max(20.min(cols))
         } else {
             0
         };
+        let settings_want = if settings_visual {
+            SETTINGS_SIDEBAR_W.min(cols).max(24.min(cols))
+        } else {
+            0
+        };
+        let help_want = if help_visual {
+            HELP_SIDEBAR_W.min(cols.max(16)).max(12.min(cols))
+        } else {
+            0
+        };
+        let list_left = self.show_list && list_visual && self.list_side() == PanelSide::Left;
+        let settings_left = settings_visual && self.settings_side() == PanelSide::Left;
+        let help_left = help_visual && self.help_side() == PanelSide::Left;
+        let left_want = (if list_left { list_want } else { 0 })
+            .max(if settings_left { settings_want } else { 0 })
+            .max(if help_left { help_want } else { 0 });
+        let list_right_side = self.show_list && list_visual && self.list_side() == PanelSide::Right;
+        let settings_right_side = settings_visual && self.settings_side() == PanelSide::Right;
+        let help_right_side = help_visual && self.help_side() == PanelSide::Right;
+        let right_want = (if list_right_side { list_want } else { 0 })
+            .max(if settings_right_side {
+                settings_want
+            } else {
+                0
+            })
+            .max(if help_right_side { help_want } else { 0 });
+        let layout = Layout::resolve(cols, left_want, right_want);
+        let content_x0 = layout.content_x0;
+        let content_cols = layout.content_cols;
+        // Overlay geometry only — never subtracted from the player region.
 
         // Freeze ambient motion while a card floats above the player so the
         // 60fps repaint is byte-identical (no shimmer bleeding around/under
         // the overlay). Covers the close-pop too. Resumes untouched after.
-        // The lyrics strip is docked (part of the layout, not an overlay)
-        // so it never freezes the pulse — karaoke motion is geometry-only.
         let frozen = settings_visual || help_visual || list_visual;
         let pulse = |period: f64| {
             if frozen { 0.5 } else { breath(t, period) }
         };
 
-        let block_w = content_cols.saturating_sub(4).clamp(28, 56);
-        let max_title = block_w.saturating_sub(2);
-
-        // Stable glyphs when paused/stopped — no blinky frame swaps.
-        let (icon, status) = if state.stopped {
-            ("■", "stopped")
-        } else if state.paused {
-            ("⏸", "paused")
-        } else if state.muted {
-            ("▶", "muted")
+        if rows < 12 || content_cols < PLAYER_MIN_W {
+            self.paint_compact_player(&mut out, state, rows, content_x0, content_cols, lyrics_on)?;
         } else {
-            ("▶", "playing")
-        };
+            let block_w = content_cols.saturating_sub(4).min(56);
+            let max_title = block_w.saturating_sub(2);
 
-        let title = truncate(state.track_name, max_title);
-        let path = if self.show_path {
-            truncate(state.track_path, max_title)
-        } else {
-            String::new()
-        };
-
-        let bar_w = block_w.saturating_sub(14).clamp(12, 36);
-        let (filled, knob, empty) = progress_parts(state.pos, state.duration, bar_w);
-        let pos_s = fmt_time(state.pos);
-        let total_s = state
-            .duration
-            .map(fmt_time)
-            .unwrap_or_else(|| "--:--".into());
-
-        let idx = format!("{}/{}", state.index, state.total);
-        let vol = if state.muted {
-            format!("mute {}%", state.volume)
-        } else {
-            format!("{}%", state.volume)
-        };
-        let spd = format!("{:.1}x", state.speed);
-        let ptch = format!("{:.2}", state.pitch);
-        let eq = state.eq_label;
-        let loop_l = state.loop_label;
-        let cava_levels = self.cava.as_ref().map(|c| c.snapshot());
-
-        // Playlist card — compact overlay: only what fits, capped so a huge
-        // queue never stretches full-height. Scrollbar covers the rest.
-        if self.show_list {
-            let cap = rows.saturating_sub(9).clamp(3, 10).max(1);
-            self.list_visible = state.list_names.len().max(1).min(cap);
-            self.list_total = state.list_names.len();
-            self.follow_list_track(state.index);
-            let vis = self.list_visible.max(1);
-            self.list_scroll = clamp_list_offset(self.list_total, vis, self.list_scroll);
-        }
-
-        let show_cava_strip = cava_levels.is_some();
-
-        // Docked lyrics — lyric LINES follow `lyrics_pos`, the header row
-        // (`lyrics · y hide` / `scrolled · enter follow`) is always pinned
-        // BELOW the footer chip row. `hidden` hides both. Fixed 6-row total
-        // (1 header + 2 inner gaps + 3 rows); `above` splits it (5-row body
-        // on top, 1-row header at the bottom) so the header height is never
-        // double-counted. Open/close pops (~140ms/~120ms, instant in LDM);
-        // the rest of the block reflows around it so nothing overlaps.
-        const LYRICS_ROWS: usize = 3;
-        const LYRICS_H_FULL: usize = 6; // header(1) + inner gaps(2) + rows(3)
-        const LYRICS_HEAD_H: usize = 1;
-        const LYRICS_BODY_FULL: usize = 5; // inner gaps(2) + rows(3)
-        let lyrics_want =
-            state.lyrics_open && self.config.lyrics_pos != LyricsPos::Hidden && !self.preview;
-        let lyrics_prog = self.lyrics_progress(ldm).clamp(0.0, 1.0);
-        let lyrics_visual = lyrics_want
-            || (!self.preview && self.config.lyrics_pos != LyricsPos::Hidden && lyrics_prog > 0.02);
-        let lyrics_h = if lyrics_visual {
-            if ldm {
-                LYRICS_H_FULL
+            // Stable glyphs when paused/stopped — no blinky frame swaps.
+            let (icon, status) = if state.stopped {
+                ("■", "stopped")
+            } else if state.paused {
+                ("⏸", "paused")
+            } else if state.muted {
+                ("▶", "muted")
             } else {
-                ((LYRICS_H_FULL as f64 * lyrics_prog).round() as usize).clamp(1, LYRICS_H_FULL)
-            }
-        } else {
-            0
-        };
-        let lyrics_above = self.config.lyrics_pos == LyricsPos::Above;
-        // Split the animated total: header pops first (1 row), the body
-        // (gaps + lines) takes the rest so heights never double-count.
-        let lyrics_head_h = if lyrics_h > 0 { LYRICS_HEAD_H } else { 0 };
-        let lyrics_body_h = lyrics_h.saturating_sub(lyrics_head_h).min(LYRICS_BODY_FULL);
-        // Follow bookkeeping (track change resets manual scroll).
-        if lyrics_visual || lyrics_want {
-            let key = if state.track_path.is_empty() {
-                state.track_name.to_string()
-            } else {
-                state.track_path.to_string()
+                ("▶", "playing")
             };
-            let total_synced = state.lyrics_synced.len();
-            let total = if total_synced > 0 {
-                total_synced
+
+            let title = truncate(state.track_name, max_title);
+            let path = if self.show_path {
+                truncate(state.track_path, max_title)
             } else {
-                state.lyrics_plain.len()
+                String::new()
             };
-            self.note_lyrics_track(&key, state.lyrics_active);
-            let target = self
-                .lyrics_manual
-                .unwrap_or_else(|| lyric_window_start(state.lyrics_active, total, LYRICS_ROWS));
-            // Clamp manual overrides that outlived a shorter track.
-            if total <= LYRICS_ROWS {
-                self.lyrics_manual = None;
-            } else if let Some(m) = self.lyrics_manual {
-                self.lyrics_manual = Some(m.min(total.saturating_sub(LYRICS_ROWS)));
+
+            let bar_w = block_w.saturating_sub(14).clamp(12, 36);
+            let (filled, knob, empty) = progress_parts(state.pos, state.duration, bar_w);
+            let pos_s = fmt_time(state.pos);
+            let total_s = state
+                .duration
+                .map(fmt_time)
+                .unwrap_or_else(|| "--:--".into());
+
+            let idx = format!("{}/{}", state.index, state.total);
+            let vol = if state.muted {
+                format!("mute {}%", state.volume)
+            } else {
+                format!("{}%", state.volume)
+            };
+            let spd = format!("{:.1}x", state.speed);
+            let ptch = format!("{:.2}", state.pitch);
+            let eq = state.eq_label;
+            let loop_l = state.loop_label;
+            let cava_levels = self.cava.as_ref().map(|c| c.snapshot());
+
+            // Playlist rail — fills the free height down the side.
+            // Header (title + hairline) + footer hint + divider take 5 rows.
+            if self.show_list {
+                let cap = rows.saturating_sub(6).max(3);
+                self.list_visible = state.list_names.len().max(1).min(cap);
+                self.list_total = state.list_names.len();
+                self.follow_list_track(state.index);
+                let vis = self.list_visible.max(1);
+                self.list_scroll = clamp_list_offset(self.list_total, vis, self.list_scroll);
             }
-            let rate = if ldm { 1.0 } else { 0.25 };
-            self.lyrics_smooth = ease_lyric_offset(self.lyrics_smooth, target as f64, rate);
-        }
-        let lyrics_line_prog = self.lyrics_line_progress(ldm);
 
-        let mut block_h = 8usize;
-        if !self.show_path {
-            block_h = block_h.saturating_sub(1);
-        }
-        // Toast / cava / list are overlays or side panels — no center-block jump.
-        block_h += 1; // meta gap / spacer
-        block_h += 1; // footer
-        block_h += lyrics_h;
-        if lyrics_h > 0 {
-            block_h += 1; // breathing gap between footer and pinned header
-            if lyrics_above {
-                block_h += 1; // breathing gap between top body and header block
+            let show_cava_strip = cava_levels.is_some();
+
+            if lyrics_on {
+                let key = if state.track_path.is_empty() {
+                    state.track_name.to_string()
+                } else {
+                    state.track_path.to_string()
+                };
+                self.note_lyrics_track(&key);
             }
-        }
 
-        let settle = if ldm {
-            0
-        } else {
-            ((1.0 - intro) * 1.5).round() as usize
-        };
-        let mut y = rows.saturating_sub(block_h) / 2 + settle;
-        if y < 1 {
-            y = 1;
-        }
-
-        // Brand breathes only while playing — frozen when paused / LDM.
-        // Lyric LINES `above`: body sits ABOVE the header block (top of
-        // area); the header row itself always goes below the footer.
-        if lyrics_h > 0 && lyrics_above {
-            if lyrics_body_h > 0 {
-                y = self.paint_lyrics_body(
-                    &mut out,
-                    y,
-                    content_x0,
-                    content_cols,
-                    block_w,
-                    state,
-                    LYRICS_ROWS,
-                    lyrics_body_h,
-                    lyrics_line_prog,
-                    ldm,
-                )?;
+            // Same height as the classic block. The lyric uses the blank row
+            // under the title, so opening it does not move the player.
+            let mut block_h = 8usize;
+            if !self.show_path {
+                block_h = block_h.saturating_sub(1);
             }
-            y += 1; // breathing gap between body and header block
-        }
-        let note_c = if playing && !ldm && !frozen {
-            mix_rgb(accent_dim, accent, pulse(2.8))
-        } else {
-            mix_rgb(accent, DARK, 1.0 - intro)
-        };
-        let brand_c = mix_rgb(accent, DARK, 1.0 - intro);
-        paint_in_region(
-            &mut out,
-            y as u16,
-            content_x0,
-            content_cols,
-            &[Span::fg(note_c, "♪  "), Span::fg(brand_c, APP_NAME)],
-        )?;
-        y += 2;
+            block_h += 1; // meta
+            block_h += 1; // footer
 
-        let title_c = if self.config.accent == Accent::Default {
-            gray(lerp(70.0, 245.0, title_in * intro))
-        } else {
-            mix_rgb(DARK, accent, title_in * intro)
-        };
-        paint_in_region(
-            &mut out,
-            y as u16,
-            content_x0,
-            content_cols,
-            &[Span::fg(title_c, &title)],
-        )?;
-        y += 1;
-
-        if self.show_path {
-            let path_c = mix_rgb(DIM, DARK, 1.0 - intro * 0.85);
+            let settle = if ldm {
+                0
+            } else {
+                ((1.0 - intro) * 1.5).round() as usize
+            };
+            let mut y = rows.saturating_sub(block_h) / 2 + settle;
+            if y < 1 {
+                y = 1;
+            }
+            // Brand breathes only while playing — frozen when paused / LDM.
+            let note_c = if playing && !ldm && !frozen {
+                mix_rgb(accent_dim, accent, pulse(2.8))
+            } else {
+                mix_rgb(accent, DARK, 1.0 - intro)
+            };
+            let brand_c = mix_rgb(accent, DARK, 1.0 - intro);
             paint_in_region(
                 &mut out,
                 y as u16,
                 content_x0,
                 content_cols,
-                &[Span::fg(path_c, &path)],
+                &[Span::fg(note_c, "♪  "), Span::fg(brand_c, APP_NAME)],
             )?;
-            y += 2; // gap before progress
-        } else {
-            y += 1; // compact gap when path hidden
-        }
+            y += 2;
 
-        let knob_c = if playing && !ldm && !frozen {
-            mix_rgb(accent_dim, accent, pulse(2.0))
-        } else if state.paused {
-            GRAY
-        } else {
-            DIM
-        };
-        let fill_c = mix_rgb(accent, DARK, 1.0 - intro);
-        let progress_spans = [
-            Span::fg(DIM, &pos_s),
-            Span::fg(DIM, "  "),
-            Span::fg(fill_c, &filled),
-            Span::fg(knob_c, &knob),
-            Span::fg(DARK, &empty),
-            Span::fg(DIM, "  "),
-            Span::fg(DIM, &total_s),
-        ];
-        let prog_x = paint_in_region(
-            &mut out,
-            y as u16,
-            content_x0,
-            content_cols,
-            &progress_spans,
-        )?;
-        let bar_x = prog_x + pos_s.chars().count() as u16 + 2;
-        self.hits.progress = Some(HitRect {
-            x: bar_x,
-            y: y as u16,
-            w: (filled.chars().count() + knob.chars().count() + empty.chars().count()) as u16,
-            h: 1,
-        });
-        y += 1;
+            let title_c = if rice_active || self.config.accent != Accent::Default {
+                mix_rgb(rice.muted, accent, title_in * intro)
+            } else {
+                gray(lerp(70.0, 245.0, title_in * intro))
+            };
+            paint_in_region(
+                &mut out,
+                y as u16,
+                content_x0,
+                content_cols,
+                &[Span::fg(title_c, &title)],
+            )?;
+            y += 1;
 
-        let st_color = if state.stopped {
-            mix_rgb(GRAY, DARK, 1.0 - intro)
-        } else if state.paused || state.muted {
-            GRAY
-        } else if ldm || frozen {
-            accent
-        } else {
-            mix_rgb(accent_dim, accent, pulse(3.2))
-        };
-        // ◂  icon status  ▸  ·  idx  ·  −  vol  +
-        let prev_g = "◂";
-        let next_g = "▸";
-        let vol_minus = "−";
-        let vol_plus = "+";
-        let status_spans = [
-            Span::fg(DIM, prev_g),
-            Span::fg(DARK, "  "),
-            Span::fg(st_color, icon),
-            Span::fg(DIM, "  "),
-            Span::fg(st_color, status),
-            Span::fg(DARK, "  "),
-            Span::fg(DIM, next_g),
-            Span::fg(DARK, "  ·  "),
-            Span::fg(GRAY, &idx),
-            Span::fg(DARK, "  ·  "),
-            Span::fg(DIM, vol_minus),
-            Span::fg(DARK, " "),
-            Span::fg(GRAY, &vol),
-            Span::fg(DARK, " "),
-            Span::fg(DIM, vol_plus),
-        ];
-        let status_x =
-            paint_in_region(&mut out, y as u16, content_x0, content_cols, &status_spans)?;
-        let mut cx = status_x;
-        self.hits.prev = Some(HitRect {
-            x: cx,
-            y: y as u16,
-            w: prev_g.chars().count() as u16,
-            h: 1,
-        });
-        cx += prev_g.chars().count() as u16 + 2;
-        let pp_w = (icon.chars().count() + 2 + status.chars().count()) as u16;
-        self.hits.play_pause = Some(HitRect {
-            x: cx,
-            y: y as u16,
-            w: pp_w,
-            h: 1,
-        });
-        cx += pp_w + 2;
-        self.hits.next = Some(HitRect {
-            x: cx,
-            y: y as u16,
-            w: next_g.chars().count() as u16,
-            h: 1,
-        });
-        // Volume controls sit at the end: − vol +
-        let vol_plus_w = vol_plus.chars().count() as u16;
-        let vol_w = vol.chars().count() as u16;
-        let vol_minus_w = vol_minus.chars().count() as u16;
-        let end = status_x + spans_width(&status_spans) as u16;
-        let plus_x = end - vol_plus_w;
-        let vol_x = plus_x - 1 - vol_w;
-        let minus_x = vol_x - 1 - vol_minus_w;
-        self.hits.volume_down = Some(HitRect {
-            x: minus_x.saturating_sub(1),
-            y: y as u16,
-            w: vol_minus_w + 2,
-            h: 1,
-        });
-        self.hits.volume = Some(HitRect {
-            x: vol_x,
-            y: y as u16,
-            w: vol_w,
-            h: 1,
-        });
-        self.hits.volume_up = Some(HitRect {
-            x: plus_x.saturating_sub(1),
-            y: y as u16,
-            w: vol_plus_w + 2,
-            h: 1,
-        });
-        y += 1;
-
-        let mut meta_spans: Vec<Span<'_>> = vec![
-            Span::fg(DIM, "spd "),
-            Span::fg(GRAY, &spd),
-            Span::fg(DARK, "  ·  "),
-            Span::fg(DIM, "ptch "),
-            Span::fg(GRAY, &ptch),
-            Span::fg(DARK, "  ·  "),
-            Span::fg(DIM, "eq "),
-            Span::fg(GRAY, eq),
-            Span::fg(DARK, "  ·  "),
-            Span::fg(DIM, "repeat "),
-            Span::fg(GRAY, loop_l),
-        ];
-        // Subtle session extras on the same status line — no new chrome.
-        if state.smart_shuffle {
-            meta_spans.push(Span::fg(DARK, "  ·  "));
-            meta_spans.push(Span::fg(DIM, "smart"));
-        }
-        if let Some(sleep) = state.sleep_label
-            && !sleep.is_empty()
-        {
-            meta_spans.push(Span::fg(DARK, "  ·  "));
-            meta_spans.push(Span::fg(DIM, "sleep "));
-            meta_spans.push(Span::fg(GRAY, sleep));
-        }
-        let meta_x = paint_in_region(&mut out, y as u16, content_x0, content_cols, &meta_spans)?;
-        let mut mx = meta_x;
-        self.hits.speed = Some(HitRect {
-            x: mx,
-            y: y as u16,
-            w: (4 + spd.chars().count()) as u16,
-            h: 1,
-        });
-        mx += 4 + spd.chars().count() as u16;
-        mx += 3; // "  ·  "
-        self.hits.pitch = Some(HitRect {
-            x: mx,
-            y: y as u16,
-            w: (5 + ptch.chars().count()) as u16,
-            h: 1,
-        });
-        mx += 5 + ptch.chars().count() as u16;
-        mx += 3;
-        self.hits.eq = Some(HitRect {
-            x: mx,
-            y: y as u16,
-            w: (3 + eq.chars().count()) as u16,
-            h: 1,
-        });
-        y += 1;
-        y += 1; // one empty breathing row before the footer bar
-        let footer_dim = mix_rgb(DARK, Color::Black, 1.0 - intro);
-        let footer_key = mix_rgb(GRAY, DARK, 1.0 - intro * 0.7);
-        paint_key_footer(
-            &mut out,
-            y as u16,
-            content_x0,
-            content_cols,
-            footer_key,
-            footer_dim,
-            self.preview,
-            &mut self.hits,
-        )?;
-        y += 1;
-        // Pinned header: ALWAYS below the footer chip row, both positions.
-        // `below` then continues with the lyric LINES under the header;
-        // `above` already painted the lines on top.
-        if lyrics_h > 0 {
-            if lyrics_body_h == 0 {
+            if self.show_path {
+                let path_c = mix_rgb(DIM, DARK, 1.0 - intro * 0.85);
+                paint_in_region(
+                    &mut out,
+                    y as u16,
+                    content_x0,
+                    content_cols,
+                    &[Span::fg(path_c, &path)],
+                )?;
+                y += 1;
+            }
+            if lyrics_on {
+                self.paint_lyric_line(
+                    &mut out,
+                    y as u16,
+                    content_x0,
+                    content_cols,
+                    state,
+                    max_title,
+                )?;
+            } else {
+                self.hits.lyrics_pane = None;
+                self.hits.lyrics_head = None;
                 self.lyrics_active_row = None;
             }
-            y += 1; // breathing gap between footer and pinned header
-            if lyrics_head_h > 0 {
-                y = self.paint_lyrics_header(&mut out, y, content_x0, content_cols, block_w)?;
-            }
-            if !lyrics_above && lyrics_body_h > 0 {
-                y = self.paint_lyrics_body(
-                    &mut out,
-                    y,
-                    content_x0,
-                    content_cols,
-                    block_w,
-                    state,
-                    LYRICS_ROWS,
-                    lyrics_body_h,
-                    lyrics_line_prog,
-                    ldm,
-                )?;
-            }
-        }
+            y += 1;
 
-        // Cava overlays below the player — fixed offset, does not shift the block.
-        let cava_rows = self.config.cava.rows as usize;
-        if show_cava_strip {
-            let cava_y = (y + 2).min(rows.saturating_sub(cava_rows + 1));
-            if let Some(ref levels) = cava_levels {
-                let intensity = if playing {
-                    0.85
-                } else if state.paused {
-                    0.32
-                } else {
-                    0.14
-                };
-                let strip_w = block_w
-                    .saturating_add(4)
-                    .min(content_cols.saturating_sub(4));
-                let cava_color = if self.config.accent == Accent::Default {
-                    mix(CAVA_DIM, CAVA_SOFT, intensity * 0.95)
-                } else {
-                    mix_rgb(DARK, accent_dim, intensity.clamp(0.2, 1.0))
-                };
-                let (strip_x, strip_h) = paint_cava_bars(
-                    &mut out,
-                    cava_y as u16,
-                    content_x0,
-                    content_cols,
-                    strip_w,
-                    levels,
-                    intensity,
-                    self.config.cava.style,
-                    cava_rows,
-                    cava_color,
-                )?;
-                self.hits.cava = Some(HitRect {
-                    x: strip_x,
-                    y: cava_y as u16,
-                    w: strip_w as u16,
-                    h: strip_h.max(1),
-                });
+            let knob_c = if playing && !ldm && !frozen {
+                mix_rgb(accent_dim, accent, pulse(2.0))
+            } else if state.paused {
+                rice.body
+            } else {
+                rice.title
+            };
+            let fill_c = mix_rgb(accent, DARK, 1.0 - intro);
+            let progress_spans = [
+                Span::fg(DIM, &pos_s),
+                Span::fg(DIM, "  "),
+                Span::fg(fill_c, &filled),
+                Span::fg(knob_c, &knob),
+                Span::fg(DARK, &empty),
+                Span::fg(DIM, "  "),
+                Span::fg(DIM, &total_s),
+            ];
+            let prog_x = paint_in_region(
+                &mut out,
+                y as u16,
+                content_x0,
+                content_cols,
+                &progress_spans,
+            )?;
+            let bar_x = prog_x + pos_s.chars().count() as u16 + 2;
+            self.hits.progress = Some(HitRect {
+                x: bar_x,
+                y: y as u16,
+                w: (filled.chars().count() + knob.chars().count() + empty.chars().count()) as u16,
+                h: 1,
+            });
+            y += 1;
+
+            let st_color = if state.stopped {
+                mix_rgb(GRAY, DARK, 1.0 - intro)
+            } else if state.paused || state.muted {
+                GRAY
+            } else if ldm || frozen {
+                accent
+            } else {
+                mix_rgb(accent_dim, accent, pulse(3.2))
+            };
+            // ◂  icon status  ▸  ·  idx  ·  −  vol  +
+            let prev_g = "◂";
+            let next_g = "▸";
+            let vol_minus = "−";
+            let vol_plus = "+";
+            let status_spans = [
+                Span::fg(DIM, prev_g),
+                Span::fg(DARK, "  "),
+                Span::fg(st_color, icon),
+                Span::fg(DIM, "  "),
+                Span::fg(st_color, status),
+                Span::fg(DARK, "  "),
+                Span::fg(DIM, next_g),
+                Span::fg(DARK, "  ·  "),
+                Span::fg(GRAY, &idx),
+                Span::fg(DARK, "  ·  "),
+                Span::fg(DIM, vol_minus),
+                Span::fg(DARK, " "),
+                Span::fg(GRAY, &vol),
+                Span::fg(DARK, " "),
+                Span::fg(DIM, vol_plus),
+            ];
+            let status_x =
+                paint_in_region(&mut out, y as u16, content_x0, content_cols, &status_spans)?;
+            let mut cx = status_x;
+            self.hits.prev = Some(HitRect {
+                x: cx,
+                y: y as u16,
+                w: str_width(prev_g) as u16,
+                h: 1,
+            });
+            cx += str_width(prev_g) as u16 + 2;
+            let pp_w = (str_width(icon) + 2 + str_width(status)) as u16;
+            self.hits.play_pause = Some(HitRect {
+                x: cx,
+                y: y as u16,
+                w: pp_w,
+                h: 1,
+            });
+            cx += pp_w + 2;
+            self.hits.next = Some(HitRect {
+                x: cx,
+                y: y as u16,
+                w: str_width(next_g) as u16,
+                h: 1,
+            });
+            // Volume controls sit at the end: − vol +
+            let vol_plus_w = str_width(vol_plus) as u16;
+            let vol_w = str_width(&vol) as u16;
+            let vol_minus_w = str_width(vol_minus) as u16;
+            let end = status_x + spans_width(&status_spans) as u16;
+            let plus_x = end - vol_plus_w;
+            let vol_x = plus_x - 1 - vol_w;
+            let minus_x = vol_x - 1 - vol_minus_w;
+            self.hits.volume_down = Some(HitRect {
+                x: minus_x.saturating_sub(1),
+                y: y as u16,
+                w: vol_minus_w + 2,
+                h: 1,
+            });
+            self.hits.volume = Some(HitRect {
+                x: vol_x,
+                y: y as u16,
+                w: vol_w,
+                h: 1,
+            });
+            self.hits.volume_up = Some(HitRect {
+                x: plus_x.saturating_sub(1),
+                y: y as u16,
+                w: vol_plus_w + 2,
+                h: 1,
+            });
+            y += 1;
+
+            let mut meta_spans: Vec<Span<'_>> = vec![
+                Span::fg(DIM, "spd "),
+                Span::fg(GRAY, &spd),
+                Span::fg(DARK, "  ·  "),
+                Span::fg(DIM, "ptch "),
+                Span::fg(GRAY, &ptch),
+                Span::fg(DARK, "  ·  "),
+                Span::fg(DIM, "eq "),
+                Span::fg(GRAY, eq),
+                Span::fg(DARK, "  ·  "),
+                Span::fg(DIM, "repeat "),
+                Span::fg(GRAY, loop_l),
+            ];
+            if state.smart_shuffle {
+                meta_spans.push(Span::fg(DARK, "  ·  "));
+                meta_spans.push(Span::fg(DIM, "smart"));
+            }
+            if let Some(sleep) = state.sleep_label
+                && !sleep.is_empty()
+            {
+                meta_spans.push(Span::fg(DARK, "  ·  "));
+                meta_spans.push(Span::fg(DIM, "sleep "));
+                meta_spans.push(Span::fg(GRAY, sleep));
+            }
+            let meta_x =
+                paint_in_region(&mut out, y as u16, content_x0, content_cols, &meta_spans)?;
+            let mut mx = meta_x;
+            self.hits.speed = Some(HitRect {
+                x: mx,
+                y: y as u16,
+                w: (4 + str_width(&spd)) as u16,
+                h: 1,
+            });
+            mx += 4 + str_width(&spd) as u16;
+            mx += 5;
+            self.hits.pitch = Some(HitRect {
+                x: mx,
+                y: y as u16,
+                w: (5 + str_width(&ptch)) as u16,
+                h: 1,
+            });
+            mx += 5 + str_width(&ptch) as u16;
+            mx += 5;
+            self.hits.eq = Some(HitRect {
+                x: mx,
+                y: y as u16,
+                w: (3 + str_width(eq)) as u16,
+                h: 1,
+            });
+            if spans_width(&status_spans) > content_cols {
+                self.hits.prev = None;
+                self.hits.play_pause = None;
+                self.hits.next = None;
+                self.hits.volume_down = None;
+                self.hits.volume = None;
+                self.hits.volume_up = None;
+            }
+            if spans_width(&meta_spans) > content_cols {
+                self.hits.speed = None;
+                self.hits.pitch = None;
+                self.hits.eq = None;
+            }
+            y += 1;
+            y += 1; // one empty breathing row before the footer bar
+            let footer_dim = mix_rgb(rice.muted, Color::Black, 1.0 - intro);
+            let footer_key = mix_rgb(rice.body, rice.muted, 1.0 - intro * 0.7);
+            paint_key_footer(
+                &mut out,
+                y as u16,
+                content_x0,
+                content_cols,
+                footer_key,
+                footer_dim,
+                self.preview,
+                &mut self.hits,
+            )?;
+            y += 1;
+            // Cava overlays below the player — fixed offset, does not shift the block.
+            let cava_rows = self.config.cava.rows as usize;
+            if show_cava_strip && y + 2 + cava_rows < rows {
+                let cava_y = y + 2;
+                if let Some(ref levels) = cava_levels {
+                    let intensity: f64 = if playing {
+                        0.85
+                    } else if state.paused {
+                        0.32
+                    } else {
+                        0.14
+                    };
+                    let strip_w = block_w
+                        .saturating_add(4)
+                        .min(content_cols.saturating_sub(4));
+                    let cava_color = if rice_active || self.config.accent != Accent::Default {
+                        mix_rgb(rice.muted, accent_dim, intensity.clamp(0.2, 1.0))
+                    } else {
+                        mix(CAVA_DIM, CAVA_SOFT, intensity * 0.95)
+                    };
+                    let (strip_x, strip_h) = paint_cava_bars(
+                        &mut out,
+                        cava_y as u16,
+                        content_x0,
+                        content_cols,
+                        strip_w,
+                        levels,
+                        intensity,
+                        self.config.cava.style,
+                        cava_rows,
+                        cava_color,
+                    )?;
+                    self.hits.cava = Some(HitRect {
+                        x: strip_x,
+                        y: cava_y as u16,
+                        w: strip_w as u16,
+                        h: strip_h.max(1),
+                    });
+                }
             }
         }
 
         if list_visual {
-            let list_right = self.list_side() == PanelSide::Right;
-            let (track_y, track_h, thumb_y, thumb_h, vis_eff) = paint_list_sidebar(
-                &mut out,
-                &mut self.hits,
-                cols,
-                rows,
-                LIST_SIDEBAR_W.min(cols.saturating_sub(4)).max(20.min(cols)),
-                self.list_scroll,
-                self.list_visible,
-                self.list_cursor,
-                state.index,
-                state.list_names,
-                playing,
-                t,
-                ldm,
-                frozen,
-                accent,
-                list_prog,
-                self.show_list,
-                list_right,
-            )?;
-            // Remember exactly what was painted so input math (wheel,
-            // drag, paging) matches the pixels — even mid-pop.
-            self.list_vis_eff = vis_eff;
-            self.list_track_y = track_y;
-            self.list_track_h = track_h;
-            self.list_thumb_y = thumb_y;
-            self.list_thumb_h = thumb_h;
+            let list_anchor_right = self.list_side() == PanelSide::Right;
+            // Resolved width: the rail paints exactly its Layout columns.
+            let list_resolved_w = if list_anchor_right {
+                layout.right_w
+            } else {
+                layout.left_w
+            };
+            // Collapsed rail: badge only, no track painting.
+            if (list_anchor_right && layout.right_collapsed)
+                || (!list_anchor_right && layout.left_collapsed)
+            {
+                paint_rail_badge(&mut out, cols, rows, list_anchor_right, rice, "list")?;
+                self.hits.list.clear();
+                self.hits.list_bar = None;
+                self.hits.list_pane = None;
+                self.list_vis_eff = 0;
+            } else {
+                let (track_y, track_h, thumb_y, thumb_h, vis_eff) = paint_list_sidebar(
+                    &mut out,
+                    &mut self.hits,
+                    cols,
+                    rows,
+                    list_resolved_w.max(RAIL_MIN_W.min(list_want.max(1))),
+                    self.list_scroll,
+                    self.list_visible,
+                    self.list_cursor,
+                    state.index,
+                    state.list_names,
+                    playing,
+                    t,
+                    ldm,
+                    frozen,
+                    rice,
+                    list_prog,
+                    self.show_list,
+                    list_anchor_right,
+                )?;
+                // Remember exactly what was painted so input math (wheel,
+                // drag, paging) matches the pixels — even mid-pop.
+                self.list_vis_eff = vis_eff;
+                self.list_track_y = track_y;
+                self.list_track_h = track_h;
+                self.list_thumb_y = thumb_y;
+                self.list_thumb_h = thumb_h;
+            }
         } else {
             self.hits.list.clear();
             self.hits.list_bar = None;
@@ -2185,20 +2127,31 @@ impl SessionUi {
 
         // Settings card uses its sticky open-time side; help uses its own
         // sticky side. The two never share a side (second opener takes the
-        // free one), so they never overlap on wide terminals; on narrow
-        // ones help shrinks to clear settings.
-        let settings_right_side = self.settings_side() == PanelSide::Right;
-        let _settings_render_w = if settings_visual {
+        // free one). Both paint exactly their Layout columns.
+        let settings_anchor_right = self.settings_side() == PanelSide::Right;
+        let settings_resolved_w = if settings_anchor_right {
+            layout.right_w
+        } else {
+            layout.left_w
+        };
+        let _settings_render_w = if settings_visual
+            && !((settings_anchor_right && layout.right_collapsed)
+                || (!settings_anchor_right && layout.left_collapsed))
+        {
             settings::paint_settings_sidebar(
                 &mut out,
                 cols,
                 rows,
                 &mut self.settings,
                 &self.config,
-                accent,
-                settings_right_side,
+                rice,
+                settings_anchor_right,
+                settings_resolved_w.max(RAIL_MIN_W.min(settings_want.max(1))),
             )?
         } else {
+            if settings_visual {
+                paint_rail_badge(&mut out, cols, rows, settings_anchor_right, rice, "conf")?;
+            }
             self.settings.close_paint_state();
             0
         };
@@ -2209,42 +2162,56 @@ impl SessionUi {
             .map(|(x, _, w, _)| (x, x + w))
             .unwrap_or((0, 0));
 
-        let help_render_w = if help_visual {
-            let help_right = self.help_side() == PanelSide::Right;
+        let help_anchor_right = self.help_side() == PanelSide::Right;
+        let help_resolved_w = if help_anchor_right {
+            layout.right_w
+        } else {
+            layout.left_w
+        };
+        let (help_render_w, help_scroll) = if help_visual
+            && !((help_anchor_right && layout.right_collapsed)
+                || (!help_anchor_right && layout.left_collapsed))
+        {
             paint_help_sidebar(
                 &mut out,
                 cols,
                 rows,
                 &mut self.hits,
-                help_full_w,
-                accent,
+                help_resolved_w.max(RAIL_MIN_W.min(help_want.max(1))),
+                rice,
                 self.preview,
                 help_prog,
                 self.show_help,
                 settings_right,
                 settings_left,
-                help_right,
+                help_anchor_right,
+                self.help_scroll,
             )?
         } else {
+            if help_visual {
+                paint_rail_badge(&mut out, cols, rows, help_anchor_right, rice, "help")?;
+            }
             self.hits.help_pane = None;
-            0
+            (0, 0)
         };
+        self.help_scroll = help_scroll;
         let _ = help_render_w;
 
-        // Docked lyrics own their hit rects (set in the painters).
-        // When hidden, clear them so clicks fall through to the player.
-        if lyrics_h == 0 {
-            self.hits.lyrics_pane = None;
-            self.hits.lyrics_head = None;
-            self.lyrics_active_row = None;
-        }
-
-        // Toast stack — fixed anchor + own width from `toast_pos`.
-        // Panels never push or resize it; newest paints last (on top).
+        // Toast stack — anchored inside the player region, never over a rail.
         let stack = self.live_toasts();
         if !stack.is_empty() {
             let pos = self.config.toast_pos;
-            paint_toast_stack(&mut out, cols, rows, &stack, pos, ldm)?;
+            paint_toast_stack(
+                &mut out,
+                cols,
+                rows,
+                &stack,
+                pos,
+                ldm,
+                rice,
+                content_x0,
+                content_cols,
+            )?;
         }
 
         queue!(out, EndSynchronizedUpdate)?;
@@ -2260,10 +2227,22 @@ const HELP_SECTIONS: &[(&str, &[(&str, &str)])] = &[
         &[
             ("space", "pause"),
             ("n p", "next / prev"),
+            ("d", "dislike skip"),
             ("s", "stop"),
             ("l", "list"),
             ("r", "shuffle"),
             ("o", "repeat cycle"),
+        ],
+    ),
+    (
+        "queue",
+        &[
+            ("J K", "move track"),
+            ("a", "play next"),
+            ("A", "append end"),
+            ("D", "clear keep cur"),
+            ("u", "undo"),
+            ("g", "jump current"),
         ],
     ),
     ("seek", &[("← →", "±5s"), ("{ }", "±60s"), ("1–9", "jump")]),
@@ -2283,11 +2262,11 @@ const HELP_SECTIONS: &[(&str, &[(&str, &str)])] = &[
         &[
             ("f", "filename"),
             ("v", "cava"),
-            ("x", "smart mix"),
             ("y", "lyrics"),
+            ("x", "smart mix"),
             ("z", "sleep"),
             ("c", "settings"),
-            ("↑↓←→", "list scroll"),
+            ("↑↓ jk", "list / next"),
             ("?", "help"),
             ("q", "quit"),
         ],
@@ -2320,20 +2299,31 @@ const LIST_SIDEBAR_W: usize = 30;
 const LIST_SIDEBAR_HEADER: usize = 3;
 const LIST_SIDEBAR_FOOTER: usize = 2;
 
-fn help_sidebar_height(preview: bool) -> usize {
-    let sections = if preview {
-        HELP_SECTIONS_PREVIEW
+/// Collapsed-rail badge: when the terminal is too narrow for a rail plus
+/// the player minimum, the rail shrinks to this one-cell hint at the
+/// screen edge instead of overlapping anything.
+fn paint_rail_badge(
+    out: &mut impl Write,
+    cols: usize,
+    rows: usize,
+    anchor_right: bool,
+    theme: crate::rice::UiTheme,
+    label: &str,
+) -> io::Result<()> {
+    let x = if anchor_right {
+        cols.saturating_sub(1)
     } else {
-        HELP_SECTIONS
-    };
-    let mut n = 1; // top pad
-    for (i, (_title, rows)) in sections.iter().enumerate() {
-        if i > 0 {
-            n += 1; // blank between sections
-        }
-        n += 1 + rows.len(); // title + rows
-    }
-    n + 2 // blank + "h close"
+        0
+    } as u16;
+    let y = rows.saturating_sub(2).max(1) as u16;
+    queue!(
+        out,
+        MoveTo(x, y),
+        SetForegroundColor(theme.muted),
+        Print(truncate(label, 1)),
+        ResetColor
+    )?;
+    Ok(())
 }
 
 /// Floating help card — hovers over the player without touching its layout.
@@ -2347,20 +2337,19 @@ fn paint_help_sidebar(
     rows: usize,
     hits: &mut HitMap,
     sidebar_w: usize,
-    accent: Color,
+    theme: crate::rice::UiTheme,
     preview: bool,
     progress: f64,
     logically_open: bool,
     avoid_left: usize,
     avoid_right_edge: usize,
     anchor_right: bool,
-) -> io::Result<usize> {
-    use crossterm::style::SetBackgroundColor;
-
+    scroll: usize,
+) -> io::Result<(usize, usize)> {
     let e = progress.clamp(0.0, 1.0);
     if e <= 0.02 {
         hits.help_pane = None;
-        return Ok(0);
+        return Ok((0, 0));
     }
 
     let sections = if preview {
@@ -2368,46 +2357,31 @@ fn paint_help_sidebar(
     } else {
         HELP_SECTIONS
     };
-    let panel_bg = Color::Rgb {
-        r: 22,
-        g: 22,
-        b: 22,
-    };
+    let border = theme.border;
+    let accent = theme.accent;
 
-    // Box geometry: 1-col margin from the pinned edge, vertically centered.
-    // Shrink first to clear the settings card on narrow terminals.
-    let mut box_w = sidebar_w.max(16).min(cols.saturating_sub(2).max(16));
-    if anchor_right {
-        let max_w = cols.saturating_sub(avoid_left + 2).max(12).min(box_w);
-        box_w = max_w.max(12).min(box_w);
-    } else {
-        // Left-anchored: clear a right-side settings card.
-        let room = avoid_right_edge.saturating_sub(3).max(12).min(box_w);
-        box_w = room.max(12).min(box_w);
-    }
-    let need = help_sidebar_height(preview) + 4; // borders + inner pads
-    let box_h = need.min(rows.saturating_sub(1).max(5)).max(5);
-
-    // Pop geometry: pinned edge stays, width/height ease to full.
+    // Rail width comes resolved from Layout — paint exactly these columns.
+    // `avoid_*` only shifts the anchor so two rails never share a side.
+    let box_w = sidebar_w.max(8).min(cols.max(1));
+    let _ = (avoid_left, avoid_right_edge);
+    // Pop geometry: pinned edge stays, width eases to full. Height is
+    // always full so the rail never floats mid-screen.
     let (render_w, render_h) = if e >= 0.999 {
-        (box_w, box_h)
+        (box_w, rows)
     } else {
         (
             ((box_w as f64 * (0.55 + 0.45 * e)) as usize)
                 .max(12)
                 .min(box_w),
-            ((box_h as f64 * (0.6 + 0.4 * e)) as usize)
-                .max(5)
-                .min(box_h),
+            rows,
         )
     };
     let x0 = if anchor_right {
-        cols.saturating_sub(render_w + 1)
+        cols.saturating_sub(render_w)
     } else {
-        1usize
+        0usize
     };
-    let y0 = rows.saturating_sub(box_h) / 2;
-    let ry0 = y0 + (box_h - render_h) / 2;
+    let ry0 = 0usize;
     let y1 = ry0 + render_h - 1;
 
     // Top card owns its clicks — set only while logically open so a
@@ -2423,100 +2397,79 @@ fn paint_help_sidebar(
         None
     };
 
-    // Solid fill so the player never shows through.
-    let fill = " ".repeat(render_w);
-    for row in ry0..=y1 {
+    // No solid fill: the rail is transparent over the terminal
+    // background, with a single divider line at its inner edge.
+    let divider_x = if anchor_right { x0 } else { x0 + render_w - 1 };
+    for row in ry0..=y1.min(rows.saturating_sub(1)) {
         queue!(
             out,
-            MoveTo(x0 as u16, row as u16),
-            SetBackgroundColor(panel_bg),
-            SetForegroundColor(panel_bg),
-            Print(&fill),
-            ResetColor
-        )?;
-    }
-
-    // Thin border — same DARK hairline language as the toast card.
-    let edge = "─".repeat(render_w.saturating_sub(2));
-    let top = format!("┌{edge}┐");
-    let bot = format!("└{edge}┘");
-    queue!(
-        out,
-        MoveTo(x0 as u16, ry0 as u16),
-        SetBackgroundColor(panel_bg),
-        SetForegroundColor(DARK),
-        Print(&top),
-        ResetColor
-    )?;
-    queue!(
-        out,
-        MoveTo(x0 as u16, y1 as u16),
-        SetBackgroundColor(panel_bg),
-        SetForegroundColor(DARK),
-        Print(&bot),
-        ResetColor
-    )?;
-    for row in (ry0 + 1)..y1 {
-        queue!(
-            out,
-            MoveTo(x0 as u16, row as u16),
-            SetBackgroundColor(panel_bg),
-            SetForegroundColor(DARK),
-            Print("│"),
-            ResetColor
-        )?;
-        queue!(
-            out,
-            MoveTo((x0 + render_w - 1) as u16, row as u16),
-            SetBackgroundColor(panel_bg),
-            SetForegroundColor(DARK),
+            MoveTo(divider_x as u16, row as u16),
+            SetForegroundColor(border),
             Print("│"),
             ResetColor
         )?;
     }
-
-    // Body text with 1-col padding inside the border (clipped while popping).
+    // Body text with 1-col padding (clipped while popping).
     let render_inner = render_w.saturating_sub(4).max(8);
     let text_x = x0 + 2;
-    let last = y1.saturating_sub(1); // keep bottom pad + border clear
-    let mut y = ry0 + 2;
+    let last = rows.saturating_sub(1);
+    let mut y = 1usize;
     let mut paint_row = |y: usize, spans: &[Span<'_>]| -> io::Result<()> {
         queue!(out, MoveTo(text_x as u16, y as u16))?;
-        queue!(out, SetBackgroundColor(panel_bg))?;
         paint_spans(out, spans)
     };
 
-    for (si, (title, rows_sec)) in sections.iter().enumerate() {
-        if si > 0 {
-            y += 1;
-        }
-        if y > last {
+    // Scrollable window: flat rows page through `scroll`, chrome (hint)
+    // always stays. Never pushes the player — clips inside the rail.
+    let flat: Vec<(bool, String, String)> = sections
+        .iter()
+        .flat_map(|(title, rows_sec)| {
+            let mut v = vec![(true, title.to_string(), String::new())];
+            v.extend(
+                rows_sec
+                    .iter()
+                    .map(|(k, a)| (false, k.to_string(), a.to_string())),
+            );
+            v
+        })
+        .collect();
+    // Rows for content: everything below row 1, minus the hint line.
+    let view_h = last.saturating_sub(1).saturating_sub(1).max(1);
+    let scrolling = flat.len() > view_h;
+    let scroll = scroll.min(flat.len().saturating_sub(view_h));
+    for (is_title, a, b) in flat.iter().skip(scroll).take(view_h) {
+        if y > last.saturating_sub(1) {
             break;
         }
-        paint_row(y, &[Span::fg(DIM, title)])?;
-        y += 1;
-        for (keys, action) in *rows_sec {
-            if y > last {
-                break;
-            }
-            let key_col = format!("{keys:<6}");
-            let action_t = truncate(action, render_inner.saturating_sub(8));
+        if *is_title {
+            paint_row(y, &[Span::fg(theme.title, a)])?;
+        } else {
+            let key_col = format!("{a:<6}");
+            let action_t = truncate(b, render_inner.saturating_sub(8));
             paint_row(
                 y,
                 &[
                     Span::fg(accent, &key_col),
-                    Span::fg(DARK, " "),
-                    Span::fg(GRAY, &action_t),
+                    Span::fg(theme.muted, " "),
+                    Span::fg(theme.body, &action_t),
                 ],
             )?;
-            y += 1;
         }
-    }
-    if y < last {
         y += 1;
-        paint_row(y, &[Span::fg(DARK, "h  close")])?;
     }
-    Ok(render_w)
+    if y <= last {
+        let hint_text = if scrolling {
+            format!(
+                "h close · {}/{}",
+                scroll + 1,
+                flat.len().saturating_sub(view_h) + 1
+            )
+        } else {
+            "h  close".to_string()
+        };
+        paint_row(y, &[Span::fg(theme.muted, &hint_text)])?;
+    }
+    Ok((render_w, scroll))
 }
 
 /// Playlist panel — compact floating card in the exact `?`/`c` language:
@@ -2544,12 +2497,11 @@ fn paint_list_sidebar(
     t: f64,
     ldm: bool,
     frozen: bool,
-    accent: Color,
+    theme: crate::rice::UiTheme,
     progress: f64,
     logically_open: bool,
     anchor_right: bool,
 ) -> io::Result<(u16, u16, u16, u16, usize)> {
-    use crossterm::style::SetBackgroundColor;
     let e = progress.clamp(0.0, 1.0);
     if e <= 0.02 {
         hits.list.clear();
@@ -2560,40 +2512,36 @@ fn paint_list_sidebar(
     let pulse = |period: f64| {
         if frozen { 0.5 } else { breath(t, period) }
     };
-    let panel_bg = Color::Rgb {
-        r: 22,
-        g: 22,
-        b: 22,
-    };
-    let box_w = sidebar_w.max(20).min(cols.max(1));
-    // Compact card: just the visible rows + title/hairline/footer + borders.
-    let vis_want = visible.max(1).min(names.len().max(1));
-    let want = vis_want + LIST_SIDEBAR_HEADER + LIST_SIDEBAR_FOOTER + 2; // borders
-    let box_h = want.min(rows.saturating_sub(2).max(7)).max(7);
+    let border = theme.border;
+    let accent = theme.accent;
+    let accent_dim = theme.accent_dim;
+    // Rail width comes resolved from Layout — paint exactly these columns.
+    let box_w = sidebar_w.max(8).min(cols.max(1));
 
-    // Pop geometry: pinned edge stays, width/height ease to full.
+    // Pop geometry: pinned edge stays, width eases to full. Height is
+    // always full so the rail never floats mid-screen.
     let (sidebar_w, list_h) = if e >= 0.999 {
-        (box_w, box_h)
+        (box_w, rows)
     } else {
         (
             ((box_w as f64 * (0.55 + 0.45 * e)) as usize)
-                .max(16)
+                .max(8)
                 .min(box_w),
-            ((box_h as f64 * (0.6 + 0.4 * e)) as usize)
-                .max(5)
-                .min(box_h),
+            rows,
         )
     };
     let x0 = if anchor_right {
-        cols.saturating_sub(sidebar_w + 1)
+        cols.saturating_sub(sidebar_w)
     } else {
-        1usize
+        0usize
     };
-    let y0 = rows.saturating_sub(box_h) / 2 + (box_h - list_h) / 2;
+    let y0 = 0usize;
     let track_x = x0 + sidebar_w.saturating_sub(2);
     let track_y = (y0 + LIST_SIDEBAR_HEADER) as u16;
+    // Track area stops one row above the bottom so the pinned footer
+    // hint never shares a row with a track.
     let track_h = list_h
-        .saturating_sub(LIST_SIDEBAR_HEADER + LIST_SIDEBAR_FOOTER + 2)
+        .saturating_sub(LIST_SIDEBAR_HEADER + LIST_SIDEBAR_FOOTER + 1)
         .max(1) as u16;
 
     hits.list.clear();
@@ -2611,50 +2559,14 @@ fn paint_list_sidebar(
         None
     };
 
-    // Solid fill so the player never shows through (both modes).
-    let fill = " ".repeat(sidebar_w);
+    // Transparent rail over the terminal background, with a single
+    // divider line at its inner edge.
+    let divider_x = if anchor_right { x0 } else { x0 + sidebar_w - 1 };
     for row in y0..(y0 + list_h).min(rows) {
         queue!(
             out,
-            MoveTo(x0 as u16, row as u16),
-            SetBackgroundColor(panel_bg),
-            SetForegroundColor(panel_bg),
-            Print(&fill),
-            ResetColor
-        )?;
-    }
-    // Hairline frame: full card on all four sides (same as `?`/`c`).
-    let edge = "─".repeat(sidebar_w.saturating_sub(2));
-    queue!(
-        out,
-        MoveTo(x0 as u16, y0 as u16),
-        SetBackgroundColor(panel_bg),
-        SetForegroundColor(DARK),
-        Print(&format!("┌{edge}┐")),
-        ResetColor
-    )?;
-    queue!(
-        out,
-        MoveTo(x0 as u16, (y0 + list_h - 1) as u16),
-        SetBackgroundColor(panel_bg),
-        SetForegroundColor(DARK),
-        Print(&format!("└{edge}┘")),
-        ResetColor
-    )?;
-    for row in (y0 + 1)..(y0 + list_h - 1) {
-        queue!(
-            out,
-            MoveTo(x0 as u16, row as u16),
-            SetBackgroundColor(panel_bg),
-            SetForegroundColor(DARK),
-            Print("│"),
-            ResetColor
-        )?;
-        queue!(
-            out,
-            MoveTo((x0 + sidebar_w - 1) as u16, row as u16),
-            SetBackgroundColor(panel_bg),
-            SetForegroundColor(DARK),
+            MoveTo(divider_x as u16, row as u16),
+            SetForegroundColor(border),
             Print("│"),
             ResetColor
         )?;
@@ -2666,16 +2578,14 @@ fn paint_list_sidebar(
     queue!(
         out,
         MoveTo(tx, (y0 + 1) as u16),
-        SetBackgroundColor(panel_bg),
-        SetForegroundColor(DIM),
+        SetForegroundColor(theme.title),
         Print(truncate(&head, inner_w)),
         ResetColor
     )?;
     queue!(
         out,
         MoveTo(tx, (y0 + 2) as u16),
-        SetBackgroundColor(panel_bg),
-        SetForegroundColor(DARK),
+        SetForegroundColor(border),
         Print(&"─".repeat(inner_w.min(cols))),
         ResetColor
     )?;
@@ -2689,13 +2599,15 @@ fn paint_list_sidebar(
         queue!(
             out,
             MoveTo(tx, track_y),
-            SetBackgroundColor(panel_bg),
-            SetForegroundColor(DARK),
+            SetForegroundColor(theme.muted),
             Print("(empty)"),
             ResetColor
         )?;
     } else {
-        let name_w = sidebar_w.saturating_sub(9).max(8);
+        // One truncate only: marker + number + name clipped to the exact
+        // free cells (`inner_w`), so wide chars can never spill past the
+        // divider. Display-width aware (CJK/emoji = 2 cells).
+        let num_w = total.to_string().len();
         for i in 0..vis {
             let idx = scroll + i;
             if idx >= total {
@@ -2705,26 +2617,27 @@ fn paint_list_sidebar(
             let current = track_n == current_1based;
             let selected = idx == cursor_0based.min(total - 1);
             let marker = if current { "›" } else { " " };
-            let chip = format!("{marker}{track_n} {}", truncate(&names[idx], name_w));
+            let prefix = format!("{marker}{track_n:>num_w$} ");
+            let name_max = inner_w.saturating_sub(str_width(&prefix)).max(1);
+            let chip = format!("{prefix}{}", truncate(&names[idx], name_max));
             let y = track_y.saturating_add(i as u16);
             let color = if current {
                 if playing && !ldm && !frozen {
-                    mix_rgb(dim_accent(accent), accent, pulse(2.6))
+                    mix_rgb(accent_dim, accent, pulse(2.6))
                 } else {
                     accent
                 }
             } else if selected {
                 // Keyboard cursor — bright so it reads apart from playback.
-                BRIGHT
+                theme.cursor
             } else {
-                GRAY
+                theme.body
             };
             queue!(
                 out,
                 MoveTo(tx, y),
-                SetBackgroundColor(panel_bg),
                 SetForegroundColor(color),
-                Print(&truncate(&chip, inner_w)),
+                Print(&chip),
                 ResetColor
             )?;
             hits.list.push((
@@ -2744,12 +2657,14 @@ fn paint_list_sidebar(
         hits.list.clear();
     }
 
+    // Footer hint pins to the bottom row of the rail (never mid-list,
+    // never over the player's own footer).
+    let foot_y = rows.saturating_sub(1);
     queue!(
         out,
-        MoveTo(tx, (y0 + list_h - 2) as u16),
-        SetBackgroundColor(panel_bg),
-        SetForegroundColor(DARK),
-        Print("↑↓/jk move · l close"),
+        MoveTo(tx, foot_y as u16),
+        SetForegroundColor(theme.muted),
+        Print(&truncate("J/K move · a next", inner_w)),
         ResetColor
     )?;
 
@@ -2769,14 +2684,13 @@ fn paint_list_sidebar(
     let (thumb_y, thumb_h) = list_thumb_geom(track_h, total, vis, scroll);
     for i in 0..track_h {
         let c = if i >= thumb_y && i < thumb_y + thumb_h {
-            GRAY
+            theme.body
         } else {
-            DARK
+            theme.muted
         };
         queue!(
             out,
             MoveTo(track_x as u16, track_y + i),
-            SetBackgroundColor(panel_bg),
             SetForegroundColor(c),
             Print("┃"),
             ResetColor
@@ -2822,7 +2736,10 @@ fn paint_key_footer(
         if i > 0 {
             x += sep_w;
         }
-        let w = key.chars().count() as u16;
+        let w = str_width(key) as u16;
+        if x as usize + w as usize > region_x + region_w {
+            break;
+        }
         for (dx, dw, target) in foot_targets(key, w) {
             hits.foot.push((
                 HitRect {
@@ -2872,7 +2789,7 @@ impl<'a> Span<'a> {
 }
 
 fn spans_width(spans: &[Span<'_>]) -> usize {
-    spans.iter().map(|s| s.text.chars().count()).sum()
+    spans.iter().map(|s| str_width(s.text)).sum()
 }
 
 fn paint_spans(out: &mut impl Write, spans: &[Span<'_>]) -> io::Result<()> {
@@ -2895,6 +2812,8 @@ pub(crate) fn paint_at(out: &mut impl Write, x: u16, y: u16, spans: &[Span<'_>])
 }
 
 /// Paint centered inside a horizontal region; returns starting column of the content.
+/// Spans wider than the region are clipped (display-width aware) so a rail
+/// never bleeds into the player's area on narrow terminals.
 fn paint_in_region(
     out: &mut impl Write,
     y: u16,
@@ -2902,11 +2821,31 @@ fn paint_in_region(
     region_w: usize,
     spans: &[Span<'_>],
 ) -> io::Result<u16> {
-    let w = spans_width(spans);
-    let x = region_x + region_w.saturating_sub(w) / 2;
-    queue!(out, MoveTo(x as u16, y))?;
-    paint_spans(out, spans)?;
-    Ok(x as u16)
+    let w: usize = spans.iter().map(|s| str_width(s.text)).sum();
+    if w <= region_w {
+        let x = region_x + (region_w - w) / 2;
+        queue!(out, MoveTo(x as u16, y))?;
+        paint_spans(out, spans)?;
+        return Ok(x as u16);
+    }
+    // Too wide: clip spans to fit, keeping whole chars (never split CJK).
+    let mut remaining = region_w;
+    queue!(out, MoveTo(region_x as u16, y))?;
+    for span in spans {
+        if remaining == 0 {
+            break;
+        }
+        let clipped = truncate(span.text, remaining);
+        remaining = remaining.saturating_sub(str_width(&clipped));
+        if let Some(c) = span.color {
+            queue!(out, SetForegroundColor(c))?;
+        } else {
+            queue!(out, ResetColor)?;
+        }
+        queue!(out, Print(&clipped))?;
+    }
+    queue!(out, ResetColor)?;
+    Ok(region_x as u16)
 }
 
 /// Classic vertical cava bars under the shortcut bar (default bar look).
@@ -3023,6 +2962,7 @@ fn paint_cava_bars(
 /// last (front, full brightness). Older cards shift 1 row away from the
 /// anchor and dim, so the stack reads as depth without new colors.
 /// Only `Error` gets a bright border; every kind has its own `· ♪ ✓ !` prefix.
+#[allow(clippy::too_many_arguments)]
 fn paint_toast_stack(
     out: &mut impl Write,
     cols: usize,
@@ -3030,8 +2970,12 @@ fn paint_toast_stack(
     stack: &[(&str, ToastKind, f64)],
     pos: ToastPos,
     ldm: bool,
+    theme: crate::rice::UiTheme,
+    region_x: usize,
+    region_w: usize,
 ) -> io::Result<()> {
-    if stack.is_empty() {
+    let region_w = region_w.min(cols.saturating_sub(region_x));
+    if stack.is_empty() || region_w < 5 || rows < 3 {
         return Ok(());
     }
     let top_anchor = matches!(
@@ -3053,40 +2997,51 @@ fn paint_toast_stack(
         // Depth falloff: older cards dim and sit behind.
         let depth_dim = 1.0 - newest_first as f64 * 0.28;
         let alpha = (base_alpha * depth_dim).clamp(0.0, 1.0);
-        let color = gray(lerp(40.0, 230.0, alpha));
+        let color = mix_rgb(theme.muted, theme.body, alpha);
         let is_err = *kind == ToastKind::Error;
         let edge_c = if is_err {
-            gray(lerp(90.0, 245.0, alpha))
+            mix_rgb(theme.muted, theme.error, alpha)
         } else {
-            mix(Color::Black, DARK, alpha)
+            mix(Color::Black, theme.muted, alpha)
         };
-        let symbol_c = if is_err { BRIGHT } else { DIM };
+        let symbol_c = if is_err { theme.error } else { theme.title };
 
-        let toast_max = cols.saturating_sub(10).clamp(12, 64);
-        let short = msg_truncated(msg, toast_max);
+        let overhead = if stacked { 4 } else { 5 };
+        let short = truncate(msg, region_w.saturating_sub(overhead).min(61));
         let inner = if stacked {
             format!("{} {}", kind.symbol(), short)
         } else {
             format!("{} {} ", kind.symbol(), short)
         };
-        let w = inner.chars().count();
+        let w = str_width(&inner);
         let box_w = w + 2;
+        // Anchor inside the player region — never over a rail.
+        let region_end = region_x + region_w.max(1);
         let x = match pos {
-            ToastPos::BottomCenter | ToastPos::TopCenter => cols.saturating_sub(box_w) / 2,
-            ToastPos::BottomLeft | ToastPos::TopLeft => 2usize,
-            ToastPos::BottomRight | ToastPos::TopRight => cols.saturating_sub(box_w + 2).max(1),
+            ToastPos::BottomCenter | ToastPos::TopCenter => {
+                region_x + region_w.saturating_sub(box_w) / 2
+            }
+            ToastPos::BottomLeft | ToastPos::TopLeft => region_x + 1,
+            ToastPos::BottomRight | ToastPos::TopRight => {
+                region_end.saturating_sub(box_w + 1).max(region_x)
+            }
         };
+        let x = x.min(region_end.saturating_sub(box_w).max(region_x));
         // 3-row box; newest hugs the edge, older ones step away.
         let base_y = if top_anchor {
             1usize
         } else {
             // Keep the bottom border off the last terminal row.
-            rows.saturating_sub(4).max(1)
+            rows.saturating_sub(4)
         };
+        let offset = newest_first * step;
+        if !top_anchor && offset > base_y {
+            continue;
+        }
         let y = if top_anchor {
-            base_y + newest_first * step
+            base_y + offset
         } else {
-            base_y.saturating_sub(newest_first * step)
+            base_y - offset
         };
         if y + 2 >= rows {
             continue;
@@ -3114,11 +3069,6 @@ fn paint_toast_stack(
         paint_at(out, x, y + 2, &[Span::fg(edge_c, &bot)])?;
     }
     Ok(())
-}
-
-fn msg_truncated(msg: &str, toast_max: usize) -> String {
-    // Room taken by the `symbol + space` prefix and trailing space.
-    truncate(msg, toast_max.saturating_sub(3).max(4))
 }
 
 impl Drop for SessionUi {
@@ -3185,17 +3135,6 @@ fn mix_rgb(a: Color, b: Color, t: f64) -> Color {
         g: lerp(ag as f64, bg as f64, t).round().clamp(0.0, 255.0) as u8,
         b: lerp(ab as f64, bb as f64, t).round().clamp(0.0, 255.0) as u8,
     }
-}
-
-fn accent_color(accent: &Accent) -> Color {
-    match accent.rgb() {
-        Some((r, g, b)) => Color::Rgb { r, g, b },
-        None => BRIGHT,
-    }
-}
-
-fn dim_accent(accent: Color) -> Color {
-    mix_rgb(accent, DARK, 0.45)
 }
 
 fn toast_alpha(elapsed: f64) -> f64 {
@@ -3275,26 +3214,158 @@ fn progress_parts(
     )
 }
 
+fn str_width(s: &str) -> usize {
+    UnicodeWidthStr::width(s)
+}
+
 fn truncate(s: &str, max: usize) -> String {
     if max == 0 {
         return String::new();
     }
-    let count = s.chars().count();
-    if count <= max {
-        s.to_string()
-    } else if max <= 1 {
-        "…".into()
-    } else {
-        let take = max - 1;
-        let mut out: String = s.chars().take(take).collect();
-        out.push('…');
-        out
+    if str_width(s) <= max {
+        return s.to_string();
     }
+    if max <= 1 {
+        return "…".into();
+    }
+    // Reserve 1 cell for the ellipsis; never split a wide char.
+    let mut out = String::new();
+    for c in s.chars() {
+        out.push(c);
+        if str_width(&out) + 1 > max {
+            out.pop();
+            break;
+        }
+    }
+    out.push('…');
+    out
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn assert_paints_inside(bytes: &[u8], cols: usize, rows: usize) {
+        let output = String::from_utf8_lossy(bytes);
+        let mut rest = output.as_ref();
+        let (mut x, mut y) = (0, 0);
+        while !rest.is_empty() {
+            if let Some(csi) = rest.strip_prefix("\x1b[") {
+                let end = csi.find(|c: char| ('@'..='~').contains(&c)).unwrap();
+                let (args, command) = csi.split_at(end);
+                if command.starts_with('H') {
+                    let mut parts = args.split(';').map(|n| n.parse::<usize>().unwrap());
+                    y = parts.next().unwrap() - 1;
+                    x = parts.next().unwrap() - 1;
+                }
+                rest = &command[1..];
+            } else {
+                let end = rest.find('\x1b').unwrap_or(rest.len());
+                let text = &rest[..end];
+                let width = str_width(text);
+                assert!(y < rows, "row {y} outside {rows}: {text:?}");
+                assert!(
+                    x + width <= cols,
+                    "columns {x}..{} outside {cols}: {text:?}",
+                    x + width
+                );
+                x += width;
+                rest = &rest[end..];
+            }
+        }
+    }
+
+    #[test]
+    fn toast_bounds_and_unicode_borders() {
+        assert_eq!(str_width("✓ ♪ e\u{301}"), 5);
+        assert_eq!(str_width("☀\u{fe0f}"), 2);
+        for cols in [1, 4, 5, 8, 20, 40, 80] {
+            for rows in [1, 2, 3, 4, 8, 24] {
+                for pos in [
+                    ToastPos::TopLeft,
+                    ToastPos::TopCenter,
+                    ToastPos::TopRight,
+                    ToastPos::BottomLeft,
+                    ToastPos::BottomCenter,
+                    ToastPos::BottomRight,
+                ] {
+                    for kind in [
+                        ToastKind::Info,
+                        ToastKind::Track,
+                        ToastKind::Config,
+                        ToastKind::Error,
+                    ] {
+                        let mut buf = Vec::new();
+                        paint_toast_stack(
+                            &mut buf,
+                            cols,
+                            rows,
+                            &[("日本語 e\u{301} ☀\u{fe0f} message", kind, 0.5); 3],
+                            pos,
+                            true,
+                            crate::rice::UiTheme::fallback(),
+                            0,
+                            cols,
+                        )
+                        .unwrap();
+                        assert_paints_inside(&buf, cols, rows);
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn compact_player_keeps_playback_inside_small_viewports() {
+        let plain = vec!["日本語 e\u{301} ☀\u{fe0f} lyrics".to_string()];
+        let state = FrameState {
+            track_name: "日本語 e\u{301} ☀\u{fe0f} track title",
+            track_path: "track.mp3",
+            index: 1,
+            total: 100,
+            pos: Duration::from_secs(65),
+            duration: Some(Duration::from_secs(240)),
+            volume: 80,
+            muted: false,
+            speed: 1.0,
+            pitch: 1.0,
+            eq_label: "flat",
+            paused: false,
+            stopped: false,
+            loop_label: "off",
+            sleep_label: None,
+            smart_shuffle: false,
+            lyrics_open: true,
+            lyrics_title: "lyrics",
+            lyrics_synced: &[],
+            lyrics_plain: &plain,
+            lyrics_active: None,
+            lyrics_status: None,
+            lyrics_source: None,
+            lyrics_now: Duration::ZERO,
+            list_names: &[],
+            toast: None,
+        };
+        for cols in [1, 4, 8, 16, 24, 33, 80] {
+            for rows in 1..12 {
+                let mut ui = blank_ui();
+                let mut buf = Vec::new();
+                ui.paint_compact_player(&mut buf, &state, rows, 0, cols, true)
+                    .unwrap();
+                assert_paints_inside(&buf, cols, rows);
+                if rows >= 4 && cols >= 8 {
+                    assert!(ui.hits.progress.is_some());
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn toast_text_cannot_inject_cursor_controls() {
+        let mut ui = blank_ui();
+        ui.toast("saved\nnext\t\x1b[2J");
+        assert_eq!(ui.toast_text(), Some("saved next  [2J"));
+    }
 
     #[test]
     fn fmt_time_under_hour() {
@@ -3310,6 +3381,85 @@ mod tests {
     fn truncate_adds_ellipsis() {
         assert_eq!(truncate("hello world", 8), "hello w…");
         assert_eq!(truncate("hi", 10), "hi");
+    }
+
+    #[test]
+    fn truncate_respects_display_width() {
+        // CJK chars are 2 cells: 7 hiragana = 14 cells.
+        assert_eq!(str_width("はいよろこんで"), 14);
+        let t = truncate("はいよろこんで", 8);
+        assert!(str_width(&t) <= 8, "spills: {t}");
+        assert!(t.ends_with('…'));
+        // Narrow max never splits a wide char.
+        assert_eq!(truncate("はい", 2), "…");
+        // Mixed content from the real library (kpop filename).
+        let t2 = truncate("(여자)아이들((G)I-DLE) - 'Nxde' Official Music Video", 20);
+        assert!(str_width(&t2) <= 20, "spills: {t2}");
+    }
+
+    #[test]
+    fn rail_never_eats_player_minimum() {
+        // Layout::resolve keeps every region disjoint at any width.
+        for cols in [20, 30, 40, 50, 60, 80, 100, 120, 200] {
+            for (lw, rw) in [(30, 0), (0, 26), (30, 26), (30, 30), (0, 0)] {
+                let l = Layout::resolve(cols, lw, rw);
+                assert_eq!(
+                    l.left_w + l.content_cols + l.right_w,
+                    cols,
+                    "regions tile cols={cols} lw={lw} rw={rw}"
+                );
+                assert_eq!(l.content_x0, l.left_w);
+                assert!(l.content_cols >= 1);
+                if cols >= PLAYER_MIN_W + RAIL_MIN_W {
+                    assert!(
+                        l.content_cols >= PLAYER_MIN_W.min(cols)
+                            || l.left_collapsed
+                            || l.right_collapsed,
+                        "player squeezed at cols={cols}"
+                    );
+                }
+            }
+        }
+        // Wide terminal: rails keep full width, player gets the rest.
+        let l = Layout::resolve(120, 30, 26);
+        assert_eq!((l.left_w, l.right_w), (30, 26));
+        assert_eq!(l.content_cols, 120 - 30 - 26);
+        assert!(!l.left_collapsed && !l.right_collapsed);
+        // Tiny terminal: rails collapse to badges instead of overlapping.
+        let l = Layout::resolve(30, 30, 26);
+        assert!(l.left_collapsed || l.right_collapsed);
+        assert_eq!(l.left_w + l.content_cols + l.right_w, 30);
+    }
+
+    #[test]
+    fn player_region_clips_wide_spans() {
+        // Narrow free area: a 40-cell footer in a 20-cell region clips
+        // instead of bleeding into the rail.
+        let mut buf: Vec<u8> = Vec::new();
+        let spans = [
+            Span::fg(GRAY, "space"),
+            Span::fg(DIM, "  ·  "),
+            Span::fg(GRAY, "n/p ←→ +/− v c ? extra long tail here"),
+        ];
+        paint_in_region(&mut buf, 0, 30, 20, &spans).unwrap();
+        let s = String::from_utf8_lossy(&buf);
+        // Strip ANSI, measure the visible tail.
+        let mut visible = 0usize;
+        let mut in_esc = false;
+        for ch in s.chars() {
+            if ch == '\x1b' {
+                in_esc = true;
+                continue;
+            }
+            if in_esc {
+                if ch == 'm' {
+                    in_esc = false;
+                }
+                continue;
+            }
+            visible += unicode_width::UnicodeWidthChar::width(ch).unwrap_or(0);
+        }
+        assert!(visible <= 20, "footer bleeds {visible} cells into the rail");
     }
 
     #[test]
@@ -3376,6 +3526,7 @@ mod tests {
             help_side_at_open: None,
             help_opened_at: None,
             help_closed_at: None,
+            help_scroll: 0,
             list_opened_at: None,
             list_closed_at: None,
             show_lyrics: false,
@@ -3383,10 +3534,9 @@ mod tests {
             lyrics_closed_at: None,
             lyrics_manual: None,
             lyrics_smooth: 0.0,
-            lyrics_last_active: None,
-            lyrics_line_since: None,
             lyrics_track_key: String::new(),
             lyrics_active_row: None,
+            lyrics_shown: 1,
             show_path: false,
             detached: true,
             t0: now,
@@ -3625,8 +3775,8 @@ mod tests {
     fn lyrics_hidden_pos_disables_strip() {
         let mut ui = blank_ui();
         ui.config.lyrics_pos = LyricsPos::Hidden;
-        ui.toggle_lyrics(); // re-opens below instead of dead-ending
-        assert_eq!(ui.config.lyrics_pos, LyricsPos::Below);
+        ui.toggle_lyrics(); // hidden turns back on
+        assert_eq!(ui.config.lyrics_pos, LyricsPos::Right);
         assert!(ui.lyrics_visible());
     }
 }

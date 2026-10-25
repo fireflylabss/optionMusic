@@ -83,6 +83,7 @@ pub fn run_local_preview(path: &Path) -> Result<()> {
             lyrics_plain: &[],
             lyrics_active: None,
             lyrics_status: None,
+            lyrics_source: None,
             lyrics_now: Duration::ZERO,
             list_names: &[],
             toast: toast_owned.as_deref(),
