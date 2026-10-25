@@ -21,6 +21,7 @@ use crate::ui::{BRIGHT, DIM, GRAY, print_info, print_success, print_warn};
 
 /// Extra extractor-args value used for the 403/PO-token fallback retry.
 pub const MWEB_FALLBACK_EXTRACTOR_ARG: &str = "youtube:player_client=mweb";
+const OUTPUT_PATH_PREFIX: &str = "__STILLMUSIC_OUTPUT_PATH__";
 
 /// True when yt-dlp stderr/status looks like a YouTube 403 / SABR / PO-token
 /// failure worth retrying with the mweb player client.
@@ -789,6 +790,11 @@ fn build_args_pass(url: &str, opts: &DownloadOptions, pass: Pass) -> Vec<String>
         "-o".into(),
         out_path,
         "--no-mtime".into(),
+        "--print".into(),
+        format!("after_move:{OUTPUT_PATH_PREFIX}%(filepath)j"),
+        "--no-simulate".into(),
+        "--no-quiet".into(),
+        "--progress".into(),
     ];
 
     match pass {
@@ -838,10 +844,10 @@ fn run_one_pass(
     opts: &DownloadOptions,
     pass: Pass,
     fallback: DlFallbackMode,
-) -> Result<()> {
+) -> Result<Vec<PathBuf>> {
     let args = build_args_pass(url, opts, pass);
     match run_captured(yt, &args) {
-        Ok(()) => Ok(()),
+        Ok(paths) => Ok(paths),
         Err(first_err) => {
             if !is_retryable_download_error(&first_err) {
                 bail!("{first_err}");
@@ -871,9 +877,9 @@ fn run_one_pass(
             let retry_args = with_mweb_fallback(&args);
             print_info("retry      yt-dlp with youtube:player_client=mweb…");
             match run_captured(yt, &retry_args) {
-                Ok(()) => {
+                Ok(paths) => {
                     print_success("fallback mweb ok");
-                    Ok(())
+                    Ok(paths)
                 }
                 Err(retry_err) => {
                     bail!("{first_err}\nfallback mweb also failed: {retry_err}");
@@ -886,7 +892,7 @@ fn run_one_pass(
 /// Spawn yt-dlp with piped output, forward it to the inherited stdio so
 /// `--newline` progress still shows, and return the combined output text
 /// on failure for retryable-error detection.
-fn run_captured(yt: &str, args: &[String]) -> std::result::Result<(), String> {
+fn run_captured(yt: &str, args: &[String]) -> std::result::Result<Vec<PathBuf>, String> {
     let output = Command::new(yt)
         .args(args)
         .stdin(Stdio::null())
@@ -896,16 +902,23 @@ fn run_captured(yt: &str, args: &[String]) -> std::result::Result<(), String> {
         .map_err(|e| format!("failed to spawn {yt}: {e:#}"))?;
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
-    if !stdout.is_empty() {
-        print!("{stdout}");
-        let _ = io::stdout().flush();
+    let mut paths = Vec::new();
+    for line in stdout.lines() {
+        if let Some(record) = line.strip_prefix(OUTPUT_PATH_PREFIX) {
+            if let Ok(path) = serde_json::from_str::<String>(record) {
+                paths.push(PathBuf::from(path));
+            }
+        } else {
+            println!("{line}");
+        }
     }
+    let _ = io::stdout().flush();
     if !stderr.is_empty() {
         eprint!("{stderr}");
         let _ = io::stderr().flush();
     }
     if output.status.success() {
-        return Ok(());
+        return Ok(paths);
     }
     let code = output.status.code().unwrap_or(-1);
     let combined = format!("yt-dlp exited with status {code}\n{stdout}\n{stderr}");
@@ -913,8 +926,8 @@ fn run_captured(yt: &str, args: &[String]) -> std::result::Result<(), String> {
 }
 
 /// Progress events emitted while a download batch runs — consumed by
-/// clients that render their own progress UI (desktop) instead of the
-/// `print_info`-style console output `run_batch` produces.
+/// callers that render their own progress UI instead of the `print_info`-style
+/// console output `run_batch` produces.
 #[derive(Debug, Clone)]
 pub enum DlEvent {
     /// A precondition warning (e.g. ffmpeg missing).
@@ -948,6 +961,16 @@ fn run_batch_core(
     emit: &mut dyn FnMut(DlEvent),
 ) -> Result<()> {
     let yt = ensure_yt_dlp()?;
+    run_batch_with_yt(&yt, items, opts, fallback, emit)
+}
+
+fn run_batch_with_yt(
+    yt: &str,
+    items: &[MediaItem],
+    opts: &DownloadOptions,
+    fallback: DlFallbackMode,
+    emit: &mut dyn FnMut(DlEvent),
+) -> Result<()> {
     if opts.kind.wants_audio() && !ffmpeg_available() {
         emit(DlEvent::Warning {
             text: "ffmpeg not found — audio extract/convert may fail".into(),
@@ -985,7 +1008,7 @@ fn run_batch_core(
                 index: i,
                 pass: "video",
             });
-            if let Err(e) = run_one_pass(&yt, &item.url, opts, Pass::Video, fallback) {
+            if let Err(e) = run_one_pass(yt, &item.url, opts, Pass::Video, fallback) {
                 emit(DlEvent::PassFailed {
                     index: i,
                     pass: "video",
@@ -999,13 +1022,22 @@ fn run_batch_core(
                 index: i,
                 pass: "audio",
             });
-            if let Err(e) = run_one_pass(&yt, &item.url, opts, Pass::Audio, fallback) {
-                emit(DlEvent::PassFailed {
-                    index: i,
-                    pass: "audio",
-                    error: format!("{e:#}"),
-                });
-                ok = false;
+            match run_one_pass(yt, &item.url, opts, Pass::Audio, fallback) {
+                Ok(paths) => {
+                    for path in paths {
+                        if path.is_file() && crate::playlist::is_audio_file(&path) {
+                            autotag_file(&path, item);
+                        }
+                    }
+                }
+                Err(e) => {
+                    emit(DlEvent::PassFailed {
+                        index: i,
+                        pass: "audio",
+                        error: format!("{e:#}"),
+                    });
+                    ok = false;
+                }
             }
         }
         if !ok {
@@ -1022,6 +1054,39 @@ fn run_batch_core(
         bail!("{failed}/{} download(s) failed", items.len());
     }
     Ok(())
+}
+
+/// Fill empty title/artist tags on `path` from the download `item`.
+/// `Artist - Title` splits on the first ` - `; otherwise the item title
+/// becomes the track title and the artist stays untouched.
+pub fn autotag_file(path: &Path, item: &MediaItem) {
+    let tags = crate::meta::read_tags(path);
+    if tags.title.as_deref().is_some_and(|t| !t.trim().is_empty())
+        && tags.artist.as_deref().is_some_and(|a| !a.trim().is_empty())
+    {
+        return;
+    }
+    let (artist, title) = split_artist_title(&item.title);
+    let mut fixed = tags;
+    if fixed.title.as_deref().is_none_or(|t| t.trim().is_empty()) {
+        fixed.title = Some(title);
+    }
+    if fixed.artist.as_deref().is_none_or(|a| a.trim().is_empty()) {
+        fixed.artist = artist;
+    }
+    let _ = crate::meta::write_tags(path, &fixed);
+}
+
+/// Split `Artist - Title` on the first ` - `. No separator → (None, whole).
+pub fn split_artist_title(raw: &str) -> (Option<String>, String) {
+    let trimmed = raw.trim();
+    if let Some((a, t)) = trimmed.split_once(" - ") {
+        let (a, t) = (a.trim(), t.trim());
+        if !a.is_empty() && !t.is_empty() {
+            return (Some(a.to_owned()), t.to_owned());
+        }
+    }
+    (None, trimmed.to_owned())
 }
 
 /// [`DlEvent`] → the same console output `run_batch` always produced.
@@ -1076,8 +1141,7 @@ pub fn run_batch(
 
 /// Event-reporting variant of [`run_batch`]: same engine and failure
 /// semantics, but progress reaches `sink` as [`DlEvent`]s on the calling
-/// (blocking) thread — desktop clients spawn it on a background executor
-/// and forward events into the UI.
+/// (blocking) thread.
 pub fn run_batch_events(
     items: &[MediaItem],
     opts: &DownloadOptions,
@@ -1714,6 +1778,192 @@ fn ask_yes_no(label: &str, default: bool) -> Result<bool> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    struct DownloadFixture(PathBuf);
+
+    #[cfg(unix)]
+    impl DownloadFixture {
+        fn new() -> Self {
+            use std::sync::atomic::{AtomicU64, Ordering};
+            static NEXT: AtomicU64 = AtomicU64::new(0);
+            let path = std::env::temp_dir().join(format!(
+                "still-download-test-{}-{}-{}",
+                std::process::id(),
+                SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos(),
+                NEXT.fetch_add(1, Ordering::Relaxed)
+            ));
+            fs::create_dir(&path).unwrap();
+            Self(path)
+        }
+
+        fn audio(&self, name: &str) -> PathBuf {
+            let path = self.0.join(name);
+            fs::write(
+                &path,
+                b"RIFF\x28\x00\x00\x00WAVEfmt \x10\x00\x00\x00\x01\x00\x01\x00\x44\xac\x00\x00\x88\x58\x01\x00\x02\x00\x10\x00data\x04\x00\x00\x00\x00\x00\x00\x00",
+            )
+            .unwrap();
+            path
+        }
+
+        fn run(&self, kind: MediaKind, stdout: &str, status: i32) -> (Result<()>, Vec<DlEvent>) {
+            use std::os::unix::fs::PermissionsExt;
+            let yt = self.0.join("yt-dlp-fake");
+            fs::write(
+                &yt,
+                format!("#!/bin/sh\ncat \"$0.records\"\nexit {status}\n"),
+            )
+            .unwrap();
+            fs::set_permissions(&yt, fs::Permissions::from_mode(0o700)).unwrap();
+            fs::write(yt.with_extension("records"), stdout).unwrap();
+            let item = MediaItem {
+                title: "Download Artist - Download Title".into(),
+                url: "https://example.invalid/track".into(),
+                provider: Provider::Youtube,
+                caps: Caps::all(),
+            };
+            let opts = DownloadOptions {
+                kind,
+                format_selector: "bv*+ba/b".into(),
+                container: "mp4".into(),
+                audio_format: "wav".into(),
+                audio_quality: "0".into(),
+                embed_thumbnail: false,
+                embed_metadata: false,
+                embed_subs: false,
+                output_dir: self.0.clone(),
+            };
+            let mut events = Vec::new();
+            let result = run_batch_with_yt(
+                yt.to_str().unwrap(),
+                &[item],
+                &opts,
+                DlFallbackMode::Off,
+                &mut |event| events.push(event),
+            );
+            (result, events)
+        }
+
+        fn record(path: &Path) -> String {
+            format!(
+                "{OUTPUT_PATH_PREFIX}{}\n",
+                serde_json::to_string(path.to_str().unwrap()).unwrap()
+            )
+        }
+    }
+
+    #[cfg(unix)]
+    impl Drop for DownloadFixture {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn batch_never_tags_video_missing_records_or_failed_passes() {
+        for (kind, record, status) in [
+            (MediaKind::Video, true, 0),
+            (MediaKind::Audio, false, 0),
+            (MediaKind::Audio, true, 1),
+        ] {
+            let fixture = DownloadFixture::new();
+            let unrelated = fixture.audio("zzz-unrelated.wav");
+            let original = fs::read(&unrelated).unwrap();
+            let stdout = if record {
+                DownloadFixture::record(&unrelated)
+            } else {
+                format!(
+                    "[download] 100%\n{}\n{OUTPUT_PATH_PREFIX}not-json\n",
+                    unrelated.display()
+                )
+            };
+            let (result, events) = fixture.run(kind, &stdout, status);
+            assert_eq!(result.is_ok(), status == 0);
+            assert_eq!(fs::read(&unrelated).unwrap(), original);
+            assert!(
+                matches!(events.last(), Some(DlEvent::BatchFinished { failed, .. }) if *failed == usize::from(status != 0))
+            );
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn batch_tags_only_the_successful_audio_record_with_escaped_path() {
+        let fixture = DownloadFixture::new();
+        let downloaded = fixture.audio("a \"quoted\"\ntrack.wav");
+        let unrelated = fixture.audio("zzz-unrelated.wav");
+        let original = fs::read(&unrelated).unwrap();
+        let records = format!("[download] 100%\n{}", DownloadFixture::record(&downloaded));
+        let (result, events) = fixture.run(MediaKind::Audio, &records, 0);
+        result.unwrap();
+        let tags = crate::meta::read_tags(&downloaded);
+        assert_eq!(tags.title.as_deref(), Some("Download Title"));
+        assert_eq!(tags.artist.as_deref(), Some("Download Artist"));
+        assert_eq!(fs::read(&unrelated).unwrap(), original);
+        assert!(
+            events
+                .iter()
+                .any(|event| matches!(event, DlEvent::ItemFinished { ok: true, .. }))
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn autotag_keeps_existing_title_and_album_when_filling_artist() {
+        use lofty::prelude::{Accessor, AudioFile, TaggedFileExt};
+        let fixture = DownloadFixture::new();
+        let downloaded = fixture.audio("downloaded.wav");
+        let mut tagged = lofty::probe::Probe::open(&downloaded)
+            .unwrap()
+            .read()
+            .unwrap();
+        let mut tag = lofty::tag::Tag::new(lofty::tag::TagType::Id3v2);
+        tag.set_title("Existing Title".into());
+        tag.set_album("Existing Album".into());
+        tag.set_track(7);
+        tagged.insert_tag(tag);
+        tagged
+            .save_to_path(&downloaded, lofty::config::WriteOptions::default())
+            .unwrap();
+
+        fixture
+            .run(MediaKind::Audio, &DownloadFixture::record(&downloaded), 0)
+            .0
+            .unwrap();
+        let tags = crate::meta::read_tags(&downloaded);
+        assert_eq!(tags.title.as_deref(), Some("Existing Title"));
+        assert_eq!(tags.artist.as_deref(), Some("Download Artist"));
+        assert_eq!(tags.album.as_deref(), Some("Existing Album"));
+        assert_eq!(tags.track_number, Some(7));
+        let already_tagged = fs::read(&downloaded).unwrap();
+        fixture
+            .run(MediaKind::Audio, &DownloadFixture::record(&downloaded), 0)
+            .0
+            .unwrap();
+        assert_eq!(fs::read(&downloaded).unwrap(), already_tagged);
+    }
+
+    #[test]
+    fn split_artist_title_handles_separator() {
+        assert_eq!(
+            split_artist_title("Daft Punk - One More Time"),
+            (Some("Daft Punk".into()), "One More Time".into())
+        );
+        assert_eq!(
+            split_artist_title("Just A Title"),
+            (None, "Just A Title".into())
+        );
+        assert_eq!(
+            split_artist_title("  A  -  B  "),
+            (Some("A".into()), "B".into())
+        );
+        assert_eq!(split_artist_title(" - "), (None, "-".into()));
+    }
 
     #[test]
     fn detect_youtube() {
