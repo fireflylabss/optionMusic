@@ -38,6 +38,8 @@ See [AUR packaging](packaging/aur/README.md) for package sources and validation.
 Every platform needs a system **libmpv** to link against; the TUI assumes a
 terminal that speaks ANSI, and the optional tools (`cava`, `yt-dlp`) are looked
 up on `PATH`.
+Linux and macOS builds also need SQLite development files. Windows builds bundle
+SQLite, while still requiring the libmpv package described below.
 
 ### System deps
 
@@ -93,6 +95,10 @@ cargo install --git https://github.com/fireflylabss/optionMusic --locked
 ```
 
 The Cargo package and crate are named `stillmusic`.
+
+The current release line is `v0.3.0-beta.1`; `still --version` and `msc --version`
+report the numeric Cargo version `0.3.0`. The beta revision identifies the
+corrected release attempt; it does not change the readiness channel.
 
 | Command | Description |
 |---------|-------------|

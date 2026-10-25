@@ -5,17 +5,17 @@ We follow [Semantic Versioning](https://semver.org/) and [Keep a Changelog](http
 <details>
 <summary>To see more about versioning, expand this.</summary>
 
-Every new release tag starts with `v` and includes its channel, e.g. `v0.3.0-beta`.
+Every new release tag starts with `v` and includes its channel, e.g. `v0.3.0-beta.1`. Alpha and beta releases may add a positive revision number for a corrected attempt; their channel stays the same.
 
 Here the installable surface is **CLI** (`still` / `msc`), including the interactive TUI.
 
 | Part | What you install | Example |
 | --- | --- | --- |
-| **CLI** | `still` / alias `msc` in the terminal | `v0.3.0-beta` |
+| **CLI** | `still` / alias `msc` in the terminal | `v0.3.0-beta.1` |
 
 With one surface there is no `m` in the tag and no per-surface sections, just the version notes.
 
-Each release heading is the version and date (`## v0.3.0-beta · 25/10/2026`); under it, a short summary ends with a plain sentence like: “This version was made for CLI with a beta release channel on 25/10/2026 (v0.3.0-beta).”
+Each release heading is the version and date (`## v0.3.0-beta.1 · 25/10/2026`); under it, a short summary ends with a plain sentence like: “This version was made for CLI with a beta release channel on 25/10/2026 (v0.3.0-beta.1).”
 
 ### What the channel suffix means
 
@@ -31,12 +31,15 @@ Historical **Desktop** and mixed entries remain below with their original tags a
 
 </details>
 
-## v0.3.0-beta · 25/10/2026
+## v0.3.0-beta.1 · 25/10/2026
 
-still music rebranding, a persistent library index, queue editing and local lyrics management. This version was made for CLI with a beta release channel on 25/10/2026 (v0.3.0-beta).
+still music rebranding, a persistent library index, queue editing and local lyrics management. This version was made for CLI with a beta release channel on 25/10/2026 (v0.3.0-beta.1).
 
 - Rebranded to **still music**, displayed as **still**. The crate is `stillmusic`; the binaries are `still` and `msc`. Environment overrides are `STILLMUSIC_MUSIC_DIR` and `STILLMUSIC_CONFIG`. Existing data stays in `~/.option/music`, and older sync backups remain importable. Repository URLs and historical release notes retain their original names.
 - AUR packaging now has `stillmusic` for source builds and `stillmusic-bin` for prebuilt Linux binaries. Both install `still` / `msc` and replace the legacy `optionmusic` package.
+- Updated the HTTPS dependency stack to rustls `0.23.46`, rustls-webpki `0.103.16` and webpki-roots `1.0.11`; Linux media-key integration now uses zbus `6.1.0`.
+- Windows builds include SQLite, so compiling the library index no longer requires a separate SQLite installation there. Linux and macOS keep using system SQLite.
+- Release publication waits for both the build and dependency audit. Alpha and beta releases support numbered revision tags while keeping the same numeric CLI version.
 - Downloaded audio fills missing title and artist tags while preserving existing metadata and other files in the output folder.
 - The library keeps a SQLite index in `cache/library.db`, reusing unchanged track metadata across runs and migrating older per-folder indexes. Multiple library folders are merged without duplicate paths, and the library browser watches for audio-file changes and refreshes its tree.
 - Edit the playing queue with `J` / `K` to reorder, `a` to play next, `A` to append, `D` to clear while keeping the current track, `u` / `Ctrl+Z` to undo, and `g` to jump to the playing track.

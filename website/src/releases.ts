@@ -11,11 +11,11 @@ export interface Release {
   note: string
 }
 
-// ## v0.2.18-beta · 13/09/2026  |  ## v0.2.12m-beta · 03/08/2026  |  ## v0.1.1 · 20/07/2026
+// Includes revision tags (v0.3.0-beta.1) and legacy mixed or plain versions.
 const HEADING =
-  /^## (v\d+\.\d+\.\d+m?(?:-(?:alpha|beta|stable))?) · (\d{2}\/\d{2}\/\d{4})$/gm
+  /^## (v\d+\.\d+\.\d+m?(?:-(?:(?:alpha|beta)(?:\.[1-9]\d*)?|stable))?) · (\d{2}\/\d{2}\/\d{4})$/gm
 
-function parseReleases(md: string): Release[] {
+export function parseReleases(md: string): Release[] {
   const headings = [...md.matchAll(HEADING)]
 
   return headings.map((match, i) => {
@@ -41,7 +41,7 @@ function parseReleases(md: string): Release[] {
     const channel: Channel =
       /m(?:-|$)/.test(v)
         ? 'mixed'
-        : ((v.match(/-(alpha|beta|stable)$/)?.[1] as Channel | undefined) ??
+        : ((v.match(/-(alpha|beta|stable)(?:\.[1-9]\d*)?$/)?.[1] as Channel | undefined) ??
           'stable')
 
     return { v, date, channel, surface, note }

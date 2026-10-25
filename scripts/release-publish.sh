@@ -2,9 +2,9 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-TAG="${1:?usage: release-publish.sh <vX.Y.Z-channel> [artifact-dir]}"
-[[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-(alpha|beta|stable)$ ]] || {
-  echo "Expected a release tag such as v0.3.0-beta" >&2
+TAG="${1:?usage: release-publish.sh <vX.Y.Z-channel[.N]> [artifact-dir]}"
+[[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-((alpha|beta)(\.[1-9][0-9]*)?|stable)$ ]] || {
+  echo "Expected a release tag such as v0.3.0-beta.1" >&2
   exit 1
 }
 ARTIFACT_DIR="$(cd "${2:-$ROOT/target/dist}" && pwd)"

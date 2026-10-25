@@ -57,7 +57,8 @@ export CARGO_TARGET_DIR="$(pwd)/target"
 
 See [VERSIONING.md](VERSIONING.md) and the blurb in [CHANGELOG.md](CHANGELOG.md). Short rules for agents:
 
-- still has one installable surface: CLI/TUI. Changelog headings use Hory style (`## v0.3.0-beta · DD/MM/YYYY`): one summary paragraph and feature bullets, without per-surface or change-category subsections.
+- still has one installable surface: CLI/TUI. Changelog headings use Hory style (`## v0.3.0-beta.1 · DD/MM/YYYY`): one summary paragraph and feature bullets, without per-surface or change-category subsections.
+- Alpha and beta tags can add a positive revision suffix (`-beta.1`, `-alpha.2`) for a corrected release attempt. Tags are immutable; increment the revision instead of moving an existing tag. Cargo keeps the numeric version (`0.3.0`).
 - Do **not** label something `stable` unless it is actually release-ready; use **beta** for builds that still need refinement and **alpha** for brand-new surfaces.
 - Historical Desktop and mixed entries keep their original tags and dates. Do not add new desktop entries or revive the `m` mixed-release form.
 
