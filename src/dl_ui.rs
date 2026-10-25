@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result, bail};
 use crossterm::cursor::{Hide, MoveTo, Show};
 use crossterm::event::{self, Event, KeyCode, KeyEventKind};
-use crossterm::style::{Color, Print, ResetColor, SetBackgroundColor, SetForegroundColor, Stylize};
+use crossterm::style::{Print, ResetColor, SetBackgroundColor, SetForegroundColor, Stylize};
 use crossterm::terminal::{
     Clear, ClearType, EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
 };
@@ -21,43 +21,10 @@ use crate::download::{
 use crate::preview;
 use crate::ui::{BRIGHT, GRAY, print_info, print_warn};
 
-/// Near-white for focused text.
-const FG_FOCUS: Color = Color::Rgb {
-    r: 250,
-    g: 250,
-    b: 250,
-};
-/// Soft panel for selected row (still greyscale).
-const BG_FOCUS: Color = Color::Rgb {
-    r: 210,
-    g: 210,
-    b: 210,
-};
-const FG_ON_FOCUS: Color = Color::Rgb {
-    r: 12,
-    g: 12,
-    b: 12,
-};
-const FG_TITLE: Color = Color::Rgb {
-    r: 235,
-    g: 235,
-    b: 235,
-};
-const FG_BODY: Color = Color::Rgb {
-    r: 175,
-    g: 175,
-    b: 175,
-};
-const FG_MUTED: Color = Color::Rgb {
-    r: 95,
-    g: 95,
-    b: 95,
-};
-const FG_RULE: Color = Color::Rgb {
-    r: 55,
-    g: 55,
-    b: 55,
-};
+/// Rice-aware palette (falls back to the classic greys).
+fn theme() -> crate::rice::UiTheme {
+    crate::rice::load().0
+}
 
 struct TermUi;
 
@@ -78,7 +45,7 @@ impl TermUi {
                 RowKind::Rule => {
                     queue!(
                         out,
-                        SetForegroundColor(FG_RULE),
+                        SetForegroundColor(theme().border),
                         Print("  ────────────────────────────────────────"),
                         ResetColor
                     )?;
@@ -86,7 +53,7 @@ impl TermUi {
                 RowKind::Title => {
                     queue!(
                         out,
-                        SetForegroundColor(FG_TITLE),
+                        SetForegroundColor(theme().cursor),
                         Print(format!("  {}", row.text)),
                         ResetColor
                     )?;
@@ -94,7 +61,7 @@ impl TermUi {
                 RowKind::Subtitle => {
                     queue!(
                         out,
-                        SetForegroundColor(FG_BODY),
+                        SetForegroundColor(theme().body),
                         Print(format!("  {}", row.text)),
                         ResetColor
                     )?;
@@ -102,7 +69,7 @@ impl TermUi {
                 RowKind::Hint => {
                     queue!(
                         out,
-                        SetForegroundColor(FG_MUTED),
+                        SetForegroundColor(theme().title),
                         Print(format!("  {}", row.text)),
                         ResetColor
                     )?;
@@ -110,7 +77,7 @@ impl TermUi {
                 RowKind::Normal => {
                     queue!(
                         out,
-                        SetForegroundColor(FG_BODY),
+                        SetForegroundColor(theme().body),
                         Print(format!("  {}", row.text)),
                         ResetColor
                     )?;
@@ -119,8 +86,8 @@ impl TermUi {
                     let padded = format!("  {}  ", row.text);
                     queue!(
                         out,
-                        SetBackgroundColor(BG_FOCUS),
-                        SetForegroundColor(FG_ON_FOCUS),
+                        SetBackgroundColor(theme().focus_bg),
+                        SetForegroundColor(theme().focus_fg),
                         Print(padded),
                         ResetColor
                     )?;
@@ -128,7 +95,7 @@ impl TermUi {
                 RowKind::Checked => {
                     queue!(
                         out,
-                        SetForegroundColor(FG_FOCUS),
+                        SetForegroundColor(theme().cursor),
                         Print(format!("  {}", row.text)),
                         ResetColor
                     )?;
