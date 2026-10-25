@@ -55,7 +55,7 @@ For a local publish:
 
 The helper verifies both source checksums before pushing, maintains separate
 repositories at `~/aur/stillmusic` and `~/aur/stillmusic-bin`, and verifies each
-remote commit after pushing. It uses `~/.ssh/aur_synara`; set `AUR_SSH_KEY` to
+remote commit after pushing. It uses `~/.ssh/aur_devin`; set `AUR_SSH_KEY` to
 override the key or `AUR_DIR` to override the parent of the two AUR checkouts.
 It refuses dirty checkouts and propagates fetch/rebase errors.
 

@@ -3,7 +3,7 @@ set -euo pipefail
 
 aur_root="$(cd "$(dirname "$0")" && pwd)"
 aur_base="${AUR_DIR:-$HOME/aur}"
-ssh_key="${AUR_SSH_KEY:-$HOME/.ssh/aur_synara}"
+ssh_key="${AUR_SSH_KEY:-$HOME/.ssh/aur_devin}"
 if [[ -n "${1:-}" ]]; then
   "$aur_root/bump.sh" "$1"
 fi
