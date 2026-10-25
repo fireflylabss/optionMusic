@@ -14,6 +14,9 @@ use serde::{Deserialize, Serialize};
 pub const COUNT_AFTER_SECS: f64 = 60.0;
 /// Fraction of duration that counts as a full play.
 pub const COUNT_AFTER_FRACTION: f64 = 0.5;
+/// Negative radio feedback (skip / dislike) penalizes the track and the
+/// artist in the similarity walk for this long.
+pub const FEEDBACK_WINDOW_SECS: u64 = 7 * 24 * 60 * 60;
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct TrackStat {
@@ -29,6 +32,18 @@ pub struct TrackStat {
     pub total_secs: u64,
     /// Unix seconds of the last counted play.
     pub last_played: u64,
+    /// Times the track was ended before the counting threshold (`n`).
+    #[serde(default)]
+    pub skips: u64,
+    /// Explicit dislikes (`d` in the player) — also a skip.
+    #[serde(default)]
+    pub dislikes: u64,
+    /// Unix seconds of the last skip / dislike (0 = never).
+    #[serde(default)]
+    pub last_skipped: u64,
+    /// Unix seconds of the last explicit dislike (0 = never).
+    #[serde(default)]
+    pub last_disliked: u64,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -41,6 +56,18 @@ pub struct StatsStore {
     /// Listened seconds across counted plays.
     #[serde(default)]
     pub total_secs: u64,
+    /// Skipped plays (track ended before the counting threshold via `n`).
+    #[serde(default)]
+    pub total_skips: u64,
+    /// Explicit dislikes (`d` in the player) — also counted as skips.
+    #[serde(default)]
+    pub total_dislikes: u64,
+    /// Successful ListenBrainz submissions (`single` accepted).
+    #[serde(default)]
+    pub scrobbles_ok: u64,
+    /// Failed ListenBrainz submissions (network / token / answer).
+    #[serde(default)]
+    pub scrobble_errors: u64,
 }
 
 fn now_unix() -> u64 {
@@ -97,9 +124,7 @@ impl StatsStore {
                 id: id.to_owned(),
                 name: name.to_owned(),
                 artist: artist.to_owned(),
-                plays: 0,
-                total_secs: 0,
-                last_played: 0,
+                ..Default::default()
             });
         entry.name = name.to_owned();
         entry.artist = artist.to_owned();
@@ -109,6 +134,70 @@ impl StatsStore {
         self.total_plays += 1;
         self.total_secs += listened_secs;
         let _ = self.save();
+    }
+
+    /// Record a negative radio signal (`skipped`: `n` · `disliked`: `d`).
+    /// A dislike always implies a skip. Both refresh the 7-day similarity
+    /// penalty window (`last_skipped`) without adding a counted play.
+    pub fn record_feedback(&mut self, id: &str, name: &str, artist: &str, disliked: bool) {
+        if id.is_empty() {
+            return;
+        }
+        let entry = self
+            .tracks
+            .entry(id.to_owned())
+            .or_insert_with(|| TrackStat {
+                id: id.to_owned(),
+                name: name.to_owned(),
+                artist: artist.to_owned(),
+                ..Default::default()
+            });
+        entry.name = name.to_owned();
+        entry.artist = artist.to_owned();
+        entry.skips += 1;
+        entry.last_skipped = now_unix();
+        self.total_skips += 1;
+        if disliked {
+            entry.dislikes += 1;
+            entry.last_disliked = entry.last_skipped;
+            self.total_dislikes += 1;
+        }
+        let _ = self.save();
+    }
+
+    /// Outcome of one ListenBrainz `single` submission. No-op when
+    /// scrobbling is disabled (the caller sends `None` then).
+    pub fn record_scrobble(&mut self, sent: bool) {
+        if sent {
+            self.scrobbles_ok += 1;
+        } else {
+            self.scrobble_errors += 1;
+        }
+        let _ = self.save();
+    }
+
+    /// True when `id` got skip/dislike feedback inside the penalty window.
+    /// Unknown ids return `false`.
+    pub fn has_recent_negative(&self, id: &str) -> bool {
+        let Some(entry) = self.tracks.get(id) else {
+            return false;
+        };
+        entry.last_skipped != 0
+            && now_unix().saturating_sub(entry.last_skipped) < FEEDBACK_WINDOW_SECS
+    }
+
+    /// Lowercased artists with any skip/dislike inside the penalty window.
+    /// The similarity walk downranks follow-up tracks by these artists.
+    pub fn penalized_artists(&self) -> std::collections::HashSet<String> {
+        let now = now_unix();
+        self.tracks
+            .values()
+            .filter(|t| {
+                t.last_skipped != 0 && now.saturating_sub(t.last_skipped) < FEEDBACK_WINDOW_SECS
+            })
+            .map(|t| t.artist.trim().to_lowercase())
+            .filter(|a| !a.is_empty() && a != "unknown artist")
+            .collect()
     }
 
     /// Top tracks by play count (descending).

@@ -29,3 +29,7 @@ pub mod smart_shuffle;
 pub mod stats;
 pub mod ui;
 pub mod which;
+pub mod rice;
+pub mod scrobble;
+pub mod sync;
+pub mod watch;

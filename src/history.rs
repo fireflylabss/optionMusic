@@ -1,4 +1,9 @@
 //! Play history for smart shelves (“played this week”).
+//!
+//! Each line of `history.jsonl` is one playback event. `outcome` separates
+//! a completed listen (`played`) from an early exit (`skipped`, via `n`) and
+//! an explicit dislike (`disliked`, via `d`). Older lines without `outcome`
+//! read back as `played`, so existing files keep working.
 
 use std::fs::{self, OpenOptions};
 use std::io::{BufRead, BufReader, Write};
@@ -13,10 +18,36 @@ use crate::config;
 const MAX_ENTRIES: usize = 5_000;
 const WEEK_SECS: u64 = 7 * 24 * 60 * 60;
 
+/// How a history event ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum HistoryOutcome {
+    /// Played past the counting threshold (or to the end).
+    #[default]
+    Played,
+    /// Cut short via `n` / next before the threshold.
+    Skipped,
+    /// Explicit dislike via `d` (also counts as a skip).
+    Disliked,
+}
+
+impl HistoryOutcome {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Played => "played",
+            Self::Skipped => "skipped",
+            Self::Disliked => "disliked",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HistoryEntry {
     pub id: String,
     pub at: u64,
+    /// Missing in files written before Radio 2.0 → defaults to `played`.
+    #[serde(default)]
+    pub outcome: HistoryOutcome,
 }
 
 fn history_path() -> PathBuf {
@@ -30,8 +61,8 @@ fn now_unix() -> u64 {
         .unwrap_or(0)
 }
 
-/// Append a play event (best-effort).
-pub fn record_play(id: &str) -> Result<()> {
+/// Append a play event with an outcome (best-effort).
+pub fn record_event(id: &str, outcome: HistoryOutcome) -> Result<()> {
     if id.is_empty() {
         return Ok(());
     }
@@ -46,9 +77,25 @@ pub fn record_play(id: &str) -> Result<()> {
     let entry = HistoryEntry {
         id: id.to_owned(),
         at: now_unix(),
+        outcome,
     };
     writeln!(file, "{}", serde_json::to_string(&entry)?)?;
     Ok(())
+}
+
+/// Append a completed play event (best-effort).
+pub fn record_play(id: &str) -> Result<()> {
+    record_event(id, HistoryOutcome::Played)
+}
+
+/// Append a skip event — track cut short via `n` / next (best-effort).
+pub fn record_skip(id: &str) -> Result<()> {
+    record_event(id, HistoryOutcome::Skipped)
+}
+
+/// Append a dislike event — explicit `d`, also counts as a skip (best-effort).
+pub fn record_dislike(id: &str) -> Result<()> {
+    record_event(id, HistoryOutcome::Disliked)
 }
 
 /// Read recent history (newest last). Caps at [`MAX_ENTRIES`].
@@ -82,13 +129,54 @@ fn rewrite_trimmed(entries: &[HistoryEntry]) -> Result<()> {
     Ok(())
 }
 
-/// Unique track ids played within the last 7 days (most recent first).
-pub fn played_this_week() -> Vec<String> {
+/// Unique ids with `outcome` played within the last 7 days (most recent first).
+fn ids_in_week(outcome: Option<HistoryOutcome>) -> Vec<String> {
     let cutoff = now_unix().saturating_sub(WEEK_SECS);
     let mut seen = std::collections::HashSet::new();
     let mut out = Vec::new();
     for entry in load_entries().into_iter().rev() {
         if entry.at < cutoff {
+            continue;
+        }
+        if outcome.is_some_and(|wanted| entry.outcome != wanted) {
+            continue;
+        }
+        if seen.insert(entry.id.clone()) {
+            out.push(entry.id);
+        }
+    }
+    out
+}
+
+/// Unique track ids fully played within the last 7 days (most recent first).
+/// Skips / dislikes are excluded — see [`skipped_this_week`] and
+/// [`negative_this_week`].
+pub fn played_this_week() -> Vec<String> {
+    ids_in_week(Some(HistoryOutcome::Played))
+}
+
+/// Unique track ids skipped (`n`) within the last 7 days (most recent first).
+pub fn skipped_this_week() -> Vec<String> {
+    ids_in_week(Some(HistoryOutcome::Skipped))
+}
+
+/// Unique track ids disliked (`d`) within the last 7 days (most recent first).
+pub fn disliked_this_week() -> Vec<String> {
+    ids_in_week(Some(HistoryOutcome::Disliked))
+}
+
+/// Unique track ids with negative radio feedback (skipped or disliked)
+/// within the last 7 days (most recent first). The similarity walk penalizes
+/// these tracks and their artists.
+pub fn negative_this_week() -> Vec<String> {
+    let cutoff = now_unix().saturating_sub(WEEK_SECS);
+    let mut seen = std::collections::HashSet::new();
+    let mut out = Vec::new();
+    for entry in load_entries().into_iter().rev() {
+        if entry.at < cutoff {
+            continue;
+        }
+        if entry.outcome == HistoryOutcome::Played {
             continue;
         }
         if seen.insert(entry.id.clone()) {

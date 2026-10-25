@@ -7,7 +7,13 @@
 //! resulting order to `run_session` as a normal `Playlist`.
 
 use std::collections::{HashMap, HashSet};
+use std::fs;
+use std::path::PathBuf;
 
+use anyhow::{Context, Result, bail};
+use serde::{Deserialize, Serialize};
+
+use crate::config;
 use crate::library::Library;
 use crate::playlist::Track;
 use crate::stats::StatsStore;
@@ -29,6 +35,15 @@ const W_FRESH: f64 = 1.5;
 const FRESH_MAX_PLAYS: u64 = 2;
 // Penalty for tracks heard in the last 7 days (skipped in --fresh).
 const W_RECENT_PENALTY: f64 = 3.0;
+// Penalty for tracks skipped/disliked in the last 7 days (`n` / `d`).
+// Stronger than the recency penalty: negative feedback must be felt even
+// when the track would otherwise win on similarity. A disliked track counts
+// double (see `is_disliked` below).
+const W_NEGATIVE_PENALTY: f64 = 6.0;
+// Penalty for any candidate whose artist got skip/dislike feedback in the
+// last 7 days — the vibe drifts away from penalized artists, not just the
+// exact rejected tracks.
+const W_NEGATIVE_ARTIST_PENALTY: f64 = 2.0;
 // Don't pick the same artist more than this many times in a row while
 // alternatives remain — keeps the walk from becoming an artist marathon.
 const SAME_ARTIST_RUN_CAP: usize = 2;
@@ -96,6 +111,9 @@ fn score_candidate(
     genres: &[HashSet<String>],
     plays: &[u64],
     is_recent: &[bool],
+    is_negative: &[bool],
+    is_disliked: &[bool],
+    artist_penalized: &[bool],
     fresh: bool,
 ) -> f64 {
     let mut score = 0.0;
@@ -133,6 +151,18 @@ fn score_candidate(
             score -= W_RECENT_PENALTY;
         }
     }
+    // Negative radio feedback (`n` skip / `d` dislike) always applies — even
+    // in --fresh mode — and outweighs every positive weight combined, so a
+    // rejected track (or its artist) loses ties for the next 7 days.
+    if is_negative[cand] {
+        score -= W_NEGATIVE_PENALTY;
+        if is_disliked[cand] {
+            score -= W_NEGATIVE_PENALTY;
+        }
+    }
+    if artist_penalized[cand] {
+        score -= W_NEGATIVE_ARTIST_PENALTY;
+    }
     score
 }
 
@@ -142,11 +172,48 @@ fn score_candidate(
 /// picks at random among the top-`opts.top_k`. Deterministic for a fixed
 /// `opts.seed`. O(n²) scoring — fine for typical libraries (< ~20k tracks);
 /// swap the full scan for an artist/genre/decade inverted index if needed.
+///
+/// `recent_ids` are tracks played this week (mild penalty). `negative_ids`
+/// are tracks skipped/disliked this week (strong penalty, always applied —
+/// even in `--fresh`). `disliked_ids` is the subset rejected explicitly via
+/// `d` (double penalty). `penalized_artists` holds lowercased artists with
+/// recent negative feedback (mild per-track penalty).
+#[allow(clippy::too_many_arguments)]
 pub fn build_order(
     tracks: &[Track],
     artist_of: impl Fn(&Track) -> String,
     stats: &StatsStore,
     recent_ids: &HashSet<String>,
+    seed_idx: usize,
+    opts: &RadioOpts,
+) -> Vec<usize> {
+    build_order_full(
+        tracks,
+        artist_of,
+        stats,
+        recent_ids,
+        &HashSet::new(),
+        &HashSet::new(),
+        &HashSet::new(),
+        seed_idx,
+        opts,
+    )
+}
+
+/// Full variant of [`build_order`] with negative-feedback inputs.
+///
+/// Prefer [`build_order`] when the caller has no feedback sets; pass the
+/// `history::{negative,disliked}_this_week` sets plus
+/// `stats.penalized_artists()` here for Radio 2.0 semantics.
+#[allow(clippy::too_many_arguments)]
+pub fn build_order_full(
+    tracks: &[Track],
+    artist_of: impl Fn(&Track) -> String,
+    stats: &StatsStore,
+    recent_ids: &HashSet<String>,
+    negative_ids: &HashSet<String>,
+    disliked_ids: &HashSet<String>,
+    penalized_artists: &HashSet<String>,
     seed_idx: usize,
     opts: &RadioOpts,
 ) -> Vec<usize> {
@@ -185,6 +252,18 @@ pub fn build_order(
         .iter()
         .map(|t| recent_ids.contains(t.path.to_string_lossy().as_ref()))
         .collect();
+    let is_negative: Vec<bool> = tracks
+        .iter()
+        .map(|t| negative_ids.contains(t.path.to_string_lossy().as_ref()))
+        .collect();
+    let is_disliked: Vec<bool> = tracks
+        .iter()
+        .map(|t| disliked_ids.contains(t.path.to_string_lossy().as_ref()))
+        .collect();
+    let artist_penalized: Vec<bool> = artists
+        .iter()
+        .map(|a| a.as_ref().is_some_and(|k| penalized_artists.contains(k)))
+        .collect();
 
     let mut used = vec![false; n];
     let mut order = Vec::with_capacity(n);
@@ -200,7 +279,18 @@ pub fn build_order(
             .map(|i| {
                 (
                     score_candidate(
-                        i, cur, tracks, &artists, &albums, &genres, &plays, &is_recent, opts.fresh,
+                        i,
+                        cur,
+                        tracks,
+                        &artists,
+                        &albums,
+                        &genres,
+                        &plays,
+                        &is_recent,
+                        &is_negative,
+                        &is_disliked,
+                        &artist_penalized,
+                        opts.fresh,
                     ),
                     i,
                 )
@@ -270,7 +360,7 @@ pub fn resolve_seed(
 }
 
 /// Track-slice variant of [`resolve_seed`] for callers that own their track
-/// list without holding a `Library` (the desktop `CoreController`).
+/// list without holding a `Library`.
 /// `artist_of`/`album_of` must resolve display names the same way
 /// `Library::artist_name`/`album_name` do.
 #[allow(clippy::too_many_arguments)]
@@ -333,6 +423,224 @@ pub fn resolve_seed_in(
         }
     }
     Some((xorshift(&mut rng) as usize) % tracks.len())
+}
+
+// ── Saved stations ───────────────────────────────────────────────
+// A station is just a named radio seed: optional query + artist + genre +
+// fresh flag, persisted as one TOML file per station under
+// `~/.option/music/stations/<slug>.toml`.
+
+/// Named radio seed saved via `msc radio save NAME`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RadioStation {
+    /// Display name given on `save`.
+    pub name: String,
+    /// Positional seed query (title / artist / album / genre search).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub query: Option<String>,
+    /// `--artist` seed filter.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub artist: Option<String>,
+    /// `--genre` seed filter.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub genre: Option<String>,
+    /// `--fresh` rediscovery mode.
+    #[serde(default)]
+    pub fresh: bool,
+}
+
+impl RadioStation {
+    /// Short `seed "q" · artist "a" · genre "g" · fresh` description for `ls`.
+    pub fn describe(&self) -> String {
+        let mut parts = Vec::new();
+        if let Some(q) = self
+            .query
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        {
+            parts.push(format!("\"{q}\""));
+        }
+        if let Some(a) = self
+            .artist
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        {
+            parts.push(format!("artist \"{a}\""));
+        }
+        if let Some(g) = self
+            .genre
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        {
+            parts.push(format!("genre \"{g}\""));
+        }
+        if self.fresh {
+            parts.push("fresh".to_owned());
+        }
+        if parts.is_empty() {
+            "library mix".to_owned()
+        } else {
+            parts.join(" · ")
+        }
+    }
+}
+
+/// Snapshot of the current CLI seed flags — what `msc radio save` stores.
+#[derive(Debug, Clone, Default)]
+pub struct RadioSeed {
+    pub query: Option<String>,
+    pub artist: Option<String>,
+    pub genre: Option<String>,
+    pub fresh: bool,
+}
+
+impl RadioSeed {
+    pub fn is_empty(&self) -> bool {
+        self.query
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .is_none()
+            && self
+                .artist
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .is_none()
+            && self
+                .genre
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .is_none()
+            && !self.fresh
+    }
+}
+
+fn stations_dir() -> PathBuf {
+    config::config_dir().join("stations")
+}
+
+/// Slug for the station file name (`"Morning Drive"` → `morning-drive`).
+/// Rejects path tricks; empty names fall back to `station`.
+pub fn station_slug(name: &str) -> Result<String> {
+    let mut slug: String = name
+        .trim()
+        .to_lowercase()
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+        .collect();
+    while slug.contains("--") {
+        slug = slug.replace("--", "-");
+    }
+    let slug = slug.trim_matches('-').to_owned();
+    let slug = if slug.is_empty() {
+        "station".to_owned()
+    } else {
+        slug
+    };
+    if slug == "." || slug == ".." || slug.contains('/') || slug.contains('\\') {
+        bail!("invalid station name: {name}");
+    }
+    Ok(slug)
+}
+
+fn station_path(name: &str) -> Result<PathBuf> {
+    Ok(stations_dir().join(format!("{}.toml", station_slug(name)?)))
+}
+
+/// Persist the current seed flags as a named station (overwrites same name).
+pub fn save_station(name: &str, seed: &RadioSeed) -> Result<RadioStation> {
+    let name = name.trim();
+    if name.is_empty() {
+        bail!("station name is empty");
+    }
+    let station = RadioStation {
+        name: name.to_owned(),
+        query: seed
+            .query
+            .clone()
+            .map(|s| s.trim().to_owned())
+            .filter(|s| !s.is_empty()),
+        artist: seed
+            .artist
+            .clone()
+            .map(|s| s.trim().to_owned())
+            .filter(|s| !s.is_empty()),
+        genre: seed
+            .genre
+            .clone()
+            .map(|s| s.trim().to_owned())
+            .filter(|s| !s.is_empty()),
+        fresh: seed.fresh,
+    };
+    let dir = stations_dir();
+    fs::create_dir_all(&dir).with_context(|| format!("create {}", dir.display()))?;
+    let path = station_path(name)?;
+    let body = toml::to_string_pretty(&station)?;
+    option_sdk::atomic_write(&path, body.as_bytes())
+        .with_context(|| format!("write {}", path.display()))?;
+    Ok(station)
+}
+
+/// Load a station by `save` name (case-insensitive fallback).
+pub fn load_station(name: &str) -> Result<RadioStation> {
+    let name = name.trim();
+    if name.is_empty() {
+        bail!("station name is empty");
+    }
+    if let Ok(path) = station_path(name)
+        && path.exists()
+    {
+        let raw = fs::read_to_string(&path).with_context(|| format!("read {}", path.display()))?;
+        return Ok(toml::from_str(&raw)?);
+    }
+    // Case-insensitive fallback so `msc radio load Morning` finds `morning`.
+    let wanted = name.to_lowercase();
+    for station in list_stations()? {
+        if station.name.to_lowercase() == wanted {
+            return Ok(station);
+        }
+    }
+    bail!("no station named \"{name}\" — see `msc radio ls`")
+}
+
+/// Every saved station, sorted case-insensitively by name.
+pub fn list_stations() -> Result<Vec<RadioStation>> {
+    let dir = stations_dir();
+    if !dir.exists() {
+        return Ok(Vec::new());
+    }
+    let mut out = Vec::new();
+    for entry in fs::read_dir(&dir)
+        .with_context(|| format!("read {}", dir.display()))?
+        .flatten()
+    {
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()) != Some("toml") {
+            continue;
+        }
+        if let Ok(raw) = fs::read_to_string(&path)
+            && let Ok(station) = toml::from_str::<RadioStation>(&raw)
+        {
+            out.push(station);
+        }
+    }
+    out.sort_by_key(|a| a.name.to_lowercase());
+    Ok(out)
+}
+
+/// Delete a saved station by name.
+pub fn delete_station(name: &str) -> Result<()> {
+    let station = load_station(name)?;
+    let path = station_path(&station.name)?;
+    if path.exists() {
+        fs::remove_file(&path)?;
+    }
+    Ok(())
 }
 
 #[cfg(test)]

@@ -21,14 +21,6 @@ pub fn config_path() -> PathBuf {
     option_sdk::App::MUSIC.config_toml()
 }
 
-/// Raw `desktop_preferences` string from config.toml, without a controller.
-/// The desktop app stores its UI state blob (JSON) there.
-pub fn desktop_preferences_raw() -> Option<String> {
-    let raw = fs::read_to_string(config_path()).ok()?;
-    let doc = raw.parse::<toml::Value>().ok()?;
-    doc.get("desktop_preferences")?.as_str().map(String::from)
-}
-
 /// `~/.option/music/cache` (ensures the whole `~/.option/music` + `cache/` tree)
 pub fn cache_dir() -> PathBuf {
     let _ = option_sdk::App::MUSIC.ensure_cache();
@@ -67,6 +59,10 @@ pub fn default_music_dir() -> PathBuf {
 /// Resolve a music-dir flag. Empty → `~/Music`. Rejects `..` and non-dirs.
 pub fn resolve_music_dir(dir: &str) -> Result<PathBuf> {
     if dir.is_empty() {
+        let folders = AppConfig::load().library_folders();
+        if let Some(first) = folders.first() {
+            return Ok(first.clone());
+        }
         return Ok(default_music_dir());
     }
 
@@ -90,6 +86,32 @@ pub fn resolve_music_dir(dir: &str) -> Result<PathBuf> {
 
 fn expand_tilde(dir: &str) -> PathBuf {
     option_sdk::expand_tilde(dir)
+}
+
+/// Config path for tests (`STILLMUSIC_CONFIG` override, else real path).
+fn active_config_path() -> PathBuf {
+    std::env::var_os("STILLMUSIC_CONFIG")
+        .map(PathBuf::from)
+        .unwrap_or_else(config_path)
+}
+
+/// MUSIC_DIR legacy env (`STILLMUSIC_MUSIC_DIR` / `MUSIC_DIR`): single dir
+/// fallback when no `-m` flag and no `library_folders` configured.
+pub fn legacy_env_dir() -> Option<PathBuf> {
+    for key in ["STILLMUSIC_MUSIC_DIR", "MUSIC_DIR"] {
+        if let Some(v) = std::env::var_os(key) {
+            let s = v.to_string_lossy().into_owned();
+            if s.trim().is_empty() {
+                continue;
+            }
+            let p = expand_tilde(s.trim());
+            if p.is_dir() {
+                return p.canonicalize().ok().or(Some(p));
+            }
+            return None;
+        }
+    }
+    None
 }
 
 // ── Persistent settings ──────────────────────────────────────────
@@ -317,7 +339,7 @@ pub enum DlUiMode {
     Type,
 }
 
-/// How the Artists browser groups tracks (shared CLI + desktop).
+/// How the Artists browser groups tracks.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 #[derive(Default)]
@@ -606,10 +628,11 @@ pub struct AppConfig {
     /// ReplayGain mode applied via MPV.
     #[serde(default)]
     pub replaygain: ReplayGainMode,
-    /// Docked lyrics strip: `above` (default) · `below` · `hidden`.
+    /// Lyrics face: `right` / `left` mean on, `hidden` keeps `y` off until pressed.
+    /// Old files that say `above` / `below` still load as on.
     #[serde(default)]
     pub lyrics_pos: LyricsPos,
-    #[serde(default, rename = "folders")]
+    #[serde(default, alias = "folders")]
     pub music_dirs: Vec<PathBuf>,
     #[serde(default)]
     pub favorites: Vec<String>,
@@ -631,6 +654,12 @@ pub struct AppConfig {
     /// Discord application client id override (empty = built-in).
     #[serde(default)]
     pub discord_rpc_id: String,
+    /// ListenBrainz user token for opt-in scrobbling (empty = off, the
+    /// default). When set, counted plays are submitted to
+    /// `api.listenbrainz.org`; without it no scrobble traffic ever happens.
+    /// Never logged or printed — treat it like a password.
+    #[serde(default)]
+    pub listenbrainz_token: String,
     /// MPRIS on the session bus — multimedia keys and `playerctl` (on by default).
     #[serde(default = "default_true")]
     pub mpris: bool,
@@ -671,6 +700,7 @@ impl Default for AppConfig {
             resume: true,
             discord_rpc: false,
             discord_rpc_id: String::new(),
+            listenbrainz_token: String::new(),
             mpris: true,
             volume: 80,
             eq: crate::eq::EqPreset::Off,
@@ -684,7 +714,7 @@ impl Default for AppConfig {
 
 impl AppConfig {
     pub fn load() -> Self {
-        let path = config_path();
+        let path = active_config_path();
         if !path.exists() {
             return Self::default();
         }
@@ -701,16 +731,45 @@ impl AppConfig {
     }
 
     pub fn save(&self) -> Result<()> {
-        let dir = config_dir();
-        fs::create_dir_all(&dir)
-            .with_context(|| format!("cannot create config dir {}", dir.display()))?;
-        let path = config_path();
+        let path = active_config_path();
+        if let Some(dir) = path.parent()
+            && !dir.as_os_str().is_empty()
+        {
+            fs::create_dir_all(dir)
+                .with_context(|| format!("cannot create config dir {}", dir.display()))?;
+        } else {
+            let dir = config_dir();
+            fs::create_dir_all(&dir)
+                .with_context(|| format!("cannot create config dir {}", dir.display()))?;
+        }
         let body = toml::to_string_pretty(self).context("serialize config")?;
         let header = "# still settings — edit carefully or use `c` in the player\n\
 # path: ~/.option/music/config.toml\n\n";
         option_sdk::atomic_write(&path, format!("{header}{body}").as_bytes())
             .with_context(|| format!("cannot write {}", path.display()))?;
         Ok(())
+    }
+
+    /// Effective library folders: existing `music_dirs` dirs, else legacy
+    /// `MUSIC_DIR` env, else `~/Music` when it exists.
+    pub fn library_folders(&self) -> Vec<PathBuf> {
+        let mut out: Vec<PathBuf> = self
+            .music_dirs
+            .iter()
+            .filter(|p| p.is_dir())
+            .cloned()
+            .collect();
+        if !out.is_empty() {
+            return out;
+        }
+        if let Some(env) = legacy_env_dir() {
+            return vec![env];
+        }
+        let def = default_music_dir();
+        if def.is_dir() {
+            out.push(def);
+        }
+        out
     }
 
     pub fn volume_max(&self) -> u8 {

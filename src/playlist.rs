@@ -201,6 +201,11 @@ impl Playlist {
         &self.tracks
     }
 
+    #[cfg(test)]
+    pub(crate) fn tracks_mut_swap(&mut self, a: usize, b: usize) {
+        self.tracks.swap(a, b);
+    }
+
     pub fn get(&self, index: usize) -> Option<&Track> {
         self.tracks.get(index)
     }
@@ -267,6 +272,139 @@ impl Playlist {
             let j = (state as usize) % (i + 1);
             self.tracks.swap(i, j);
         }
+    }
+
+    pub fn replace_tracks(&mut self, tracks: Vec<Track>) {
+        self.tracks = tracks;
+    }
+
+    fn index_of_path(&self, path: &Path) -> Option<usize> {
+        self.tracks.iter().position(|t| t.path == path)
+    }
+
+    pub fn reorder_step(
+        &mut self,
+        cursor: usize,
+        delta: i32,
+        current: &mut usize,
+    ) -> Option<usize> {
+        if self.tracks.is_empty() || delta == 0 {
+            return None;
+        }
+        if cursor >= self.tracks.len() || *current >= self.tracks.len() {
+            return None;
+        }
+        let target = cursor as i32 + delta;
+        if target < 0 || target >= self.tracks.len() as i32 {
+            return None;
+        }
+        let target = target as usize;
+        let current_path = self.tracks[*current].path.clone();
+        let moved_path = self.tracks[cursor].path.clone();
+        self.tracks.swap(cursor, target);
+        *current = self.index_of_path(&current_path).unwrap_or(*current);
+        Some(self.index_of_path(&moved_path).unwrap_or(target))
+    }
+
+    pub fn move_to_next(&mut self, cursor: usize, current: usize) -> Option<(usize, usize)> {
+        if self.tracks.len() < 2 {
+            return None;
+        }
+        if cursor >= self.tracks.len() || current >= self.tracks.len() {
+            return None;
+        }
+        if cursor == current {
+            return None;
+        }
+        if cursor == current + 1 {
+            return None;
+        }
+        let current_path = self.tracks[current].path.clone();
+        let moved_path = self.tracks[cursor].path.clone();
+        let moved = self.tracks.remove(cursor);
+        let current_at = self.index_of_path(&current_path).unwrap_or(0);
+        let at = (current_at + 1).min(self.tracks.len());
+        self.tracks.insert(at, moved);
+        Some((
+            self.index_of_path(&current_path).unwrap_or(current),
+            self.index_of_path(&moved_path).unwrap_or(at),
+        ))
+    }
+
+    pub fn move_to_end(&mut self, cursor: usize, current: usize) -> Option<(usize, usize)> {
+        if self.tracks.len() < 2 {
+            return None;
+        }
+        if cursor >= self.tracks.len() || current >= self.tracks.len() {
+            return None;
+        }
+        if cursor + 1 == self.tracks.len() {
+            return None;
+        }
+        let current_path = self.tracks[current].path.clone();
+        let moved_path = self.tracks[cursor].path.clone();
+        let moved = self.tracks.remove(cursor);
+        self.tracks.push(moved);
+        Some((
+            self.index_of_path(&current_path).unwrap_or(current),
+            self.index_of_path(&moved_path)
+                .unwrap_or(self.tracks.len() - 1),
+        ))
+    }
+
+    pub fn clear_keep_current(&mut self, current: usize) -> bool {
+        if self.tracks.len() <= 1 {
+            return false;
+        }
+        if current >= self.tracks.len() {
+            return false;
+        }
+        let kept = self.tracks[current].clone();
+        self.tracks.clear();
+        self.tracks.push(kept);
+        true
+    }
+}
+
+/// Undo stack for queue edits (reorder / play-next / append / clear / shuffle).
+#[derive(Debug, Default)]
+pub struct QueueUndo {
+    stack: Vec<QueueSnapshot>,
+}
+
+#[derive(Debug, Clone)]
+struct QueueSnapshot {
+    tracks: Vec<Track>,
+    current: usize,
+    cursor: usize,
+}
+
+impl QueueUndo {
+    pub fn new() -> Self {
+        Self { stack: Vec::new() }
+    }
+
+    pub fn push(&mut self, tracks: &[Track], current: usize, cursor: usize) {
+        if self.stack.len() >= 32 {
+            self.stack.remove(0);
+        }
+        self.stack.push(QueueSnapshot {
+            tracks: tracks.to_vec(),
+            current,
+            cursor,
+        });
+    }
+
+    pub fn pop(&mut self) -> Option<(Vec<Track>, usize, usize)> {
+        self.stack.pop().map(|s| (s.tracks, s.current, s.cursor))
+    }
+
+    pub fn len(&self) -> usize {
+        self.stack.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.stack.is_empty()
     }
 }
 
@@ -385,5 +523,83 @@ mod tests {
         let len = pl.len();
         pl.shuffle();
         assert_eq!(pl.len(), len);
+    }
+
+    fn test_playlist(n: usize) -> Playlist {
+        Playlist {
+            tracks: (0..n)
+                .map(|i| Track::from_path(PathBuf::from(format!("/m/t{i}.mp3"))))
+                .collect(),
+        }
+    }
+
+    fn order(pl: &Playlist) -> Vec<String> {
+        pl.tracks()
+            .iter()
+            .map(|t| t.path.to_string_lossy().into_owned())
+            .collect()
+    }
+
+    #[test]
+    fn reorder_step_moves_and_tracks_current() {
+        let mut pl = test_playlist(4);
+        let mut current = 0;
+        assert_eq!(pl.reorder_step(2, 1, &mut current), Some(3));
+        assert_eq!(
+            order(&pl),
+            vec!["/m/t0.mp3", "/m/t1.mp3", "/m/t3.mp3", "/m/t2.mp3"]
+        );
+        assert_eq!(current, 0);
+        assert_eq!(pl.reorder_step(0, 1, &mut current), Some(1));
+        assert_eq!(current, 1);
+        assert_eq!(pl.reorder_step(0, -1, &mut current), None);
+        assert_eq!(pl.reorder_step(3, 1, &mut current), None);
+        assert_eq!(pl.reorder_step(9, 1, &mut current), None);
+    }
+
+    #[test]
+    fn play_next_moves_after_current() {
+        let mut pl = test_playlist(4);
+        let (current, moved) = pl.move_to_next(3, 0).expect("move");
+        assert_eq!((current, moved), (0, 1));
+        assert_eq!(
+            order(&pl),
+            vec!["/m/t0.mp3", "/m/t3.mp3", "/m/t1.mp3", "/m/t2.mp3"]
+        );
+        assert!(pl.move_to_next(0, 0).is_none());
+        assert!(pl.move_to_next(1, 0).is_none());
+    }
+
+    #[test]
+    fn append_end_and_clear_keep_current() {
+        let mut pl = test_playlist(4);
+        let (current, moved) = pl.move_to_end(1, 0).expect("append");
+        assert_eq!((current, moved), (0, 3));
+        assert_eq!(
+            order(&pl),
+            vec!["/m/t0.mp3", "/m/t2.mp3", "/m/t3.mp3", "/m/t1.mp3"]
+        );
+        assert!(pl.move_to_end(3, 0).is_none());
+        assert!(pl.clear_keep_current(0));
+        assert_eq!(order(&pl), vec!["/m/t0.mp3"]);
+        assert!(!pl.clear_keep_current(0));
+    }
+
+    #[test]
+    fn undo_stack_restores_order() {
+        let mut undo = QueueUndo::new();
+        let pl = test_playlist(3);
+        undo.push(pl.tracks(), 1, 2);
+        let mut pl2 = test_playlist(3);
+        pl2.tracks_mut_swap(0, 2);
+        undo.push(pl2.tracks(), 0, 1);
+        let (tracks, current, cursor) = undo.pop().expect("pop");
+        assert_eq!(current, 0);
+        assert_eq!(cursor, 1);
+        assert_eq!(tracks.len(), 3);
+        let (_, current, _) = undo.pop().expect("pop2");
+        assert_eq!(current, 1);
+        assert!(undo.is_empty());
+        assert!(undo.pop().is_none());
     }
 }
