@@ -65,7 +65,7 @@ describe("accessibility", () => {
       </StaticRouter>,
     );
     const results = await audit(
-      `<!doctype html><html lang="en"><head><title>optionMusic</title></head><body>${body}</body></html>`,
+      `<!doctype html><html lang="en"><head><title>still</title></head><body>${body}</body></html>`,
     );
     expect(describeViolations(results)).toBe("");
   }, 30_000);

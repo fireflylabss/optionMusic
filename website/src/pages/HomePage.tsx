@@ -67,7 +67,7 @@ function DemoPlayer() {
             className="block h-auto w-full outline-1 -outline-offset-1 outline-black/10 dark:outline-white/10"
             src="/demo.mp4"
             poster="/poster.jpg"
-            aria-label="Demo video: optionMusic playing a local track"
+            aria-label="Demo video: still playing a local track"
             autoPlay={!reducedMotion}
             muted
             loop
@@ -139,7 +139,7 @@ const FAMILY: {
   desc: string
   channel: 'stable' | 'beta' | 'alpha'
 }[] = [
-  { name: 'optionMusic', desc: 'Music player for the terminal', channel: 'stable' },
+  { name: 'still', desc: 'Music player for the terminal', channel: 'beta' },
   { name: 'optionTerm', desc: 'Terminal emulator, GPU-rendered', channel: 'beta' },
   { name: 'optionFiles', desc: 'GTK file manager, mono-first', channel: 'beta' },
   { name: 'optionNotes', desc: 'Plain-text notes, local-first', channel: 'alpha' },
@@ -156,19 +156,19 @@ const STEPS: { n: string; title: string; cmd: string; desc: string }[] = [
   {
     n: '01',
     title: 'Index',
-    cmd: 'optionmusic add ~/Music',
+    cmd: 'still -m ~/Music library refresh',
     desc: 'Point it at a folder. The library index builds once, then stays warm.',
   },
   {
     n: '02',
     title: 'Play',
-    cmd: 'optionmusic play --shuffle',
+    cmd: 'still play --shuffle',
     desc: 'Albums, artists, playlists or a single search — straight to audio.',
   },
   {
     n: '03',
     title: 'Stay',
-    cmd: 'optionmusic',
+    cmd: 'still browse',
     desc: 'The TUI stays open in a corner of your terminal. Out of the way, always on.',
   },
 ]
@@ -195,15 +195,15 @@ const surfaceLabel: Record<string, string | null> = {
 const FAQ: { q: string; a: string }[] = [
   {
     q: 'Which platforms are supported?',
-    a: 'Linux today — through the AUR package or a release tarball. macOS and Windows builds land once the core player is stable.',
+    a: 'Linux is the primary platform, through stillmusic or stillmusic-bin on the AUR. macOS and Windows builds are best-effort and need system libmpv.',
   },
   {
     q: 'Which audio formats does it play?',
-    a: 'flac, mp3, ogg, opus and m4a out of the box. If your system decodes it, optionMusic plays it.',
+    a: 'flac, mp3, ogg, opus and m4a out of the box. If your system decodes it, still plays it.',
   },
   {
     q: 'Is there a GUI version?',
-    a: 'No — optionMusic is terminal-first by design. If you want a graphical surface, the GTK siblings in the Option family share the same design tokens.',
+    a: 'No — still is terminal-first by design. If you want a graphical surface, the GTK siblings in the Option family share the same design tokens.',
   },
   {
     q: 'Does it stream from Spotify or other services?',
@@ -215,7 +215,7 @@ const FAQ: { q: string; a: string }[] = [
   },
   {
     q: 'Where does it keep its state?',
-    a: 'Config in $XDG_CONFIG_HOME/option/music.toml, cache and library index under $XDG_DATA_HOME/option/. Plain files, nothing hidden.',
+    a: 'Config in ~/.option/music/config.toml, cache and library index under ~/.option/music/cache/. Plain files you can inspect and back up.',
   },
 ]
 
@@ -380,7 +380,7 @@ function HomePage() {
           One palette, every surface
         </h2>
         <p className="mt-4 max-w-md leading-relaxed text-muted-foreground">
-          optionMusic is part of a family of small tools that share the same
+          still is part of a family of small tools that share the same
           token-driven design system — from TUI to GTK.
         </p>
         <Reveal delay={90}>
@@ -422,7 +422,7 @@ function HomePage() {
               Your library stays yours
             </h2>
             <p className="mt-4 leading-relaxed text-muted-foreground">
-              All state lives in plain files under standard XDG paths. Works
+              All state lives in plain files under ~/.option/music/. Works
               fully offline — no accounts, no sync service, nothing leaves the
               machine.
             </p>
@@ -449,16 +449,16 @@ function HomePage() {
             </div>
             <div className="space-y-1.5 p-5 text-xs text-muted-foreground">
               <p>
-                <span className="text-foreground">~/.config/option/</span>
-                music.toml
+                <span className="text-foreground">~/.option/music/</span>
+                config.toml
               </p>
               <p>
-                <span className="text-foreground">~/.local/share/option/</span>
-                music/library.db
+                <span className="text-foreground">~/.option/music/</span>
+                cache/library.db
               </p>
               <p>
-                <span className="text-foreground">~/.local/state/option/</span>
-                music/logs/
+                <span className="text-foreground">~/.option/music/</span>
+                stats.json
               </p>
               <p>
                 <span className="text-foreground">~/Music/</span>
@@ -541,28 +541,31 @@ function HomePage() {
       </section>
 
       <section id="download" className="border-t border-border py-20">
-        <h2 className="font-sans text-display-md">Get optionMusic</h2>
+        <h2 className="font-sans text-display-md">Get still</h2>
         <p className="mt-4 max-w-md text-muted-foreground">
-          Install from the AUR or grab a release tarball. Linux builds are
-          available now.
+          Choose stillmusic to build from source, or stillmusic-bin for the
+          prebuilt release. Both install still and its short alias msc.
         </p>
         <Reveal delay={90}>
         <div className="mt-8 overflow-hidden rounded-xl border border-border bg-card font-mono text-sm">
           <div className="space-y-2 p-5">
             <p>
-              <span className="text-muted-foreground"># arch / AUR</span>
+              <span className="text-muted-foreground"># arch / AUR: from source</span>
               <br />
-              <span className="text-muted-foreground">$</span> paru -S
-              optionmusic
+              <span className="text-muted-foreground">$</span> paru -S stillmusic
             </p>
             <p>
-              <span className="text-muted-foreground"># everywhere else</span>
+              <span className="text-muted-foreground"># or: prebuilt release</span>
               <br />
-              <span className="text-muted-foreground">$</span> cargo install
-              optionmusic
+              <span className="text-muted-foreground">$</span> paru -S stillmusic-bin
             </p>
             <p>
-              <span className="text-muted-foreground">$</span>{' '}
+              <span className="text-muted-foreground"># from a source checkout</span>
+              <br />
+              <span className="text-muted-foreground">$</span> cargo install --path .
+            </p>
+            <p>
+              <span className="text-muted-foreground">$</span> still{' '}
               <span className="option-blink">▮</span>
             </p>
           </div>

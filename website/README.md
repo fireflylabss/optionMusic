@@ -1,4 +1,4 @@
-# optionMusic — website
+# still music — website
 
 Standalone landing site (Vite + React + TS + Tailwind v4). Quiet B&W editorial.
 

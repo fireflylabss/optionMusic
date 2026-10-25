@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "optionmusic-website",
+      "name": "stillmusic-website",
       "dependencies": {
         "@fontsource-variable/geist": "^5.3.0",
         "@fontsource-variable/jetbrains-mono": "^5.3.0",

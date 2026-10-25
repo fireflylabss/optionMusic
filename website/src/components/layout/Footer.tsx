@@ -39,7 +39,7 @@ function Footer() {
           <div className="max-w-sm">
             <p className="font-sans text-2xl tracking-tight">Play with focus.</p>
             <p className="mt-3 text-sm leading-relaxed text-muted-foreground">
-              optionMusic is a minimal music player for the terminal. Download it
+              still is a minimal music player for the terminal. Download it
               or build from source.
             </p>
             <div className="mt-6 flex flex-wrap gap-3">
@@ -99,7 +99,7 @@ function Footer() {
 
         <div className="mt-16 flex flex-col items-start justify-between gap-4 border-t border-border pt-8 md:flex-row md:items-center">
           <div className="flex items-center gap-3">
-            <span className="font-sans text-lg tracking-tight">optionMusic</span>
+            <span className="font-sans text-lg tracking-tight">still</span>
             <span className="text-xs text-muted-foreground">
               © 2026 Firefly Labs
             </span>

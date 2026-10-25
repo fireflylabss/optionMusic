@@ -22,7 +22,7 @@ function Nav() {
             to="/"
             className="font-sans text-lg tracking-tight text-foreground"
           >
-            optionMusic
+            still
           </NavLink>
           <div className="hidden items-center gap-6 sm:flex">
             {links.map((link) => (
