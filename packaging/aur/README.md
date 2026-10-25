@@ -1,56 +1,66 @@
-# AUR packaging (`optionmusic`)
+# still music on AUR
 
-Published: https://aur.archlinux.org/packages/optionmusic
+Two packages install the same `still` and `msc` commands:
 
-## Install (users)
+- **stillmusic** builds the pinned GitHub release from source with Cargo.
+- **stillmusic-bin** installs the prebuilt x86_64 Linux release asset.
 
-```bash
-yay -S optionmusic
-# or
-paru -S optionmusic
-```
-
-## Automatic publish (recommended)
-
-Every **GitHub Release** runs [`.github/workflows/publish-aur.yml`](../../.github/workflows/publish-aur.yml):
-
-1. Bumps `packaging/aur/PKGBUILD` + `.SRCINFO` for the release tag
-2. Commits that bump back to `master`
-3. Pushes the package to the AUR
-
-### One-time setup
-
-Add the AUR SSH **private** key as a repo secret:
-
-1. GitHub → **Settings → Secrets and variables → Actions**
-2. New secret name: `AUR_SSH_PRIVATE_KEY`
-3. Value: contents of `~/.ssh/aur_synara` (the private key, not `.pub`)
-
-Or from the CLI:
+The GitHub repository remains `fireflylabss/optionMusic`. Both AUR packages
+conflict with the previous `optionmusic` and `optmusic` packages so an AUR helper can remove
+an older package during installation. The old AUR package is preserved; these
+recipes do not request its deletion or merge.
 
 ```bash
-gh secret set AUR_SSH_PRIVATE_KEY < ~/.ssh/aur_synara
+yay -S stillmusic
+# or, to install without compiling:
+yay -S stillmusic-bin
 ```
 
-The public key must already be on your AUR account (it is, if you published 0.2.4).
+The runtime dependencies are MPV, SQLite, glibc and libgcc. `cava` adds spectrum
+bars; `yt-dlp` adds downloads; `ffmpeg` adds audio extraction and conversion;
+`tar` enables backup export and import. The source package also needs Cargo
+and pkgconf during its build. The binary package does not invoke Cargo.
 
-### Day-to-day
+## Release metadata
+
+Publish the GitHub tag and its Linux binary archive first. Then, on Arch Linux:
+
+Recipes live on the default branch and are refreshed after the release exists;
+the release source archive cannot contain its own final checksum. For the first
+still release, the new recipes are added after the tag and binary are published.
 
 ```bash
-# bump code, commit, then:
-git tag -a v0.2.5 -m "optionMusic 0.2.5"
-git push origin v0.2.5
-gh release create v0.2.5 --title "optionMusic 0.2.5" --generate-notes
-# → Actions publishes AUR automatically
+./packaging/aur/bump.sh v0.3.0-beta.1
 ```
 
-Manual re-run: **Actions → Publish AUR → Run workflow**.
+This downloads both the tag archive and
+`stillmusic-v0.3.0-beta.1-x86_64-unknown-linux-gnu.tar.gz`, checks their expected
+contents, calculates real SHA-256 checksums and regenerates both `.SRCINFO`
+files with `makepkg --printsrcinfo`. A `v0.3.0-beta.1` tag uses Arch version
+`0.3.0beta1`, which sorts before the eventual `0.3.0` stable package. Neither
+recipe is updated if one download or metadata generation fails. Release archives must remain unchanged afterward.
 
-## Local publish (fallback)
+## Publish
+
+The [AUR workflow](../../.github/workflows/publish-aur.yml) updates both packages
+after the release assets are ready. It requires the `AUR_SSH_PRIVATE_KEY` secret,
+whose public key is registered on the maintainer's AUR account.
+
+For a local publish:
 
 ```bash
-./packaging/aur/publish.sh           # push current packaging/
-./packaging/aur/publish.sh 0.2.5     # bump + push
+./packaging/aur/publish.sh v0.3.0-beta.1  # refresh metadata and publish both
+./packaging/aur/publish.sh              # publish already refreshed metadata
 ```
 
-Uses `~/aur/optionmusic` and `~/.ssh/aur_synara` (override with `AUR_SSH_KEY=` / `AUR_DIR=`).
+The helper verifies both source checksums before pushing, maintains separate
+repositories at `~/aur/stillmusic` and `~/aur/stillmusic-bin`, and verifies each
+remote commit after pushing. It uses `~/.ssh/aur_synara`; set `AUR_SSH_KEY` to
+override the key or `AUR_DIR` to override the parent of the two AUR checkouts.
+It refuses dirty checkouts and propagates fetch/rebase errors.
+
+Publishing a package repository and seeing it indexed in the AUR web interface
+are separate checks. Verify both package pages after publication:
+
+- https://aur.archlinux.org/packages/stillmusic
+- https://aur.archlinux.org/packages/stillmusic-bin
