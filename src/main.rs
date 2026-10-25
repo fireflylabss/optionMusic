@@ -1,6 +1,6 @@
-//! optionMusic — minimal black & white CLI music player (option music).
+//! still — minimal black & white CLI music player (still music).
 //!
-//! Binaries: `optionmusic`, short alias `msc`.
+//! Binaries: `still`, short alias `msc`.
 //! Engine: MPV via libmpv2.
 
 use std::io::{self, IsTerminal};
@@ -14,23 +14,23 @@ use crossterm::event::{
 };
 use crossterm::style::Stylize;
 
-use optionmusic::cli::{Cli, Command, LibraryCmd, PlaylistCmd};
-use optionmusic::config::{AppConfig, RepeatMode, resolve_music_dir};
-use optionmusic::download::{self, DownloadRequest, MediaKind};
-use optionmusic::library::Library;
-use optionmusic::lyrics::{LyricsLoader, LyricsState};
-use optionmusic::plain::Event as PlainEvent;
-use optionmusic::player::Player;
-use optionmusic::playlist::Playlist;
-use optionmusic::session::{
+use stillmusic::cli::{Cli, Command, LibraryCmd, PlaylistCmd};
+use stillmusic::config::{AppConfig, RepeatMode, resolve_music_dir};
+use stillmusic::download::{self, DownloadRequest, MediaKind};
+use stillmusic::library::Library;
+use stillmusic::lyrics::{LyricsLoader, LyricsState};
+use stillmusic::plain::Event as PlainEvent;
+use stillmusic::player::Player;
+use stillmusic::playlist::Playlist;
+use stillmusic::session::{
     Action, LoopMode, go_next, go_prev, handle_key, list_nav_key, lyrics_query, maybe_count_stats,
     nanos_seed, save_session,
 };
-use optionmusic::settings::SettingsAction;
-use optionmusic::sleep::SleepTimer;
-use optionmusic::smart_shuffle::RecentWindow;
-use optionmusic::stats::StatsStore;
-use optionmusic::ui::{
+use stillmusic::settings::SettingsAction;
+use stillmusic::sleep::SleepTimer;
+use stillmusic::smart_shuffle::RecentWindow;
+use stillmusic::stats::StatsStore;
+use stillmusic::ui::{
     APP_NAME, BRIGHT, BarClick, DIM, FrameState, GRAY, HitTarget, SessionUi, WHITE, banner,
     bin_name, print_info, print_success, print_warn,
 };
@@ -50,7 +50,7 @@ fn parse_cli() -> Cli {
     let raw: Vec<String> = std::env::args().collect();
     if raw.len() >= 2 {
         let first = raw[1].as_str();
-        if !first.starts_with('-') && !optionmusic::cli::is_subcommand(first) {
+        if !first.starts_with('-') && !stillmusic::cli::is_subcommand(first) {
             let mut rewritten = Vec::with_capacity(raw.len() + 1);
             rewritten.push(raw[0].clone());
             rewritten.push("play".into());
@@ -261,12 +261,12 @@ fn run() -> Result<()> {
             println!(
                 "  {}",
                 format!(
-                    "optionmusic · msc  ({bin})  ·  mpv  ·  {}",
-                    optionmusic::platform::label()
+                    "still · msc  ({bin})  ·  mpv  ·  {}",
+                    stillmusic::platform::label()
                 )
                 .with(GRAY)
             );
-            if let Some(caveat) = optionmusic::platform::caveat() {
+            if let Some(caveat) = stillmusic::platform::caveat() {
                 print_warn(&caveat);
             }
         }
@@ -305,7 +305,7 @@ fn cmd_play(
     volume: Option<u8>,
     speed: Option<f64>,
     pitch: Option<f64>,
-    eq: Option<optionmusic::eq::EqPreset>,
+    eq: Option<stillmusic::eq::EqPreset>,
     crossfade: f64,
     shuffle: bool,
     loop_flag: Option<LoopMode>,
@@ -348,7 +348,7 @@ fn cmd_play(
     }
 
     let mut player = Player::new(
-        volume.min(optionmusic::config::VOLUME_MAX_EXCESS),
+        volume.min(stillmusic::config::VOLUME_MAX_EXCESS),
         speed,
         crossfade,
     )?;
@@ -398,8 +398,8 @@ fn run_plain(
     loop_playlist: bool,
     out: OutputMode,
 ) -> Result<()> {
-    optionmusic::signals::install();
-    let mut rpc = optionmusic::rpc::Rpc::new();
+    stillmusic::signals::install();
+    let mut rpc = stillmusic::rpc::Rpc::new();
     let cfg = AppConfig::load();
     let _ = rpc.sync(cfg.discord_rpc, &cfg.discord_rpc_id);
     let mut stats_store = StatsStore::load();
@@ -412,7 +412,7 @@ fn run_plain(
     'queue: loop {
         for (idx, track) in playlist.tracks().iter().enumerate() {
             // A signal between tracks must not start another one.
-            if optionmusic::signals::interrupted() {
+            if stillmusic::signals::interrupted() {
                 interrupted = true;
                 break 'queue;
             }
@@ -429,7 +429,7 @@ fn run_plain(
             let mut max_pos = Duration::ZERO;
             let mut counted = false;
             while !player.is_idle() {
-                if optionmusic::signals::interrupted() {
+                if stillmusic::signals::interrupted() {
                     interrupted = true;
                     break;
                 }
@@ -491,7 +491,7 @@ fn run_plain(
         // MPV is stopped and everything is persisted, so exiting here is safe and
         // keeps the shell's `128 + signo` contract for "killed by a signal".
         io::Write::flush(&mut io::stdout()).ok();
-        std::process::exit(optionmusic::signals::exit_code());
+        std::process::exit(stillmusic::signals::exit_code());
     }
 
     emit(out, &PlainEvent::End { tracks_played });
@@ -558,9 +558,9 @@ fn run_session(
     let mut done_msg = "done — thanks for listening ♪";
 
     // Discord Rich Presence (opt-in) + session persistence throttle.
-    let mut rpc = optionmusic::rpc::Rpc::new();
+    let mut rpc = stillmusic::rpc::Rpc::new();
     // MPRIS on the session bus (on by default) — multimedia keys + playerctl.
-    let mut mpris = optionmusic::mpris::Mpris::new();
+    let mut mpris = stillmusic::mpris::Mpris::new();
     let mut last_save = std::time::Instant::now();
 
     // Smart shuffle (history-aware advance), sleep timer, stats + lyrics.
@@ -568,7 +568,7 @@ fn run_session(
     let mut recent = RecentWindow::new(playlist.len());
     recent.push(index);
     let mut sleep = SleepTimer::new();
-    if let Some(mins) = optionmusic::sleep::take_request()
+    if let Some(mins) = stillmusic::sleep::take_request()
         && mins > 0
     {
         ui.toast_config(sleep.set_minutes(mins));
@@ -654,7 +654,7 @@ fn run_session(
             ui.toast_config(warn);
         }
         for cmd in mpris.take_commands() {
-            use optionmusic::mpris::Command;
+            use stillmusic::mpris::Command;
             match cmd {
                 Command::Play | Command::PlayPause | Command::Pause => {
                     let want_pause = matches!(cmd, Command::Pause)
@@ -725,7 +725,7 @@ fn run_session(
             break;
         }
         if let Some(t) = playlist.get(index) {
-            mpris.update(optionmusic::mpris::Status {
+            mpris.update(stillmusic::mpris::Status {
                 title: t.display_name(),
                 artist: t.artist.clone().unwrap_or_default(),
                 album: t.album.clone().unwrap_or_default(),
@@ -770,7 +770,7 @@ fn run_session(
         // Lyrics dock content (resolved lazily per track, then cached).
         // Synced lines carry word timings for karaoke; plain falls back
         // to a static scrollable list; empty stays `no lyrics found`.
-        let empty_synced: Vec<optionmusic::lyrics::LrcLine> = Vec::new();
+        let empty_synced: Vec<stillmusic::lyrics::LrcLine> = Vec::new();
         let empty_plain: Vec<String> = Vec::new();
         let lyric_now = if held {
             Duration::ZERO
@@ -778,7 +778,7 @@ fn run_session(
             player.position()
         };
         let (lyric_synced, lyric_plain, lyric_active, lyric_status): (
-            &[optionmusic::lyrics::LrcLine],
+            &[stillmusic::lyrics::LrcLine],
             &[String],
             Option<usize>,
             Option<String>,
@@ -1672,7 +1672,7 @@ fn cmd_download(
     output: Option<&std::path::Path>,
     audio_format: &str,
     interactive: bool,
-    ui_override: Option<optionmusic::config::DlUiMode>,
+    ui_override: Option<stillmusic::config::DlUiMode>,
     fallback_mweb: bool,
     no_fallback: bool,
     music_dir_flag: &str,
@@ -1688,7 +1688,7 @@ fn cmd_download(
     };
 
     let use_wizard = interactive || query.is_none_or(|q| q.trim().is_empty());
-    let cfg = optionmusic::config::AppConfig::load();
+    let cfg = stillmusic::config::AppConfig::load();
     let fallback = download::resolve_fallback_policy(fallback_mweb, no_fallback, cfg.dl_fallback);
     if use_wizard {
         let ui_mode = ui_override.unwrap_or(cfg.dl_ui);
@@ -1745,12 +1745,12 @@ fn cmd_info(path: &std::path::Path) -> Result<()> {
     println!("  {}  {}", "size".with(DIM), size_h.with(GRAY));
     println!("  {}  {}", "format".with(DIM), fmt.with(GRAY));
 
-    match optionmusic::player::probe_duration(path) {
+    match stillmusic::player::probe_duration(path) {
         Some(d) => {
             println!(
                 "  {}  {}",
                 "duration".with(DIM),
-                optionmusic::ui::fmt_time(d).with(BRIGHT)
+                stillmusic::ui::fmt_time(d).with(BRIGHT)
             );
         }
         None => {
@@ -1762,7 +1762,7 @@ fn cmd_info(path: &std::path::Path) -> Result<()> {
 }
 
 fn cmd_list(path: &std::path::Path, recursive: bool) -> Result<()> {
-    let tracks = optionmusic::playlist::scan_path(path, recursive)?;
+    let tracks = stillmusic::playlist::scan_path(path, recursive)?;
     if tracks.is_empty() {
         print_warn("no audio files found");
         return Ok(());
@@ -1855,7 +1855,7 @@ fn cmd_browse(favorites: bool, music_dir_flag: &str, enable_cava: bool) -> Resul
         print_warn("add audio files to the folder, or pass another folder with -m / --music-dir");
         return Ok(());
     }
-    optionmusic::browse::run(library, favorites, enable_cava)
+    stillmusic::browse::run(library, favorites, enable_cava)
 }
 
 /// `msc radio` — order the whole library as a similarity walk and play it
@@ -1869,7 +1869,7 @@ fn cmd_radio(
     volume: Option<u8>,
     speed: Option<f64>,
     pitch: Option<f64>,
-    eq: Option<optionmusic::eq::EqPreset>,
+    eq: Option<stillmusic::eq::EqPreset>,
     crossfade: f64,
     loop_flag: Option<LoopMode>,
     music_dir_flag: &str,
@@ -1893,11 +1893,11 @@ fn cmd_radio(
     }
 
     let stats = StatsStore::load();
-    let recent: std::collections::HashSet<String> = optionmusic::history::played_this_week()
+    let recent: std::collections::HashSet<String> = stillmusic::history::played_this_week()
         .into_iter()
         .collect();
     let rng_seed = nanos_seed();
-    let Some(seed_idx) = optionmusic::radio::resolve_seed(
+    let Some(seed_idx) = stillmusic::radio::resolve_seed(
         &library,
         seed_query.as_deref(),
         artist.as_deref(),
@@ -1917,13 +1917,13 @@ fn cmd_radio(
         anyhow::bail!("no match for {desc} — try an artist, album, track or genre name");
     };
 
-    let order = optionmusic::radio::build_order(
+    let order = stillmusic::radio::build_order(
         library.tracks(),
         |t| library.artist_name(t),
         &stats,
         &recent,
         seed_idx,
-        &optionmusic::radio::RadioOpts {
+        &stillmusic::radio::RadioOpts {
             fresh,
             seed: rng_seed,
             ..Default::default()
@@ -1935,7 +1935,7 @@ fn cmd_radio(
         seed_track.display_name(),
         library.artist_name(seed_track)
     );
-    let tracks: Vec<optionmusic::playlist::Track> =
+    let tracks: Vec<stillmusic::playlist::Track> =
         order.iter().map(|&i| library.tracks()[i].clone()).collect();
     let mut playlist = Playlist::from_tracks(tracks);
 
@@ -1951,7 +1951,7 @@ fn cmd_radio(
     });
 
     let mut player = Player::new(
-        volume.min(optionmusic::config::VOLUME_MAX_EXCESS),
+        volume.min(stillmusic::config::VOLUME_MAX_EXCESS),
         speed,
         crossfade,
     )?;
@@ -1993,7 +1993,7 @@ fn cmd_radio(
 }
 
 fn cmd_doctor() {
-    use optionmusic::doctor::{Need, checks, downloads_ready};
+    use stillmusic::doctor::{Need, checks, downloads_ready};
 
     let checks = checks();
     println!("  {}", "external tools".with(BRIGHT));
@@ -2046,7 +2046,7 @@ fn cmd_stats(limit: usize) -> Result<()> {
         } else {
             "plays".with(DIM)
         },
-        optionmusic::ui::fmt_time(Duration::from_secs(store.total_secs)).with(BRIGHT),
+        stillmusic::ui::fmt_time(Duration::from_secs(store.total_secs)).with(BRIGHT),
         "listened".with(DIM)
     );
     println!();
@@ -2084,12 +2084,12 @@ fn cmd_stats(limit: usize) -> Result<()> {
 
 fn cmd_sleep(arg: Option<&str>) -> Result<()> {
     match arg.map(str::trim) {
-        None | Some("") => match optionmusic::sleep::peek_request() {
+        None | Some("") => match stillmusic::sleep::peek_request() {
             Some(m) => print_info(&format!("sleep timer · {m} min (next session)")),
             None => print_info("sleep timer · off"),
         },
         Some(s) if s.eq_ignore_ascii_case("off") => {
-            optionmusic::sleep::write_request(None)?;
+            stillmusic::sleep::write_request(None)?;
             print_success("sleep timer · off");
         }
         Some(s) => {
@@ -2097,10 +2097,10 @@ fn cmd_sleep(arg: Option<&str>) -> Result<()> {
                 .parse()
                 .with_context(|| format!("expected minutes or `off`, got `{s}`"))?;
             if mins == 0 {
-                optionmusic::sleep::write_request(None)?;
+                stillmusic::sleep::write_request(None)?;
                 print_success("sleep timer · off");
             } else {
-                optionmusic::sleep::write_request(Some(mins))?;
+                stillmusic::sleep::write_request(Some(mins))?;
                 print_success(&format!("sleep timer · {mins} min (next session)"));
             }
         }
@@ -2111,7 +2111,7 @@ fn cmd_sleep(arg: Option<&str>) -> Result<()> {
 fn cmd_playlist(action: PlaylistCmd) -> Result<()> {
     match action {
         PlaylistCmd::List => {
-            let list = optionmusic::saved_playlists::list()?;
+            let list = stillmusic::saved_playlists::list()?;
             if list.is_empty() {
                 print_warn("no playlists yet — try `msc playlist create \"Name\"` or `import`");
                 return Ok(());
@@ -2126,11 +2126,11 @@ fn cmd_playlist(action: PlaylistCmd) -> Result<()> {
             }
         }
         PlaylistCmd::Create { name } => {
-            let pl = optionmusic::saved_playlists::create(&name)?;
+            let pl = stillmusic::saved_playlists::create(&name)?;
             print_success(&format!("created {} ({})", pl.name, pl.id));
         }
         PlaylistCmd::Import { path, name } => {
-            let pl = optionmusic::saved_playlists::import_m3u(&path, name.as_deref())?;
+            let pl = stillmusic::saved_playlists::import_m3u(&path, name.as_deref())?;
             print_success(&format!(
                 "imported {} ({} tracks)",
                 pl.name,
@@ -2138,12 +2138,12 @@ fn cmd_playlist(action: PlaylistCmd) -> Result<()> {
             ));
         }
         PlaylistCmd::Export { id, path } => {
-            optionmusic::saved_playlists::export_m3u(&id, &path)?;
+            stillmusic::saved_playlists::export_m3u(&id, &path)?;
             print_success(&format!("exported to {}", path.display()));
         }
         PlaylistCmd::Add { id, track } => {
             let path = track.canonicalize().unwrap_or(track);
-            let pl = optionmusic::saved_playlists::add_track(&id, &path.to_string_lossy())?;
+            let pl = stillmusic::saved_playlists::add_track(&id, &path.to_string_lossy())?;
             print_success(&format!(
                 "added to {} ({} tracks)",
                 pl.name,
@@ -2151,7 +2151,7 @@ fn cmd_playlist(action: PlaylistCmd) -> Result<()> {
             ));
         }
         PlaylistCmd::Delete { id } => {
-            optionmusic::saved_playlists::delete(&id)?;
+            stillmusic::saved_playlists::delete(&id)?;
             print_success("playlist deleted");
         }
     }

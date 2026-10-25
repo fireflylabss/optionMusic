@@ -560,7 +560,7 @@ mod tests {
 
     fn tmp_lib(name: &str, files: &[&str]) -> (PathBuf, Library) {
         let dir =
-            std::env::temp_dir().join(format!("optionmusic-radio-{}-{name}", std::process::id()));
+            std::env::temp_dir().join(format!("stillmusic-radio-{}-{name}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         for f in files {

@@ -10,7 +10,7 @@ use discord_rich_presence::{
     activity::{Activity, ActivityType, Assets, Timestamps},
 };
 
-/// Built-in Discord application id (the "optionMusic" app registered at
+/// Built-in Discord application id (the "still" app registered at
 /// discord.dev/developers). `discord_rpc_id` in config.toml overrides it.
 const BUILT_IN_CLIENT_ID: &str = "1548415534012432404";
 
@@ -128,7 +128,7 @@ impl Rpc {
         let state = clip(state);
         let assets = match image {
             Some(img) => Assets::new().large_image(img).large_text(&details),
-            None => Assets::new().large_image("logo").large_text("optionMusic"),
+            None => Assets::new().large_image("logo").large_text("still"),
         };
         let mut act = Activity::new().details(&details);
         if !state.is_empty() {

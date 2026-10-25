@@ -1,21 +1,9 @@
-# The desktop shell is a member so one lockfile, one target dir and
-# `--workspace` lints/tests cover both surfaces. `default-members` keeps bare
-# `cargo build`/`cargo test` on the CLI, which needs no GPUI system deps.
-[workspace]
-members = [".", "src-gpui"]
-default-members = ["."]
-
-[workspace.dependencies]
-anyhow = "1"
-serde = { version = "1", features = ["derive"] }
-serde_json = "1.0.150"
-
 [package]
-name = "optionmusic"
-version = "0.2.17"
+name = "stillmusic"
+version = "0.3.0"
 edition = "2024"
 rust-version = "1.89"
-description = "optionMusic — minimal black & white CLI music player"
+description = "still music — minimal black & white CLI music player"
 authors = ["AEFireflyLabs"]
 license = "Apache-2.0"
 readme = "README.md"
@@ -24,7 +12,7 @@ categories = ["command-line-utilities", "multimedia::audio"]
 
 # Canonical name
 [[bin]]
-name = "optionmusic"
+name = "still"
 path = "src/main.rs"
 
 # Short alias (same entrypoint)
@@ -35,15 +23,18 @@ path = "src/main.rs"
 [dependencies]
 clap = { version = "4", features = ["derive", "color", "env"] }
 libmpv2 = "6.0"
-anyhow = { workspace = true }
+anyhow = "1"
 walkdir = "2"
 crossterm = "0.29"
+unicode-width = "0.2"
 optionSDK = "0.1.3"
-serde = { workspace = true }
+serde = { version = "1", features = ["derive"] }
 toml = "0.8"
-serde_json = { workspace = true }
+serde_json = "1.0.150"
 lofty = "0.24"
+rusqlite = "0.32"
 base64 = "0.23"
+notify = "8.2.0"
 discord-rich-presence = "1.1.0"
 ureq = { version = "3.4.2", default-features = false, features = ["rustls", "gzip"] }
 

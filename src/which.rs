@@ -76,7 +76,7 @@ mod tests {
 
     fn scratch(tag: &str) -> PathBuf {
         let dir =
-            std::env::temp_dir().join(format!("optionmusic-which-{tag}-{}", std::process::id()));
+            std::env::temp_dir().join(format!("stillmusic-which-{tag}-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         dir
     }

@@ -636,7 +636,7 @@ mod tests {
 
     fn tmp_tree(name: &str) -> PathBuf {
         let dir =
-            std::env::temp_dir().join(format!("optionmusic-lib-{}-{name}", std::process::id()));
+            std::env::temp_dir().join(format!("stillmusic-lib-{}-{name}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         dir
@@ -715,6 +715,6 @@ mod tests {
 
     #[test]
     fn scan_rejects_missing_root() {
-        assert!(Library::scan(PathBuf::from("/tmp/optionmusic_nope_xyz")).is_err());
+        assert!(Library::scan(PathBuf::from("/tmp/stillmusic_nope_xyz")).is_err());
     }
 }

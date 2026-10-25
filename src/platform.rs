@@ -1,4 +1,4 @@
-//! Which platforms optionMusic actually claims to support.
+//! Which platforms still actually claims to support.
 //!
 //! Linux is the one target that is developed against and packaged; everything
 //! else builds (CI covers macOS and Windows) but nobody runs it day to day, so

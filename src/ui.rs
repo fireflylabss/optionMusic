@@ -57,7 +57,7 @@ pub const CAVA_SOFT: Color = Color::Rgb {
     b: 44,
 };
 
-pub const APP_NAME: &str = "optionMusic";
+pub const APP_NAME: &str = "still";
 
 /// Toast stack — at most 3 visible (ui.rs `TOAST_MAX`).
 /// Oldest is dropped when a 4th arrives; each item expires on its own clock.
@@ -3210,7 +3210,7 @@ fn toast_alpha(elapsed: f64) -> f64 {
 
 // ── Shared helpers ──────────────────────────────────────────────
 
-/// Binary name as invoked (`optionmusic` or `msc`).
+/// Binary name as invoked (`still` or `msc`).
 pub fn bin_name() -> String {
     std::env::args()
         .next()
@@ -3219,7 +3219,7 @@ pub fn bin_name() -> String {
                 .file_name()
                 .map(|s| s.to_string_lossy().into_owned())
         })
-        .unwrap_or_else(|| "optionmusic".into())
+        .unwrap_or_else(|| "still".into())
 }
 
 pub fn banner() {

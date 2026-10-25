@@ -3,7 +3,7 @@
 //! Purely local: the desktop already routes the multimedia keys
 //! (`XF86AudioPlay`, `XF86AudioNext`, …) and panel widgets to whichever player
 //! owns an MPRIS name, so exporting the interface is what makes those keys and
-//! `playerctl` drive optionMusic — no key grabbing of our own.
+//! `playerctl` drive still — no key grabbing of our own.
 //!
 //! The bus lives on its own connection thread; incoming methods only queue
 //! [`Command`]s, which the TUI loop drains with [`Mpris::take_commands`] and
@@ -106,7 +106,7 @@ mod bus {
         let id = if status.path.is_empty() {
             ObjectPath::from_static_str_unchecked("/org/mpris/MediaPlayer2/TrackList/NoTrack")
         } else {
-            ObjectPath::from_static_str_unchecked("/one/hory/optionMusic/track/current")
+            ObjectPath::from_static_str_unchecked("/one/hory/stillmusic/track/current")
         };
         map.insert("mpris:trackid".into(), Value::from(id));
         if !status.title.is_empty() {
@@ -174,12 +174,12 @@ mod bus {
 
         #[zbus(property)]
         fn identity(&self) -> &str {
-            "optionMusic"
+            "still"
         }
 
         #[zbus(property)]
         fn desktop_entry(&self) -> &str {
-            "optionmusic"
+            "still"
         }
 
         #[zbus(property)]
@@ -392,7 +392,7 @@ impl Mpris {
         // Unique-per-process name, as the spec requires when several
         // instances of one player can run at once.
         let name = format!(
-            "org.mpris.MediaPlayer2.optionmusic.instance{}",
+            "org.mpris.MediaPlayer2.stillmusic.instance{}",
             std::process::id()
         );
         let conn = zbus::blocking::connection::Builder::session()?

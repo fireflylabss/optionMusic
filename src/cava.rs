@@ -70,7 +70,7 @@ impl CavaBridge {
 
         let shared = Arc::clone(&levels);
         thread::Builder::new()
-            .name("optionmusic-cava".into())
+            .name("stillmusic-cava".into())
             .spawn(move || read_loop(stdout, shared, bars))
             .context("cava reader thread")?;
 
@@ -109,12 +109,12 @@ fn cava_on_path() -> bool {
 }
 
 fn write_cava_config(bars: usize, input_method: &str, source: &str) -> Result<PathBuf> {
-    let dir = std::env::temp_dir().join("optionmusic");
+    let dir = std::env::temp_dir().join("stillmusic");
     std::fs::create_dir_all(&dir).context("temp cava dir")?;
     let path = dir.join(format!("cava-{}.cfg", std::process::id()));
 
     let cfg = format!(
-        r#"## optionMusic — generated cava config (do not edit)
+        r#"## still — generated cava config (do not edit)
 [general]
 framerate = 60
 bars = {bars}

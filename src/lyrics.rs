@@ -401,7 +401,7 @@ fn fetch_lrclib(artist: &str, title: &str, album: &str, duration: Option<f64>) -
     let agent: ureq::Agent = ureq::Agent::config_builder()
         .timeout_connect(Some(Duration::from_secs(4)))
         .timeout_global(Some(Duration::from_secs(6)))
-        .user_agent(concat!("optionmusic/", env!("CARGO_PKG_VERSION")))
+        .user_agent(concat!("stillmusic/", env!("CARGO_PKG_VERSION")))
         .build()
         .into();
     let body = agent
@@ -674,7 +674,7 @@ mod tests {
 
     #[test]
     fn loader_resolves_sidecar_without_network() {
-        let dir = std::env::temp_dir().join(format!("optmusic-lyrics-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("stillmusic-lyrics-{}", std::process::id()));
         fs::create_dir_all(&dir).unwrap();
         let audio = dir.join("track.mp3");
         fs::write(&audio, b"x").unwrap();

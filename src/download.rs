@@ -1223,7 +1223,7 @@ fn run_interactive_type(
     if items.len() == 1
         && ask_yes_no(
             &format!(
-                "preview “{}” in optionMusic first?",
+                "preview “{}” in still first?",
                 truncate(&items[0].title, 40)
             ),
             true,

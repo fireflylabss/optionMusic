@@ -1,4 +1,4 @@
-//! Command-line interface for optionMusic.
+//! Command-line interface for still.
 
 use std::path::PathBuf;
 
@@ -63,17 +63,17 @@ impl CliEq {
     }
 }
 
-/// optionMusic — minimal black & white CLI music player
+/// still — minimal black & white CLI music player
 ///
-/// Invoke as `optionmusic`, or the `msc` alias.
+/// Invoke as `still`, or the `msc` alias.
 #[derive(Debug, Parser)]
 #[command(
-    name = "optionmusic",
+    name = "still",
     version,
-    about = "♪ optionMusic — minimal black & white CLI music player",
-    long_about = "optionMusic — play local audio from the terminal.\n\
+    about = "♪ still — minimal black & white CLI music player",
+    long_about = "still — play local audio from the terminal.\n\
 \n\
-  binaries   optionmusic · msc\n\
+  binaries   still · msc\n\
   engine     MPV (libmpv)\n\
   optional   cava spectrum bars",
     after_help = "Shortcuts:\n\
@@ -129,11 +129,11 @@ pub struct Cli {
         short = 'm',
         long = "music-dir",
         global = true,
-        env = "OPTIONMUSIC_MUSIC_DIR",
+        env = "STILLMUSIC_MUSIC_DIR",
         default_value = "",
         hide_default_value = true,
         value_name = "DIR",
-        help = "Music library root (default: ~/Music; also OPTIONMUSIC_MUSIC_DIR)"
+        help = "Music library root (default: ~/Music; also STILLMUSIC_MUSIC_DIR)"
     )]
     pub music_dir: String,
 
@@ -458,7 +458,7 @@ mod tests {
 
     #[test]
     fn parses_play_with_path() {
-        let cli = Cli::parse_from(["optionmusic", "play", "song.mp3"]);
+        let cli = Cli::parse_from(["still", "play", "song.mp3"]);
         match cli.command {
             Some(Command::Play { paths, volume, .. }) => {
                 assert_eq!(paths, vec![PathBuf::from("song.mp3")]);
@@ -493,7 +493,7 @@ mod tests {
 
     #[test]
     fn parses_list_recursive() {
-        let cli = Cli::parse_from(["optionmusic", "list", "./music", "-r"]);
+        let cli = Cli::parse_from(["still", "list", "./music", "-r"]);
         match cli.command {
             Some(Command::List { path, recursive }) => {
                 assert_eq!(path, PathBuf::from("./music"));
