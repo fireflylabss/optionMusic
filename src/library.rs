@@ -1096,11 +1096,15 @@ mod tests {
         let legacy = crate::config::cache_dir().join(format!("library-baseline-{stem}.toml"));
         fs::write(
             &legacy,
-            format!(
-                "root = \"{}\"\n[[tracks]]\npath = \"{}\"\nmtime = {mtime}\nsize = {size}\n",
-                dir.display(),
-                dir.join("old.mp3").display()
-            ),
+            toml::to_string(&serde_json::json!({
+                "root": dir.to_string_lossy(),
+                "tracks": [{
+                    "path": dir.join("old.mp3").to_string_lossy(),
+                    "mtime": mtime,
+                    "size": size,
+                }],
+            }))
+            .unwrap(),
         )
         .unwrap();
         assert!(!library_db_path().is_file());
