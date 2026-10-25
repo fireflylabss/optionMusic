@@ -89,12 +89,14 @@ Use a modern terminal (Windows Terminal) for proper colours and mouse support.
 
 ```bash
 export CARGO_TARGET_DIR="$(pwd)/target"
-cargo install --path . --force
+cargo install --path . --force --locked
 # remote source:
 cargo install --git https://github.com/fireflylabss/optionMusic --locked
 ```
 
 The Cargo package and crate are named `stillmusic`.
+
+Use `--locked` so installation follows the checked-in `Cargo.lock`.
 
 The current release line is `v0.3.0-beta.1`; `still --version` and `msc --version`
 report the numeric Cargo version `0.3.0`. The beta revision identifies the

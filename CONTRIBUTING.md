@@ -19,7 +19,7 @@ sudo pacman -S mpv sqlite   # Arch; Debian/Ubuntu: apt install libmpv-dev libsql
 export CARGO_TARGET_DIR="$(pwd)/target"
 cargo test
 cargo build --release
-cargo install --path . --force   # refresh `still` / `msc` on PATH
+cargo install --path . --force --locked   # refresh `still` / `msc` on PATH
 ```
 
 `msc doctor` reports the optional tools (`yt-dlp`, `ffmpeg`, `cava`) and whether

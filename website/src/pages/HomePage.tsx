@@ -562,7 +562,7 @@ function HomePage() {
             <p>
               <span className="text-muted-foreground"># from a source checkout</span>
               <br />
-              <span className="text-muted-foreground">$</span> cargo install --path .
+              <span className="text-muted-foreground">$</span> cargo install --path . --locked
             </p>
             <p>
               <span className="text-muted-foreground">$</span> still{' '}

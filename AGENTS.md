@@ -29,7 +29,7 @@ When you finish a task that touches code (features, fixes, UI, deps):
 
    ```bash
    export CARGO_TARGET_DIR="$(pwd)/target"
-   cargo install --path . --force --offline
+   cargo install --path . --force --offline --locked
    ```
 
    Use `--offline` when deps are already fetched; drop it if the lockfile needs network.
