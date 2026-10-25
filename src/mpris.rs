@@ -78,7 +78,7 @@ mod bus {
     use std::collections::{HashMap, VecDeque};
     use std::sync::{Arc, Mutex};
     use std::time::Duration;
-    use zbus::zvariant::{ObjectPath, Value};
+    use zbus::{ObjectPath, Variant};
 
     pub(super) type Shared = Arc<Mutex<Status>>;
     pub(super) type Queue = Arc<Mutex<VecDeque<Command>>>;
@@ -101,31 +101,31 @@ mod bus {
 
     /// `Metadata` for the current track. `mpris:trackid` has to be a valid
     /// object path, so the file path itself cannot be used.
-    pub(super) fn metadata(status: &Status) -> HashMap<String, Value<'static>> {
-        let mut map: HashMap<String, Value<'static>> = HashMap::new();
+    pub(super) fn metadata(status: &Status) -> HashMap<String, Variant<'static>> {
+        let mut map: HashMap<String, Variant<'static>> = HashMap::new();
         let id = if status.path.is_empty() {
             ObjectPath::from_static_str_unchecked("/org/mpris/MediaPlayer2/TrackList/NoTrack")
         } else {
             ObjectPath::from_static_str_unchecked("/one/hory/stillmusic/track/current")
         };
-        map.insert("mpris:trackid".into(), Value::from(id));
+        map.insert("mpris:trackid".into(), Variant::from(id));
         if !status.title.is_empty() {
-            map.insert("xesam:title".into(), Value::from(status.title.clone()));
+            map.insert("xesam:title".into(), Variant::from(status.title.clone()));
         }
         if !status.artist.is_empty() {
             map.insert(
                 "xesam:artist".into(),
-                Value::from(vec![status.artist.clone()]),
+                Variant::from(vec![status.artist.clone()]),
             );
         }
         if !status.album.is_empty() {
-            map.insert("xesam:album".into(), Value::from(status.album.clone()));
+            map.insert("xesam:album".into(), Variant::from(status.album.clone()));
         }
         if !status.path.is_empty() {
-            map.insert("xesam:url".into(), Value::from(file_url(&status.path)));
+            map.insert("xesam:url".into(), Variant::from(file_url(&status.path)));
         }
         if let Some(dur) = status.duration {
-            map.insert("mpris:length".into(), Value::from(dur.as_micros() as i64));
+            map.insert("mpris:length".into(), Variant::from(dur.as_micros() as i64));
         }
         map
     }
@@ -243,7 +243,7 @@ mod bus {
         }
 
         #[zbus(property)]
-        fn metadata(&self) -> HashMap<String, Value<'static>> {
+        fn metadata(&self) -> HashMap<String, Variant<'static>> {
             metadata(&read(&self.state))
         }
 
@@ -318,7 +318,7 @@ mod bus {
 pub struct Mpris {
     enabled: bool,
     #[cfg(target_os = "linux")]
-    conn: Option<zbus::blocking::Connection>,
+    conn: Option<zbus::Connection>,
     #[cfg(target_os = "linux")]
     state: bus::Shared,
     #[cfg(target_os = "linux")]
@@ -395,22 +395,24 @@ impl Mpris {
             "org.mpris.MediaPlayer2.stillmusic.instance{}",
             std::process::id()
         );
-        let conn = zbus::blocking::connection::Builder::session()?
-            .serve_at(
-                "/org/mpris/MediaPlayer2",
-                bus::Root {
-                    queue: self.queue.clone(),
-                },
-            )?
-            .serve_at(
-                "/org/mpris/MediaPlayer2",
-                bus::Player {
-                    state: self.state.clone(),
-                    queue: self.queue.clone(),
-                },
-            )?
-            .name(name)?
-            .build()?;
+        let conn = zbus::block_on(
+            zbus::connection::Builder::session()
+                .serve_at(
+                    "/org/mpris/MediaPlayer2",
+                    bus::Root {
+                        queue: self.queue.clone(),
+                    },
+                )
+                .serve_at(
+                    "/org/mpris/MediaPlayer2",
+                    bus::Player {
+                        state: self.state.clone(),
+                        queue: self.queue.clone(),
+                    },
+                )
+                .name(name)
+                .build(),
+        )?;
         self.conn = Some(conn);
         Ok(())
     }
@@ -429,40 +431,42 @@ impl Mpris {
             let Some(conn) = self.conn.as_ref() else {
                 return;
             };
-            let Ok(iface) = conn
-                .object_server()
-                .interface::<_, bus::Player>("/org/mpris/MediaPlayer2")
-            else {
-                return;
-            };
-            let previous = self.published.take();
-            let emitter = iface.signal_emitter();
-            let player = iface.get();
-            let metadata_moved = previous
-                .as_ref()
-                .is_none_or(|p| p.metadata_key() != status.metadata_key());
-            let playback_moved = previous
-                .as_ref()
-                .is_none_or(|p| p.playback_status() != status.playback_status());
-            let volume_moved = previous.as_ref().is_none_or(|p| p.volume != status.volume);
-            let caps_moved = previous
-                .as_ref()
-                .is_none_or(|p| (p.can_next, p.can_prev) != (status.can_next, status.can_prev));
-            if metadata_moved {
-                let _ = zbus::block_on(player.metadata_changed(emitter));
+            let published = zbus::block_on(async {
+                let Ok(iface) = conn
+                    .object_server()
+                    .interface::<_, bus::Player>("/org/mpris/MediaPlayer2")
+                    .await
+                else {
+                    return false;
+                };
+                let previous = self.published.as_ref();
+                let emitter = iface.signal_emitter();
+                let player = iface.get().await;
+                let metadata_moved =
+                    previous.is_none_or(|p| p.metadata_key() != status.metadata_key());
+                let playback_moved =
+                    previous.is_none_or(|p| p.playback_status() != status.playback_status());
+                let volume_moved = previous.is_none_or(|p| p.volume != status.volume);
+                let caps_moved = previous
+                    .is_none_or(|p| (p.can_next, p.can_prev) != (status.can_next, status.can_prev));
+                if metadata_moved {
+                    let _ = player.metadata_changed(emitter).await;
+                }
+                if playback_moved {
+                    let _ = player.playback_status_changed(emitter).await;
+                }
+                if volume_moved {
+                    let _ = player.volume_changed(emitter).await;
+                }
+                if caps_moved {
+                    let _ = player.can_go_next_changed(emitter).await;
+                    let _ = player.can_go_previous_changed(emitter).await;
+                }
+                true
+            });
+            if published {
+                self.published = Some(status);
             }
-            if playback_moved {
-                let _ = zbus::block_on(player.playback_status_changed(emitter));
-            }
-            if volume_moved {
-                let _ = zbus::block_on(player.volume_changed(emitter));
-            }
-            if caps_moved {
-                let _ = zbus::block_on(player.can_go_next_changed(emitter));
-                let _ = zbus::block_on(player.can_go_previous_changed(emitter));
-            }
-            drop(player);
-            self.published = Some(status);
         }
         #[cfg(not(target_os = "linux"))]
         {
@@ -564,11 +568,11 @@ mod tests {
         assert!(map.contains_key("mpris:trackid"));
         assert_eq!(
             map.get("mpris:length"),
-            Some(&zbus::zvariant::Value::from(200_000_000i64))
+            Some(&zbus::Variant::from(200_000_000i64))
         );
         assert_eq!(
             map.get("xesam:url"),
-            Some(&zbus::zvariant::Value::from(
+            Some(&zbus::Variant::from(
                 "file:///home/u/Music/a%20b.mp3".to_string()
             ))
         );
