@@ -30,8 +30,7 @@ body:
     attributes:
       label: Surface
       options:
-        - CLI (optionmusic / msc)
-        - Desktop (src-gpui)
+        - CLI (still / msc)
         - Website
     validations:
       required: true

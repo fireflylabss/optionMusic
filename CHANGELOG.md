@@ -1,38 +1,55 @@
 # Changelog
 
-We follow [Semantic Versioning](https://semver.org/) and [Keep a Changelog](https://keepachangelog.com/). CLI and Desktop version separately.
+We follow [Semantic Versioning](https://semver.org/) and [Keep a Changelog](https://keepachangelog.com/). still music (still) ships one installable surface: **CLI**, including its interactive TUI.
 
 <details>
 <summary>To see more about versioning, expand this.</summary>
 
-Every version string starts with `v` (required), e.g. `v0.2.14`, `v0.1.6-beta`.
+Every new release tag starts with `v` and includes its channel, e.g. `v0.3.0-beta`.
 
-Here the installable surfaces are **CLI** and **Desktop**. Other Option apps swap in their own names the same way — e.g. **GTK**, **Web**, **GNOME** — whatever you actually ship.
+Here the installable surface is **CLI** (`still` / `msc`), including the interactive TUI.
 
 | Part | What you install | Example |
 | --- | --- | --- |
-| **CLI** | `optionmusic` / alias `msc` in the terminal | `v0.2.14` |
-| **Desktop** | the visual app | `v0.1.6-beta` |
+| **CLI** | `still` / alias `msc` in the terminal | `v0.3.0-beta` |
 
-A new CLI does not always mean a new Desktop app, and the other way around.
+With one surface there is no `m` in the tag and no per-surface sections, just the version notes.
 
-Sometimes one cut ships **both** surfaces. That is a **mixed release**: one tag with an `m` before the channel (ex: `v0.2.12m-beta`), and the notes break out each surface so a small touch on one side does not look equal to a large cut on the other.
+Each release heading is the version and date (`## v0.3.0-beta · 25/10/2026`); under it, a short summary ends with a plain sentence like: “This version was made for CLI with a beta release channel on 25/10/2026 (v0.3.0-beta).”
 
-Each release heading is the version and date (`## v0.2.12m-beta · 03/08/2026`); under it, a short summary ends with a plain sentence like: “This version was made for both desktop and CLI with a beta release channel on 03/08/2026 (v0.2.12m-beta).”
-
-### What the Desktop suffix means
+### What the channel suffix means
 
 | Suffix | In plain words |
 | --- | --- |
 | **-alpha** | Very early. Expect missing pieces and lots of bugs. |
 | **-beta** | Mostly there, but still rough. Fine to try; not the “official” install. |
-| **-stable** | Ready for daily use. This is what we put on GitHub Releases and the AUR. |
+| **-stable** | Ready for daily use. |
 
-We only call something **stable** when we mean it. While the desktop app is still settling, builds stay **beta**.
+We only call something **stable** when we mean it. Beta builds can also be published on GitHub Releases and the AUR while refinement continues.
 
-Older desktop builds (`v0.1.0`, `v0.1.1`) had no channel suffix. From `v0.1.2-beta` on, every desktop (and mixed) version includes one.
+Historical **Desktop** and mixed entries remain below with their original tags and dates. They describe the removed desktop app and do not define a current release line.
 
 </details>
+
+## v0.3.0-beta · 25/10/2026
+
+still music rebranding, a persistent library index, queue editing and local lyrics management. This version was made for CLI with a beta release channel on 25/10/2026 (v0.3.0-beta).
+
+- Rebranded to **still music**, displayed as **still**. The crate is `stillmusic`; the binaries are `still` and `msc`. Environment overrides are `STILLMUSIC_MUSIC_DIR` and `STILLMUSIC_CONFIG`. Existing data stays in `~/.option/music`, and older sync backups remain importable. Repository URLs and historical release notes retain their original names.
+- AUR packaging now has `stillmusic` for source builds and `stillmusic-bin` for prebuilt Linux binaries. Both install `still` / `msc` and replace the legacy `optionmusic` package.
+- Downloaded audio fills missing title and artist tags while preserving existing metadata and other files in the output folder.
+- The library keeps a SQLite index in `cache/library.db`, reusing unchanged track metadata across runs and migrating older per-folder indexes. Multiple library folders are merged without duplicate paths, and the library browser watches for audio-file changes and refreshes its tree.
+- Edit the playing queue with `J` / `K` to reorder, `a` to play next, `A` to append, `D` to clear while keeping the current track, `u` / `Ctrl+Z` to undo, and `g` to jump to the playing track.
+- Saved radio stations retain query, artist, genre and rediscovery settings. Skips and dislikes influence track and artist selection for seven days; recent listening history helps avoid repeats.
+- `msc sync export` / `import` backs up configuration, playlists, stations, listening history, statistics, the library index and selected lyrics. Restoring existing files requires `--force`.
+- ListenBrainz submissions are optional and stay disabled until a token is configured; outcome counts appear in `msc stats`.
+- `msc doctor` checks libmpv, audio, optional tools, configuration and local data, with actionable diagnostics.
+- The TUI reflows from wide to tiny terminals, clipping with Unicode-aware widths; toast borders no longer break on symbols like `✓` and `♪`.
+- Equalizer presets now cover 13 modes, with reset from settings.
+- Lyrics return to the player (`y`): online lookup (lrclib, NetEase, lyrics.ovh), synced scrolling, and reload (`Y`) without blocking redraw.
+- `msc lyrics` manages per-track lyrics: search, select, import `.lrc`/`.txt`, show and remove. Saved selections are included in `msc sync` backups.
+- The player can follow a local rice color scheme from `~/.local/state/rice/scheme.json`, with the monochrome theme as its fallback.
+- Removed the GPUI desktop app (`src-gpui/`), desktop installers and icons, `release-desktop.yml`, desktop CI jobs, and the desktop-only `controller`/`update` modules. Local library, config and cache files are untouched.
 
 ## v0.1.8-beta · 01/10/2026
 
@@ -83,8 +100,6 @@ The native GPUI desktop app grows up: albums page, full playlist flows, sound co
 
 Local-library radio: `msc radio` turns your whole library into an endless similarity-walked queue. This version was made for CLI with a beta release channel on 12/09/2026 (v0.2.17-beta).
 
-### CLI (`0.2.17`)
-
 - `msc radio` (aliases `rd`, `mix`): orders the entire library as a radio walk — each next track is picked by similarity to the current one (same artist +4, same album +2, genre overlap +2, year proximity) weighted by play counts, with a penalty for anything heard this week. A random pick among the top-5 candidates per step keeps the queue drifting like a real radio; same artist caps at 2 in a row while alternatives remain.
 - Seeds: `msc radio` (most-played or random), `msc radio "query"` (title/artist/album/genre search), `--artist NAME`, `--genre GENRE`, and `--fresh` for rediscovery mode (favors rarely/never-played tracks).
 - Same playback flags as `play` (`-v`, `-f`, `--pitch`, `--eq`, `-c`, `-l`, `--loop-file`); the radio queue rides the normal session — playlist sidebar `l`, stats, lyrics, Discord RPC, and `msc play` session resume all work on it.
@@ -92,8 +107,6 @@ Local-library radio: `msc radio` turns your whole library into an endless simila
 ## v0.2.16-beta · 12/09/2026
 
 Discord Rich Presence and session memory: quit and come back to the same queue, track, and position. This version was made for CLI with a beta release channel on 12/09/2026 (v0.2.16-beta).
-
-### CLI (`0.2.16`)
 
 - Playback prefs persist to `config.toml` (on quit + every ~5s while playing): volume, EQ, repeat (`o`), speed, pitch, smart shuffle (`x`). Next launch restores them; explicit flags still win (`-v`, `-f`, `--pitch`, `--eq`, `-l`, `--loop-file`, `-s`).
 - Session resume: `msc play` with no paths or playback flags restores the saved queue order and re-opens the last track paused at the saved position (toast `resumed · title`). Toggle in settings `c` → Resume or `resume = false` in config; turning it off clears the saved session.
@@ -119,8 +132,6 @@ Floating panels, docked karaoke lyrics, and a hardened downloader on a stable cu
 
 Library core on the CLI: incremental refresh, an artists → albums → tracks browser, and genre/year search across the tree. This version was made for CLI with a beta release channel on 29/08/2026 (v0.2.14-beta).
 
-### CLI (`0.2.14`)
-
 - New `src/library.rs` shared library core: one-time scan plus incremental `refresh()` driven by mtime/size — removed/renamed files are pruned, changed files are re-tagged, unchanged files keep their cached tags (zero re-parse).
 - `msc library` / `msc lib` subcommand: `refresh` prints `+added · -removed · changed · total`, `ls` lists tracks with indices, `paths` prints absolute paths for scripts / `xargs`.
 - `msc browse` / `msc br`: tree navigation (artists → albums → tracks) with album/track counts, genre (`g`) and year (`y`) filters, unified search (`/`), favorites toggle (`f`) plus a favorites-only mode (`1` / `--favorites`), and an in-memory queue (`a` append, `n` play-next, `tab` queue view with `j/k` reorder, `enter` play).
@@ -131,8 +142,6 @@ Library core on the CLI: incremental refresh, an artists → albums → tracks b
 ## v0.2.13-stable · 22/08/2026
 
 The legacy binary alias era ends: `optmusic` is gone, `optionmusic` and `msc` remain. This version was made for CLI with a stable release channel on 22/08/2026 (v0.2.13-stable).
-
-### CLI (`0.2.13`)
 
 - Removed the legacy `optmusic` binary alias. The canonical binary is `optionmusic`, with the `msc` short alias.
 - Bumped the package to `0.2.13`.
@@ -315,7 +324,8 @@ MPV engine rewrite with mute, EQ, speed/pitch, and a zero-leak TUI. This version
 - Audio engine via `libmpv2` (replaces rodio); mute, long seek, EQ presets, crossfade, speed & pitch.
 - Default music dir (`-m` / `--music-dir`); alternate-screen UI with clean scrollback restore.
 - Unit tests for playlist, EQ, MPV clamps, music-dir resolution, CLI parsing, and UI helpers.
-- Requires system libmpv. Various other small tweaks
+- Requires system libmpv.
+- Various other small tweaks
 
 ## v0.1.0 · 17/07/2026
 

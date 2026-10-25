@@ -11,6 +11,6 @@
 - [ ] `cargo fmt --all --check`
 - [ ] `cargo clippy --all-targets -- -D warnings`
 - [ ] `cargo test`
-- [ ] `cargo build --release` (and `cargo run -p optionmusic-gpui` for desktop changes)
+- [ ] `cargo build --release`
 - [ ] `cd website && bun run test` (website changes)
 - [ ] CHANGELOG entry for a user-visible change (see VERSIONING.md)

@@ -1,6 +1,6 @@
 # Contributing
 
-optionMusic is a minimal black & white terminal player. Changes should keep the
+still is a minimal black & white terminal player. Changes should keep the
 UI compact and monochrome, and keep playback responsive — never block the TUI
 frame loop on I/O or the network.
 
@@ -8,28 +8,22 @@ frame loop on I/O or the network.
 
 | Path | What |
 |------|------|
-| `src/` | CLI + TUI (`optionmusic`, `msc`), playback engine wrapper over libmpv |
-| `src-gpui/` | native GPUI desktop shell, a workspace member reusing the `optionmusic` crate |
+| `src/` | CLI + TUI (`still`, `msc`), playback engine wrapper over libmpv |
 | `website/` | Vite + React + TypeScript site, run with Bun |
+| `packaging/aur/` | Source and prebuilt AUR recipes; see its README for validation |
 
 ## Build
 
 ```bash
-sudo pacman -S libmpv        # Arch; Debian/Ubuntu: apt install libmpv-dev pkg-config
+sudo pacman -S mpv          # Arch; Debian/Ubuntu: apt install libmpv-dev pkg-config
 export CARGO_TARGET_DIR="$(pwd)/target"
 cargo test
 cargo build --release
-cargo install --path . --force   # refresh `optionmusic` / `msc` on PATH
+cargo install --path . --force   # refresh `still` / `msc` on PATH
 ```
 
 `msc doctor` reports the optional tools (`yt-dlp`, `ffmpeg`, `cava`) and whether
 `msc dl` is ready.
-
-The desktop shell pins its own toolchain in `src-gpui/rust-toolchain.toml`:
-
-```bash
-cargo run -p optionmusic-gpui   # from the repo root
-```
 
 Website:
 
@@ -54,6 +48,8 @@ needs something newer, bump it in the same PR and say so.
 - Conventional-commit subjects (`feat:`, `fix:`, `ci:`, `build:`, `docs:`).
 - Keep PRs focused; unrelated formatting churn makes review harder.
 - User-visible changes get a CHANGELOG entry; read [VERSIONING.md](VERSIONING.md)
-  first — CLI and desktop are independent version lines and channel labels
-  (`alpha` / `beta` / `stable`) are meaningful.
+  first. Follow Hory style: `## vX.Y.Z-channel · DD/MM/YYYY`, a short summary
+  naming CLI, channel, date and tag, then feature bullets. CLI/TUI is the single
+  installable surface, so new entries have no `m` or per-surface subsections.
+  Channel labels (`alpha` / `beta` / `stable`) describe release readiness.
 - New external tools must be optional and reported by `msc doctor`.
