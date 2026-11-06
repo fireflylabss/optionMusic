@@ -1893,23 +1893,37 @@ impl SessionUi {
             let next_g = "▸";
             let vol_minus = "−";
             let vol_plus = "+";
-            let status_spans = [
-                Span::fg(DIM, prev_g),
-                Span::fg(DARK, "  "),
-                Span::fg(st_color, icon),
-                Span::fg(DIM, "  "),
-                Span::fg(st_color, status),
-                Span::fg(DARK, "  "),
-                Span::fg(DIM, next_g),
-                Span::fg(DARK, "  ·  "),
-                Span::fg(GRAY, &idx),
-                Span::fg(DARK, "  ·  "),
-                Span::fg(DIM, vol_minus),
-                Span::fg(DARK, " "),
-                Span::fg(GRAY, &vol),
-                Span::fg(DARK, " "),
-                Span::fg(DIM, vol_plus),
-            ];
+            // Narrow columns drop the index first, then the status word,
+            // instead of clipping the volume controls off the end.
+            let build_status = |show_idx: bool, show_word: bool| {
+                let mut s = vec![
+                    Span::fg(DIM, prev_g),
+                    Span::fg(DARK, "  "),
+                    Span::fg(st_color, icon),
+                ];
+                if show_word {
+                    s.push(Span::fg(DIM, "  "));
+                    s.push(Span::fg(st_color, status));
+                }
+                s.push(Span::fg(DARK, "  "));
+                s.push(Span::fg(DIM, next_g));
+                if show_idx {
+                    s.push(Span::fg(DARK, "  ·  "));
+                    s.push(Span::fg(GRAY, idx.as_str()));
+                }
+                s.push(Span::fg(DARK, "  ·  "));
+                s.push(Span::fg(DIM, vol_minus));
+                s.push(Span::fg(DARK, " "));
+                s.push(Span::fg(GRAY, vol.as_str()));
+                s.push(Span::fg(DARK, " "));
+                s.push(Span::fg(DIM, vol_plus));
+                s
+            };
+            let (show_idx, show_word) = [(true, true), (false, true), (false, false)]
+                .into_iter()
+                .find(|&(i, w)| spans_width(&build_status(i, w)) <= content_cols)
+                .unwrap_or((false, false));
+            let status_spans = build_status(show_idx, show_word);
             let status_x =
                 paint_in_region(&mut out, y as u16, content_x0, content_cols, &status_spans)?;
             let mut cx = status_x;
@@ -1920,7 +1934,7 @@ impl SessionUi {
                 h: 1,
             });
             cx += str_width(prev_g) as u16 + 2;
-            let pp_w = (str_width(icon) + 2 + str_width(status)) as u16;
+            let pp_w = (str_width(icon) + if show_word { 2 + str_width(status) } else { 0 }) as u16;
             self.hits.play_pause = Some(HitRect {
                 x: cx,
                 y: y as u16,
@@ -1962,55 +1976,54 @@ impl SessionUi {
             });
             y += 1;
 
-            let mut meta_spans: Vec<Span<'_>> = vec![
-                Span::fg(DIM, "spd "),
-                Span::fg(GRAY, &spd),
-                Span::fg(DARK, "  ·  "),
-                Span::fg(DIM, "ptch "),
-                Span::fg(GRAY, &ptch),
-                Span::fg(DARK, "  ·  "),
-                Span::fg(DIM, "eq "),
-                Span::fg(GRAY, eq),
-                Span::fg(DARK, "  ·  "),
-                Span::fg(DIM, "repeat "),
-                Span::fg(GRAY, loop_l),
+            // (label, value) pairs in priority order; narrow columns drop
+            // whole pairs from the end rather than clipping one mid-word.
+            let mut meta_items: Vec<(&str, &str)> = vec![
+                ("spd ", spd.as_str()),
+                ("ptch ", ptch.as_str()),
+                ("eq ", eq),
+                ("repeat ", loop_l),
             ];
             if state.smart_shuffle {
-                meta_spans.push(Span::fg(DARK, "  ·  "));
-                meta_spans.push(Span::fg(DIM, "smart"));
+                meta_items.push(("smart", ""));
             }
             if let Some(sleep) = state.sleep_label
                 && !sleep.is_empty()
             {
-                meta_spans.push(Span::fg(DARK, "  ·  "));
-                meta_spans.push(Span::fg(DIM, "sleep "));
-                meta_spans.push(Span::fg(GRAY, sleep));
+                meta_items.push(("sleep ", sleep));
+            }
+            let meta_widths: Vec<usize> = meta_items
+                .iter()
+                .map(|(l, v)| str_width(l) + str_width(v))
+                .collect();
+            let keep = fit_count(&meta_widths, 5, content_cols);
+            let mut meta_spans: Vec<Span<'_>> = Vec::with_capacity(keep * 3);
+            for (i, (label, value)) in meta_items.iter().take(keep).enumerate() {
+                if i > 0 {
+                    meta_spans.push(Span::fg(DARK, "  ·  "));
+                }
+                meta_spans.push(Span::fg(DIM, label));
+                if !value.is_empty() {
+                    meta_spans.push(Span::fg(GRAY, value));
+                }
             }
             let meta_x =
                 paint_in_region(&mut out, y as u16, content_x0, content_cols, &meta_spans)?;
             let mut mx = meta_x;
-            self.hits.speed = Some(HitRect {
-                x: mx,
-                y: y as u16,
-                w: (4 + str_width(&spd)) as u16,
-                h: 1,
-            });
-            mx += 4 + str_width(&spd) as u16;
-            mx += 5;
-            self.hits.pitch = Some(HitRect {
-                x: mx,
-                y: y as u16,
-                w: (5 + str_width(&ptch)) as u16,
-                h: 1,
-            });
-            mx += 5 + str_width(&ptch) as u16;
-            mx += 5;
-            self.hits.eq = Some(HitRect {
-                x: mx,
-                y: y as u16,
-                w: (3 + str_width(eq)) as u16,
-                h: 1,
-            });
+            let mut meta_rects: [Option<HitRect>; 3] = [None, None, None];
+            for (i, w) in meta_widths.iter().take(keep.min(3)).enumerate() {
+                meta_rects[i] = Some(HitRect {
+                    x: mx,
+                    y: y as u16,
+                    w: *w as u16,
+                    h: 1,
+                });
+                mx += *w as u16 + 5;
+            }
+            let [speed_rect, pitch_rect, eq_rect] = meta_rects;
+            self.hits.speed = speed_rect;
+            self.hits.pitch = pitch_rect;
+            self.hits.eq = eq_rect;
             if spans_width(&status_spans) > content_cols {
                 self.hits.prev = None;
                 self.hits.play_pause = None;
@@ -2757,11 +2770,7 @@ fn paint_key_footer(
     hits: &mut HitMap,
 ) -> io::Result<()> {
     hits.foot.clear();
-    let chips: &[&str] = if preview {
-        &["space", "←→", "+/−", "?", "q"]
-    } else {
-        &["space", "n/p", "←→", "+/−", "v", "c", "?"]
-    };
+    let chips = footer_chips(preview, region_w);
     let mut spans: Vec<Span<'_>> = Vec::with_capacity(chips.len() * 2);
     for (i, key) in chips.iter().enumerate() {
         if i > 0 {
@@ -2796,6 +2805,42 @@ fn paint_key_footer(
         x += w;
     }
     Ok(())
+}
+
+/// How many leading items of `widths` fit in `max` columns when joined by
+/// `sep` columns. Always keeps at least one so a line is never empty.
+fn fit_count(widths: &[usize], sep: usize, max: usize) -> usize {
+    let mut used = 0;
+    let mut keep = 0;
+    for (i, w) in widths.iter().enumerate() {
+        used += w + if i > 0 { sep } else { 0 };
+        if used > max {
+            break;
+        }
+        keep = i + 1;
+    }
+    keep.max(1).min(widths.len())
+}
+
+/// Footer chips that fit `region_w`. Narrow columns shed the least
+/// essential chips first and keep play/pause, settings and help reachable.
+fn footer_chips(preview: bool, region_w: usize) -> Vec<&'static str> {
+    let mut chips: Vec<&'static str> = if preview {
+        vec!["space", "←→", "+/−", "?", "q"]
+    } else {
+        vec!["space", "n/p", "←→", "+/−", "v", "c", "?"]
+    };
+    const SHED: &[&str] = &["v", "+/−", "←→", "n/p", "c", "q"];
+    let width = |c: &[&str]| -> usize {
+        c.iter().map(|k| str_width(k)).sum::<usize>() + 5 * c.len().saturating_sub(1)
+    };
+    for drop in SHED {
+        if width(&chips) <= region_w {
+            break;
+        }
+        chips.retain(|k| k != drop);
+    }
+    chips
 }
 
 /// Click target(s) for a footer chip: (x-offset, width, action).
@@ -3417,6 +3462,35 @@ mod tests {
     #[test]
     fn fmt_time_with_hours() {
         assert_eq!(fmt_time(Duration::from_secs(3661)), "1:01:01");
+    }
+
+    #[test]
+    fn fit_count_drops_whole_items_from_the_end() {
+        let w = [8, 10, 8, 13];
+        assert_eq!(fit_count(&w, 5, 200), 4);
+        assert_eq!(fit_count(&w, 5, 53), 3);
+        assert_eq!(fit_count(&w, 5, 23), 2);
+        assert_eq!(fit_count(&w, 5, 22), 1);
+        assert_eq!(fit_count(&w, 5, 3), 1);
+        assert_eq!(fit_count(&[], 5, 40), 0);
+    }
+
+    #[test]
+    fn footer_chips_shed_least_essential_first() {
+        let full = footer_chips(false, 80);
+        assert_eq!(full, ["space", "n/p", "←→", "+/−", "v", "c", "?"]);
+        let mut last = full.len();
+        for w in (1..=60).rev() {
+            let chips = footer_chips(false, w);
+            assert!(chips.len() <= last, "chips grew while narrowing at {w}");
+            last = chips.len();
+            assert!(chips.contains(&"space") && chips.contains(&"?"));
+        }
+        let mid = footer_chips(false, 34);
+        assert!(!mid.contains(&"v") && mid.contains(&"c"));
+        let fit: usize = mid.iter().map(|k| str_width(k)).sum::<usize>() + 5 * (mid.len() - 1);
+        assert!(fit <= 34, "still too wide: {mid:?}");
+        assert!(footer_chips(true, 12).contains(&"?"));
     }
 
     #[test]
