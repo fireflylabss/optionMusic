@@ -38,7 +38,7 @@ pub struct UiTheme {
 }
 
 impl UiTheme {
-    /// Classic B&W defaults — pixel-identical to the pre-rice UI.
+    /// Classic B&W defaults: text roles keep at least 4.5:1 on black.
     pub fn fallback() -> Self {
         let accent = Color::Rgb {
             r: 245,
@@ -57,14 +57,14 @@ impl UiTheme {
                 b: 48,
             },
             title: Color::Rgb {
-                r: 80,
-                g: 80,
-                b: 80,
+                r: 120,
+                g: 120,
+                b: 120,
             },
             body: Color::Rgb {
-                r: 140,
-                g: 140,
-                b: 140,
+                r: 160,
+                g: 160,
+                b: 160,
             },
             muted: Color::Rgb {
                 r: 48,

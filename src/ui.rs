@@ -30,14 +30,14 @@ pub const BRIGHT: Color = Color::Rgb {
     b: 245,
 };
 pub const GRAY: Color = Color::Rgb {
-    r: 140,
-    g: 140,
-    b: 140,
+    r: 160,
+    g: 160,
+    b: 160,
 };
 pub const DIM: Color = Color::Rgb {
-    r: 80,
-    g: 80,
-    b: 80,
+    r: 120,
+    g: 120,
+    b: 120,
 };
 pub const DARK: Color = Color::Rgb {
     r: 48,
@@ -2522,7 +2522,7 @@ fn paint_help_sidebar(
         } else {
             "h  close".to_string()
         };
-        paint_row(y, &[Span::fg(theme.muted, &hint_text)])?;
+        paint_row(y, &[Span::fg(theme.title, &hint_text)])?;
     }
     Ok((render_w, scroll))
 }
@@ -2654,7 +2654,7 @@ fn paint_list_sidebar(
         queue!(
             out,
             MoveTo(tx, track_y),
-            SetForegroundColor(theme.muted),
+            SetForegroundColor(theme.title),
             Print("(empty)"),
             ResetColor
         )?;
@@ -2718,7 +2718,7 @@ fn paint_list_sidebar(
     queue!(
         out,
         MoveTo(tx, foot_y as u16),
-        SetForegroundColor(theme.muted),
+        SetForegroundColor(theme.title),
         Print(&truncate("J/K move · a next", inner_w)),
         ResetColor
     )?;
@@ -3462,6 +3462,40 @@ mod tests {
     #[test]
     fn fmt_time_with_hours() {
         assert_eq!(fmt_time(Duration::from_secs(3661)), "1:01:01");
+    }
+
+    fn luminance(c: Color) -> f64 {
+        let Color::Rgb { r, g, b } = c else {
+            return if c == Color::White { 1.0 } else { 0.0 };
+        };
+        let lin = |v: u8| {
+            let v = v as f64 / 255.0;
+            if v <= 0.04045 {
+                v / 12.92
+            } else {
+                ((v + 0.055) / 1.055).powf(2.4)
+            }
+        };
+        0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b)
+    }
+
+    fn contrast_on_black(c: Color) -> f64 {
+        (luminance(c) + 0.05) / 0.05
+    }
+
+    #[test]
+    fn text_greys_stay_legible_on_black() {
+        for (name, c) in [
+            ("GRAY", GRAY),
+            ("DIM", DIM),
+            ("title", crate::rice::UiTheme::fallback().title),
+        ] {
+            assert!(contrast_on_black(c) >= 4.5, "{name} too faint");
+        }
+        let panel = crate::rice::UiTheme::fallback().panel;
+        let on_panel = |c: Color| (luminance(c) + 0.05) / (luminance(panel) + 0.05);
+        assert!(on_panel(crate::rice::UiTheme::fallback().title) >= 4.0);
+        assert!(contrast_on_black(CAVA_DIM) < contrast_on_black(DIM));
     }
 
     #[test]
