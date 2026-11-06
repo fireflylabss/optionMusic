@@ -57,6 +57,12 @@ impl MpvConfig {
     }
 }
 
+/// Per-process audio client name. The cava bridge uses it to find this
+/// instance's own output stream and ignore every other app.
+pub fn client_name() -> String {
+    format!("stillmusic-{}", std::process::id())
+}
+
 /// Create an audio-only MPV instance.
 pub fn create_player(config: &MpvConfig) -> Result<Mpv> {
     // libmpv refuses to start unless LC_NUMERIC is "C". GTK/WebKit (Tauri) and
@@ -71,6 +77,7 @@ pub fn create_player(config: &MpvConfig) -> Result<Mpv> {
 
     let _ = mpv.set_property("video", "no");
     let _ = mpv.set_property("terminal", "no");
+    let _ = mpv.set_property("audio-client-name", client_name());
     let _ = mpv.set_property("input-default-bindings", "no");
     let _ = mpv.set_property("input-vo-keyboard", "no");
     let _ = mpv.set_property("osc", "no");

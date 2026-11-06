@@ -3,6 +3,7 @@
 use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
@@ -33,13 +34,45 @@ pub struct CavaBridge {
     levels: Arc<Mutex<Vec<f32>>>,
     config_path: PathBuf,
     bars: usize,
+    /// Isolated mode: feeder that pipes only this instance's stream into cava.
+    feeder: Option<Feeder>,
+}
+
+/// Pipes this process's own PipeWire output stream (found by its
+/// `audio-client-name`) into a fifo that cava reads, so other apps never
+/// show up in the spectrum.
+struct Feeder {
+    stop: Arc<AtomicBool>,
+    parec: Arc<Mutex<Option<Child>>>,
+    fifo: PathBuf,
+}
+
+impl Feeder {
+    fn shutdown(&self) {
+        self.stop.store(true, Ordering::Relaxed);
+        if let Ok(mut g) = self.parec.lock()
+            && let Some(mut c) = g.take()
+        {
+            let _ = c.kill();
+            let _ = c.wait();
+        }
+    }
 }
 
 impl CavaBridge {
     /// Spawn cava if the binary exists. Returns `None` when unavailable.
+    /// On Linux the spectrum follows only this instance's audio when
+    /// `parec` + `pactl` exist; otherwise it falls back to the system mix.
     pub fn try_start() -> Option<Self> {
         if !cava_on_path() {
             return None;
+        }
+        #[cfg(target_os = "linux")]
+        if crate::which::on_path("pw-record")
+            && crate::which::on_path("pw-link")
+            && let Ok(b) = Self::start_isolated()
+        {
+            return Some(b);
         }
         INPUTS
             .iter()
@@ -79,6 +112,69 @@ impl CavaBridge {
             levels,
             config_path,
             bars,
+            feeder: None,
+        })
+    }
+
+    #[cfg(target_os = "linux")]
+    fn start_isolated() -> Result<Self> {
+        let bars = DEFAULT_BARS;
+        let dir = std::env::temp_dir().join("stillmusic");
+        std::fs::create_dir_all(&dir).context("temp cava dir")?;
+        let pid = std::process::id();
+        let fifo = dir.join(format!("cava-{pid}.pcm"));
+        let _ = std::fs::remove_file(&fifo);
+        let c_path =
+            std::ffi::CString::new(fifo.to_string_lossy().as_bytes()).context("fifo path")?;
+        // SAFETY: valid NUL-terminated path, mode is a plain integer.
+        if unsafe { libc::mkfifo(c_path.as_ptr(), 0o600) } != 0 {
+            anyhow::bail!("mkfifo failed: {}", std::io::Error::last_os_error());
+        }
+        // O_RDWR keeps the fifo open on our side so cava never sees EOF
+        // between tracks and opening never blocks.
+        let sink = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(&fifo)
+            .context("open fifo")?;
+
+        let config_path = write_cava_config_fifo(bars, &fifo)?;
+        let levels = Arc::new(Mutex::new(vec![0.0; bars]));
+        let mut child = Command::new("cava")
+            .arg("-p")
+            .arg(&config_path)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .context("failed to spawn cava (fifo)")?;
+        let stdout = child.stdout.take().context("cava stdout missing")?;
+        thread::sleep(Duration::from_millis(80));
+        if let Ok(Some(status)) = child.try_wait() {
+            let _ = std::fs::remove_file(&fifo);
+            anyhow::bail!("cava exited early (fifo): {status}");
+        }
+
+        let shared = Arc::clone(&levels);
+        thread::Builder::new()
+            .name("stillmusic-cava".into())
+            .spawn(move || read_loop(stdout, shared, bars))
+            .context("cava reader thread")?;
+
+        let stop = Arc::new(AtomicBool::new(false));
+        let parec: Arc<Mutex<Option<Child>>> = Arc::new(Mutex::new(None));
+        let (s2, p2) = (Arc::clone(&stop), Arc::clone(&parec));
+        thread::Builder::new()
+            .name("stillmusic-cava-feed".into())
+            .spawn(move || feed_loop(sink, s2, p2))
+            .context("cava feeder thread")?;
+
+        Ok(Self {
+            child: Some(child),
+            levels,
+            config_path,
+            bars,
+            feeder: Some(Feeder { stop, parec, fifo }),
         })
     }
 
@@ -90,6 +186,10 @@ impl CavaBridge {
     }
 
     pub fn stop(&mut self) {
+        if let Some(f) = self.feeder.take() {
+            f.shutdown();
+            let _ = std::fs::remove_file(&f.fifo);
+        }
         if let Some(mut child) = self.child.take() {
             let _ = child.kill();
             let _ = child.wait();
@@ -143,6 +243,139 @@ integral = 65
 gravity = 90
 ignore = 0
 "#
+    );
+    std::fs::write(&path, cfg).context("write cava config")?;
+    Ok(path)
+}
+
+/// True while this process's own PipeWire output node exists (its name is
+/// the `audio-client-name` set on mpv).
+#[cfg(target_os = "linux")]
+fn own_node_alive() -> bool {
+    let want = format!("{}:", crate::mpv::client_name());
+    Command::new("pw-link")
+        .arg("-o")
+        .stdin(Stdio::null())
+        .stderr(Stdio::null())
+        .output()
+        .map(|o| {
+            String::from_utf8_lossy(&o.stdout)
+                .lines()
+                .any(|l| l.trim().starts_with(&want))
+        })
+        .unwrap_or(false)
+}
+
+/// Keep a `pw-record --target <our node>` running and copy its PCM into the
+/// fifo. A capture stream linked straight to our playback stream hears only
+/// this instance. A watcher kills the recorder when the node goes away
+/// (track change, device switch) so it re-attaches to the new one.
+#[cfg(target_os = "linux")]
+fn feed_loop(mut sink: std::fs::File, stop: Arc<AtomicBool>, slot: Arc<Mutex<Option<Child>>>) {
+    use std::io::{Read, Write};
+
+    let (wstop, wslot) = (Arc::clone(&stop), Arc::clone(&slot));
+    let _ = thread::Builder::new()
+        .name("stillmusic-cava-watch".into())
+        .spawn(move || {
+            while !wstop.load(Ordering::Relaxed) {
+                thread::sleep(Duration::from_millis(700));
+                let has_child = wslot.lock().map(|g| g.is_some()).unwrap_or(false);
+                if has_child
+                    && !own_node_alive()
+                    && let Ok(mut g) = wslot.lock()
+                    && let Some(mut c) = g.take()
+                {
+                    let _ = c.kill();
+                    let _ = c.wait();
+                }
+            }
+        });
+
+    let mut buf = [0u8; 4096];
+    while !stop.load(Ordering::Relaxed) {
+        if !own_node_alive() {
+            thread::sleep(Duration::from_millis(300));
+            continue;
+        }
+        let spawned = Command::new("pw-record")
+            .args(["--target", &crate::mpv::client_name()])
+            .args(["-P", "{ node.dont-fallback = true }"])
+            .args(["--format", "s16", "--rate", "44100", "--channels", "1"])
+            .args(["--latency", "20ms", "-"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn();
+        let Ok(mut child) = spawned else {
+            thread::sleep(Duration::from_millis(500));
+            continue;
+        };
+        let Some(mut out) = child.stdout.take() else {
+            let _ = child.kill();
+            continue;
+        };
+        if let Ok(mut g) = slot.lock() {
+            *g = Some(child);
+        }
+        while !stop.load(Ordering::Relaxed) {
+            match out.read(&mut buf) {
+                Ok(0) | Err(_) => break,
+                Ok(n) => {
+                    if sink.write_all(&buf[..n]).is_err() {
+                        break;
+                    }
+                }
+            }
+        }
+        if let Ok(mut g) = slot.lock()
+            && let Some(mut c) = g.take()
+        {
+            let _ = c.kill();
+            let _ = c.wait();
+        }
+        thread::sleep(Duration::from_millis(150));
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn write_cava_config_fifo(bars: usize, fifo: &std::path::Path) -> Result<PathBuf> {
+    let dir = std::env::temp_dir().join("stillmusic");
+    let path = dir.join(format!("cava-{}.cfg", std::process::id()));
+    let cfg = format!(
+        r#"## still — generated cava config (do not edit)
+[general]
+framerate = 60
+bars = {bars}
+autosens = 1
+sensitivity = 85
+lower_cutoff_freq = 50
+higher_cutoff_freq = 12000
+
+[input]
+method = fifo
+source = {}
+sample_rate = 44100
+sample_bits = 16
+channels = 1
+
+[output]
+method = raw
+raw_target = /dev/stdout
+data_format = ascii
+ascii_max_range = {ASCII_MAX}
+bar_delimiter = 59
+frame_delimiter = 10
+channels = mono
+
+[smoothing]
+monstercat = 0
+noise_reduction = 70
+integral = 65
+gravity = 90
+ignore = 0
+"#,
+        fifo.display()
     );
     std::fs::write(&path, cfg).context("write cava config")?;
     Ok(path)

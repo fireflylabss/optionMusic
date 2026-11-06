@@ -44,16 +44,16 @@ pub const DARK: Color = Color::Rgb {
     g: 48,
     b: 48,
 };
-/// Soft cava wash — barely above black, content-area only.
+/// Soft cava wash — visible on any dark terminal, still quieter than text.
 pub const CAVA_DIM: Color = Color::Rgb {
-    r: 32,
-    g: 32,
-    b: 32,
+    r: 52,
+    g: 52,
+    b: 52,
 };
 pub const CAVA_SOFT: Color = Color::Rgb {
-    r: 44,
-    g: 44,
-    b: 44,
+    r: 84,
+    g: 84,
+    b: 84,
 };
 
 pub const APP_NAME: &str = "still";
@@ -2043,43 +2043,50 @@ impl SessionUi {
             }
             // Cava overlays below the player — fixed offset, does not shift the block.
             let cava_rows = self.config.cava.rows as usize;
-            if show_cava_strip && y + 2 + cava_rows < rows {
-                let cava_y = y + 2;
-                if let Some(ref levels) = cava_levels {
-                    let intensity: f64 = if playing {
-                        0.85
-                    } else if state.paused {
-                        0.32
-                    } else {
-                        0.14
-                    };
-                    let strip_w = block_w
-                        .saturating_add(4)
-                        .min(content_cols.saturating_sub(4));
-                    let cava_color = if rice_active || self.config.accent != Accent::Default {
-                        mix_rgb(rice.muted, accent_dim, intensity.clamp(0.2, 1.0))
-                    } else {
-                        mix(CAVA_DIM, CAVA_SOFT, intensity * 0.95)
-                    };
-                    let (strip_x, strip_h) = paint_cava_bars(
-                        &mut out,
-                        cava_y as u16,
-                        content_x0,
-                        content_cols,
-                        strip_w,
-                        levels,
-                        intensity,
-                        self.config.cava.style,
-                        cava_rows,
-                        cava_color,
-                    )?;
-                    self.hits.cava = Some(HitRect {
-                        x: strip_x,
-                        y: cava_y as u16,
-                        w: strip_w as u16,
-                        h: strip_h.max(1),
-                    });
-                }
+            // Short terminals: tuck the strip right under the lyric row
+            // instead of dropping it entirely.
+            let cava_y = if lyric_y + 2 + cava_rows < rows {
+                lyric_y + 2
+            } else {
+                lyric_y + 1
+            };
+            if show_cava_strip
+                && cava_y + cava_rows < rows
+                && let Some(ref levels) = cava_levels
+            {
+                let intensity: f64 = if playing {
+                    0.85
+                } else if state.paused {
+                    0.32
+                } else {
+                    0.14
+                };
+                let strip_w = block_w
+                    .saturating_add(4)
+                    .min(content_cols.saturating_sub(4));
+                let cava_color = if rice_active || self.config.accent != Accent::Default {
+                    mix_rgb(rice.muted, accent_dim, intensity.clamp(0.2, 1.0))
+                } else {
+                    mix(CAVA_DIM, CAVA_SOFT, intensity * 0.95)
+                };
+                let (strip_x, strip_h) = paint_cava_bars(
+                    &mut out,
+                    cava_y as u16,
+                    content_x0,
+                    content_cols,
+                    strip_w,
+                    levels,
+                    intensity,
+                    self.config.cava.style,
+                    cava_rows,
+                    cava_color,
+                )?;
+                self.hits.cava = Some(HitRect {
+                    x: strip_x,
+                    y: cava_y as u16,
+                    w: strip_w as u16,
+                    h: strip_h.max(1),
+                });
             }
         }
 
