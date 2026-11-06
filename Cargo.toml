@@ -35,7 +35,6 @@ lofty = "0.24"
 rusqlite = "0.32"
 base64 = "0.23"
 notify = "8.2.0"
-discord-rich-presence = "1.1.0"
 ureq = { version = "3.4.2", default-features = false, features = ["rustls", "gzip"] }
 
 [target.'cfg(unix)'.dependencies]

@@ -21,7 +21,6 @@ pub mod playlist;
 pub mod preview;
 pub mod radio;
 pub mod rice;
-pub mod rpc;
 pub mod saved_playlists;
 pub mod scrobble;
 pub mod session;

@@ -732,12 +732,6 @@ pub struct AppConfig {
     /// Persist playback prefs + session on quit; `msc play` bare resumes (on by default).
     #[serde(default = "default_true")]
     pub resume: bool,
-    /// Discord Rich Presence via local IPC (off by default).
-    #[serde(default)]
-    pub discord_rpc: bool,
-    /// Discord application client id override (empty = built-in).
-    #[serde(default)]
-    pub discord_rpc_id: String,
     /// ListenBrainz user token for opt-in scrobbling (empty = off, the
     /// default). When set, counted plays are submitted to
     /// `api.listenbrainz.org`; without it no scrobble traffic ever happens.
@@ -785,8 +779,6 @@ impl Default for AppConfig {
             resume_position: 0.0,
             resume_queue: Vec::new(),
             resume: true,
-            discord_rpc: false,
-            discord_rpc_id: String::new(),
             listenbrainz_token: String::new(),
             mpris: true,
             volume: 80,
