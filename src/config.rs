@@ -799,21 +799,62 @@ impl Default for AppConfig {
     }
 }
 
+/// Parse `raw`, keeping every valid top-level key when only some are bad, so
+/// one typo never resets favorites, folders or tokens. Returns the config and
+/// the keys that had to be dropped; `None` when the text is not valid TOML.
+fn parse_lenient(raw: &str) -> Option<(AppConfig, Vec<String>)> {
+    if let Ok(cfg) = toml::from_str::<AppConfig>(raw) {
+        return Some((cfg, Vec::new()));
+    }
+    let table: toml::Table = toml::from_str(raw).ok()?;
+    let mut kept = toml::Table::new();
+    let mut dropped = Vec::new();
+    for (key, value) in table {
+        let mut probe = toml::Table::new();
+        probe.insert(key.clone(), value.clone());
+        if toml::Value::Table(probe).try_into::<AppConfig>().is_ok() {
+            kept.insert(key, value);
+        } else {
+            dropped.push(key);
+        }
+    }
+    let cfg = toml::Value::Table(kept).try_into::<AppConfig>().ok()?;
+    Some((cfg, dropped))
+}
+
+/// Keep a copy of a config we could not fully read (`config.toml.broken`)
+/// before the next save overwrites it. Best effort, never fails playback.
+fn backup_broken(path: &std::path::Path, raw: &str) {
+    let mut name = path.as_os_str().to_owned();
+    name.push(".broken");
+    let bak = PathBuf::from(name);
+    if fs::read_to_string(&bak).is_ok_and(|old| old == raw) {
+        return;
+    }
+    let _ = fs::write(bak, raw);
+}
+
 impl AppConfig {
     pub fn load() -> Self {
         let path = active_config_path();
         if !path.exists() {
             return Self::default();
         }
-        match fs::read_to_string(&path) {
-            Ok(raw) => match toml::from_str::<AppConfig>(&raw) {
-                Ok(mut cfg) => {
-                    cfg.cava.normalize();
-                    cfg
+        let Ok(raw) = fs::read_to_string(&path) else {
+            return Self::default();
+        };
+        match parse_lenient(&raw) {
+            Some((mut cfg, dropped)) => {
+                if !dropped.is_empty() {
+                    backup_broken(&path, &raw);
                 }
-                Err(_) => Self::default(),
-            },
-            Err(_) => Self::default(),
+                cfg.cava.normalize();
+                cfg
+            }
+            None => {
+                backup_broken(&path, &raw);
+                Self::default()
+            }
         }
     }
 
@@ -875,6 +916,39 @@ impl AppConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn lenient_parse_keeps_valid_keys_around_a_bad_one() {
+        let raw = "volume = 33\nfavorites = [\"/a.mp3\"]\naccent = \"not-a-color\"\nlyrics_anim = \"sometimes\"\n";
+        assert!(toml::from_str::<AppConfig>(raw).is_err());
+        let (cfg, dropped) = parse_lenient(raw).expect("salvageable");
+        assert_eq!(cfg.volume, 33);
+        assert_eq!(cfg.favorites, vec!["/a.mp3".to_string()]);
+        assert_eq!(cfg.accent, Accent::Default);
+        assert!(cfg.lyrics_anim);
+        assert_eq!(dropped, ["accent", "lyrics_anim"]);
+    }
+
+    #[test]
+    fn lenient_parse_passes_clean_files_and_rejects_bad_syntax() {
+        let (cfg, dropped) = parse_lenient("volume = 12\n").unwrap();
+        assert_eq!(cfg.volume, 12);
+        assert!(dropped.is_empty());
+        assert!(parse_lenient("volume = = 12\n[").is_none());
+    }
+
+    #[test]
+    fn broken_config_is_copied_aside_once() {
+        let dir = std::env::temp_dir().join(format!("still-cfg-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let cfg = dir.join("config.toml");
+        backup_broken(&cfg, "volume = = 1");
+        let bak = dir.join("config.toml.broken");
+        assert_eq!(fs::read_to_string(&bak).unwrap(), "volume = = 1");
+        backup_broken(&cfg, "volume = = 1");
+        assert_eq!(fs::read_to_string(&bak).unwrap(), "volume = = 1");
+        let _ = fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn config_dir_ends_with_option_music() {
