@@ -164,6 +164,7 @@ fn run() -> Result<()> {
             ui,
             fallback_mweb,
             no_fallback,
+            mode,
         }) => {
             if !quiet {
                 banner();
@@ -180,6 +181,7 @@ fn run() -> Result<()> {
                 ui.map(|u| u.to_mode()),
                 fallback_mweb,
                 no_fallback,
+                mode.map(|m| m.to_mode()),
                 &cli.music_dir,
             )?;
         }
@@ -1897,6 +1899,7 @@ fn cmd_download(
     ui_override: Option<stillmusic::config::DlUiMode>,
     fallback_mweb: bool,
     no_fallback: bool,
+    mode_override: Option<stillmusic::config::DlMode>,
     music_dir_flag: &str,
 ) -> Result<()> {
     let kind_flag = if both {
@@ -1912,6 +1915,7 @@ fn cmd_download(
     let use_wizard = interactive || query.is_none_or(|q| q.trim().is_empty());
     let cfg = stillmusic::config::AppConfig::load();
     let fallback = download::resolve_fallback_policy(fallback_mweb, no_fallback, cfg.dl_fallback);
+    download::set_mode(mode_override.unwrap_or(cfg.dl_mode));
     let cfg_provider = match cfg.dl_provider {
         stillmusic::config::DlSource::Ask => None,
         stillmusic::config::DlSource::Youtube => Some(download::Provider::Youtube),

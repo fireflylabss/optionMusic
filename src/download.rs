@@ -102,6 +102,42 @@ fn parse_yes_default(line: &str) -> bool {
     )
 }
 
+// ── Download engine (standard / fast) ───────────────────────────
+
+static DL_FAST: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Select the engine for this process (`fast` = experimental aria2c).
+pub fn set_mode(mode: crate::config::DlMode) {
+    DL_FAST.store(
+        mode == crate::config::DlMode::Fast,
+        std::sync::atomic::Ordering::Relaxed,
+    );
+}
+
+pub fn aria2_available() -> bool {
+    which_bin("aria2c").is_ok()
+}
+
+/// Extra yt-dlp flags for the active mode. Fast uses aria2c when installed,
+/// otherwise yt-dlp's own parallel fragments.
+fn mode_args() -> Vec<String> {
+    if !DL_FAST.load(std::sync::atomic::Ordering::Relaxed) {
+        return Vec::new();
+    }
+    if aria2_available() {
+        vec![
+            "--downloader".into(),
+            "aria2c".into(),
+            "--downloader-args".into(),
+            "aria2c:-x 16 -s 16 -k 1M --console-log-level=warn --summary-interval=0".into(),
+            "--concurrent-fragments".into(),
+            "8".into(),
+        ]
+    } else {
+        vec!["--concurrent-fragments".into(), "8".into()]
+    }
+}
+
 pub(crate) const PAGE_SIZE: usize = 8;
 const SEARCH_FETCH: usize = 40; // up to 5 pages
 const CACHE_TTL: Duration = Duration::from_secs(3 * 24 * 60 * 60);
@@ -821,6 +857,7 @@ fn build_args_pass(url: &str, opts: &DownloadOptions, pass: Pass) -> Vec<String>
     }
 
     push_embed_flags(&mut args, opts, pass);
+    args.extend(mode_args());
     args.push("--".into());
     args.push(url.to_string());
     args
@@ -984,6 +1021,12 @@ fn run_batch_with_yt(
     if (opts.embed_thumbnail || opts.embed_subs || opts.embed_metadata) && !ffmpeg_available() {
         emit(DlEvent::Warning {
             text: "ffmpeg not found — embed may fail".into(),
+        });
+    }
+
+    if DL_FAST.load(std::sync::atomic::Ordering::Relaxed) && !aria2_available() {
+        emit(DlEvent::Warning {
+            text: "fast mode: aria2c not found — using yt-dlp parallel fragments only".into(),
         });
     }
 

@@ -29,6 +29,22 @@ pub enum CliDlUi {
     Type,
 }
 
+/// `--mode` values for `msc dl`.
+#[derive(Debug, Clone, Copy, clap::ValueEnum)]
+pub enum CliDlMode {
+    Standard,
+    Fast,
+}
+
+impl CliDlMode {
+    pub fn to_mode(self) -> crate::config::DlMode {
+        match self {
+            Self::Standard => crate::config::DlMode::Standard,
+            Self::Fast => crate::config::DlMode::Fast,
+        }
+    }
+}
+
 impl CliDlUi {
     pub fn to_mode(self) -> crate::config::DlUiMode {
         match self {
@@ -328,6 +344,10 @@ pub enum Command {
         /// Never retry with the mweb fallback
         #[arg(long = "no-fallback", conflicts_with = "fallback_mweb")]
         no_fallback: bool,
+
+        /// Download engine: `standard` or `fast` (experimental, uses aria2c)
+        #[arg(long = "mode", value_enum, value_name = "MODE")]
+        mode: Option<CliDlMode>,
     },
 
     /// Manage local playlists (save / import M3U)
