@@ -223,8 +223,42 @@ pub fn export_m3u(id: &str, out: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Write `paths` as an extended M3U with absolute paths, so the file works
+/// from any directory. Returns the number of tracks written.
+pub fn export_paths_m3u(paths: &[std::path::PathBuf], out: &Path) -> Result<usize> {
+    if paths.is_empty() {
+        bail!("queue is empty");
+    }
+    let mut body = String::from("#EXTM3U\n");
+    for p in paths {
+        let abs = std::path::absolute(p).unwrap_or_else(|_| p.clone());
+        let title = abs.file_stem().and_then(|s| s.to_str()).unwrap_or_default();
+        body.push_str(&format!("#EXTINF:-1,{title}\n{}\n", abs.display()));
+    }
+    if let Some(parent) = out.parent()
+        && !parent.as_os_str().is_empty()
+    {
+        fs::create_dir_all(parent)?;
+    }
+    option_sdk::atomic_write(out, body.as_bytes())
+        .with_context(|| format!("write {}", out.display()))?;
+    Ok(paths.len())
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn export_paths_writes_absolute_extm3u() {
+        let dir = std::env::temp_dir().join(format!("still-m3u-{}", std::process::id()));
+        let out = dir.join("q.m3u");
+        let n = super::export_paths_m3u(&[std::path::PathBuf::from("/a/b/one.mp3")], &out).unwrap();
+        assert_eq!(n, 1);
+        let body = std::fs::read_to_string(&out).unwrap();
+        assert!(body.starts_with("#EXTM3U\n#EXTINF:-1,one\n/a/b/one.mp3"));
+        assert!(super::export_paths_m3u(&[], &out).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     use super::*;
 
     #[test]

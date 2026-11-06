@@ -1060,6 +1060,17 @@ fn run_session(
                                         ui.list_cursor_end();
                                         continue;
                                     }
+                                    // Enter plays the highlighted track.
+                                    KeyCode::Enter if !ui.settings_open() => {
+                                        let at = ui.list_cursor();
+                                        if let Some(t) = playlist.get(at) {
+                                            held = false;
+                                            index = at;
+                                            player.play_file(&t.path)?;
+                                            ui.toast_track(t.display_name());
+                                        }
+                                        continue;
+                                    }
                                     _ => {}
                                 }
                             }
@@ -1208,6 +1219,25 @@ fn run_session(
                                 Action::SleepCycle => {
                                     let msg = sleep.cycle();
                                     ui.toast_config(msg);
+                                }
+                                Action::ExportQueue => {
+                                    let paths: Vec<std::path::PathBuf> =
+                                        playlist.tracks().iter().map(|t| t.path.clone()).collect();
+                                    let secs = std::time::SystemTime::now()
+                                        .duration_since(std::time::UNIX_EPOCH)
+                                        .map(|d| d.as_secs())
+                                        .unwrap_or(0);
+                                    let out =
+                                        std::path::PathBuf::from(format!("still-queue-{secs}.m3u"));
+                                    match stillmusic::saved_playlists::export_paths_m3u(
+                                        &paths, &out,
+                                    ) {
+                                        Ok(n) => ui.toast_info(format!(
+                                            "exported {n} tracks → {}",
+                                            out.display()
+                                        )),
+                                        Err(e) => ui.toast_info(format!("export failed: {e}")),
+                                    }
                                 }
                                 Action::Jump(n) => {
                                     if n >= 1 && n <= playlist.len() {

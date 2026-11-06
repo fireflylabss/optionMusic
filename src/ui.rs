@@ -2246,7 +2246,15 @@ const HELP_SECTIONS: &[(&str, &[(&str, &str)])] = &[
             ("g", "jump current"),
         ],
     ),
-    ("seek", &[("← →", "±5s"), ("{ }", "±60s"), ("1–9", "jump")]),
+    (
+        "seek",
+        &[
+            ("← →", "±5s"),
+            ("{ }", "±60s"),
+            ("1–9", "jump"),
+            ("enter", "play in list"),
+        ],
+    ),
     (
         "sound",
         &[
@@ -2266,6 +2274,7 @@ const HELP_SECTIONS: &[(&str, &[(&str, &str)])] = &[
             ("y", "lyrics"),
             ("x", "smart mix"),
             ("z", "sleep"),
+            ("w", "export m3u"),
             ("c", "settings"),
             ("↑↓ jk", "list / next"),
             ("?", "help"),
