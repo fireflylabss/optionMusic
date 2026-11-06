@@ -415,9 +415,6 @@ fn run_plain(
     out: OutputMode,
 ) -> Result<()> {
     stillmusic::signals::install();
-    let mut rpc = stillmusic::rpc::Rpc::new();
-    let cfg = AppConfig::load();
-    let _ = rpc.sync(cfg.discord_rpc, &cfg.discord_rpc_id);
     let mut stats_store = StatsStore::load();
     let total = playlist.len();
     let mut tracks_played = 0usize;
@@ -450,14 +447,6 @@ fn run_plain(
                     break;
                 }
                 max_pos = max_pos.max(player.position());
-                rpc.update(
-                    &track.display_name(),
-                    &track.artist_album(),
-                    track.thumb_url().as_deref(),
-                    player.position(),
-                    player.duration(),
-                    false,
-                );
                 maybe_count_stats(
                     &mut stats_store,
                     track,
@@ -497,7 +486,6 @@ fn run_plain(
         player.stop();
     }
     let _ = stats_store.save();
-    rpc.clear();
 
     if interrupted {
         emit(out, &PlainEvent::Interrupted { tracks_played });
@@ -575,8 +563,6 @@ fn run_session(
     let mut quitting = false;
     let mut done_msg = "done — thanks for listening ♪";
 
-    // Discord Rich Presence (opt-in) + session persistence throttle.
-    let mut rpc = stillmusic::rpc::Rpc::new();
     // MPRIS on the session bus (on by default) — multimedia keys + playerctl.
     let mut mpris = stillmusic::mpris::Mpris::new();
     let mut last_save = std::time::Instant::now();
@@ -645,30 +631,8 @@ fn run_session(
             ui.toast_config("sleep timer · stopped");
         }
 
-        // Discord presence: follows the settings toggle live; deduped inside.
-        if let Some(warn) = rpc.sync(ui.config().discord_rpc, &ui.config().discord_rpc_id) {
-            ui.toast_config(warn);
-        }
-        if let Some(t) = playlist.get(index) {
-            if held {
-                // Stopped via `s`: nothing playing — drop the presence
-                // instead of lingering on the last track.
-                rpc.clear();
-            } else {
-                rpc.update(
-                    &t.display_name(),
-                    &t.artist_album(),
-                    t.thumb_url().as_deref(),
-                    player.position(),
-                    player.duration(),
-                    player.is_paused(),
-                );
-            }
-        }
-
-        // MPRIS: same live-toggle shape as the presence, then run whatever the
-        // desktop (multimedia keys, panel widget, playerctl) asked for through
-        // the very code paths the keyboard uses.
+        // MPRIS: run whatever the desktop (multimedia keys, panel widget,
+        // playerctl) asked for through the very code paths the keyboard uses.
         if let Some(warn) = mpris.sync(ui.config().mpris) {
             ui.toast_config(warn);
         }
@@ -1911,7 +1875,6 @@ fn run_session(
     // Persist prefs + session for the next launch (`resume` gates inside).
     // `quitting` = user left mid-session → keep resume; natural end clears it.
     save_session(&mut ui, player, playlist, index, loop_mode, smart, quitting);
-    rpc.clear();
     mpris.clear();
 
     ui.leave()?;

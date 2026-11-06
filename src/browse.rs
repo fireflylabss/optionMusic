@@ -22,7 +22,6 @@ use unicode_width::UnicodeWidthStr;
 use crate::config::AppConfig;
 use crate::library::{AlbumGroup, ArtistGroup, Library};
 use crate::player::Player;
-use crate::rpc::Rpc;
 use crate::ui::fmt_time;
 
 // ── Palette (rice-aware; falls back to the classic B&W greys) ─────
@@ -471,9 +470,6 @@ impl Session {
             }
         });
         let mut quit = false;
-        let mut rpc = Rpc::new();
-        let cfg = AppConfig::load();
-        let _ = rpc.sync(cfg.discord_rpc, &cfg.discord_rpc_id);
         loop {
             if let Some((rts, rx)) = watch.as_ref() {
                 while rx.try_recv().is_ok() {
@@ -482,20 +478,6 @@ impl Session {
             }
             self.paint()?;
             self.auto_advance();
-
-            // Discord presence (deduped inside; no-op when disabled).
-            if let Some(i) = self.queue_cursor
-                && let Some(t) = self.library.get(i)
-            {
-                rpc.update(
-                    &t.display_name(),
-                    &t.artist_album(),
-                    t.thumb_url().as_deref(),
-                    self.player.position(),
-                    self.player.duration(),
-                    self.player.is_paused(),
-                );
-            }
 
             if event::poll(Duration::from_millis(40)).unwrap_or(false) {
                 loop {
