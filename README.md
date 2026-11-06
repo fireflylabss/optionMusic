@@ -297,7 +297,6 @@ Grouped into sections — **player** · **interface** · **library & dl**:
 |--------|---------|
 | Excess vol | Allow volume up to 200% |
 | Resume | Persist prefs + session; `msc play` resumes (on by default) |
-| Discord | Paused for now. The setting is hidden; `discord_rpc` in the file is ignored until it returns |
 | Accent | Color accent (presets or `#RRGGBB` in the file) |
 | LDM | Fewer animations, lighter redraw |
 | Cava | Style (`bars` / `dense` / `mirror` / `dots`) and height |
@@ -337,12 +336,6 @@ Off by default. With `--cava` or `v`, and `cava` installed, still draws a spectr
 - PipeWire first, Pulse fallback
 - Click the strip or press `v` to toggle
 - Missing cava → strip unavailable; playback unaffected
-
-## Discord presence
-
-Paused. The player does not open a Discord IPC socket in this cut, and the
-settings row is hidden. `discord_rpc` in `config.toml` is kept and ignored
-until Rich Presence comes back.
 
 ## MPRIS & multimedia keys
 

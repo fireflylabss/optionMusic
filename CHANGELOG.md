@@ -46,6 +46,7 @@ More control over downloads, lyrics and the spectrum, a queue export, and a pass
 - Dim labels, hints and section titles reach 4.5:1 contrast on black in the default monochrome theme.
 - A bad value in `config.toml` no longer resets the whole file: valid keys are kept and the original is copied to `config.toml.broken` before the next save.
 - The repository moved from `fireflylabss/optionMusic` to `horizzon3507/stillmusic`; GitHub redirects keep old clone and release URLs working.
+- Discord Rich Presence is gone for good — the paused opt-in (`discord_rpc` / `discord_rpc_id`), its module and the `discord-rich-presence` crate were removed. Old config files with those keys are simply ignored.
 
 ## v0.3.0-beta.1 · 25/10/2026
 
