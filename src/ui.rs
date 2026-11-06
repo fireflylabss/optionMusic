@@ -390,7 +390,7 @@ pub struct SessionUi {
     /// List card pop timestamps (same geometry-only pop as `?` / `c`).
     list_opened_at: Option<Instant>,
     list_closed_at: Option<Instant>,
-    /// Current lyric in the gap under the title (`y` toggles).
+    /// Current lyric in the gap under the keys (`y` toggles).
     show_lyrics: bool,
     /// Strip pop timestamps (geometry-only, never blocks input).
     lyrics_opened_at: Option<Instant>,
@@ -1017,7 +1017,7 @@ impl SessionUi {
         self.lyrics_active_row.map(|r| r == row).unwrap_or(false)
     }
 
-    /// One lyric in the blank row under the title. The row exists either way.
+    /// One lyric in the blank row under the keys. The row exists either way.
     fn paint_lyric_line(
         &mut self,
         out: &mut impl Write,
@@ -1764,8 +1764,8 @@ impl SessionUi {
                 self.note_lyrics_track(&key);
             }
 
-            // Same height as the classic block. The lyric uses the blank row
-            // under the title, so opening it does not move the player.
+            // Same height as the classic block. The lyric paints in the
+            // blank row two below the keys, so opening it moves nothing.
             let mut block_h = 8usize;
             if !self.show_path {
                 block_h = block_h.saturating_sub(1);
@@ -1823,16 +1823,7 @@ impl SessionUi {
                 )?;
                 y += 1;
             }
-            if lyrics_on {
-                self.paint_lyric_line(
-                    &mut out,
-                    y as u16,
-                    content_x0,
-                    content_cols,
-                    state,
-                    max_title,
-                )?;
-            } else {
+            if !lyrics_on {
                 self.hits.lyrics_pane = None;
                 self.hits.lyrics_head = None;
                 self.lyrics_active_row = None;
@@ -2032,6 +2023,24 @@ impl SessionUi {
                 &mut self.hits,
             )?;
             y += 1;
+            // Lyric line lives two rows below the keys: one blank row of
+            // breathing room between the footer and the lyric. Fixed overlay,
+            // so toggling it never shifts the player or the cava.
+            let lyric_y = y + 1;
+            if lyrics_on && lyric_y < rows {
+                self.paint_lyric_line(
+                    &mut out,
+                    lyric_y as u16,
+                    content_x0,
+                    content_cols,
+                    state,
+                    block_w,
+                )?;
+            } else {
+                self.hits.lyrics_pane = None;
+                self.hits.lyrics_head = None;
+                self.lyrics_active_row = None;
+            }
             // Cava overlays below the player — fixed offset, does not shift the block.
             let cava_rows = self.config.cava.rows as usize;
             if show_cava_strip && y + 2 + cava_rows < rows {
