@@ -457,7 +457,7 @@ impl ToastPos {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum DlFallbackMode {
-    /// Ask on TTY (`[s/N]`), never auto-retry off-TTY.
+    /// Ask on TTY (`[Y/n]`, Enter = yes), never auto-retry off-TTY.
     #[default]
     Ask,
     /// Retry automatically without asking.

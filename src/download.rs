@@ -73,7 +73,7 @@ fn stdin_is_tty() -> bool {
     std::io::stdin().is_terminal()
 }
 
-/// Ask `[s/N]` on interactive TTYs. Returns true when the user opts in.
+/// Ask `[Y/n]` on interactive TTYs — Enter accepts. Returns true to retry.
 fn ask_mweb_retry() -> bool {
     use std::io::IsTerminal;
     if !std::io::stdin().is_terminal() {
@@ -84,16 +84,21 @@ fn ask_mweb_retry() -> bool {
         stdout,
         "  {} {} ",
         "?".with(DIM),
-        "403/blocked? retry with mweb fallback? [y/N]".with(GRAY)
+        "403/blocked? retry with mweb fallback? [Y/n]".with(GRAY)
     );
     let _ = stdout.flush();
     let mut line = String::new();
     if io::stdin().read_line(&mut line).is_err() {
         return false;
     }
-    matches!(
+    parse_yes_default(&line)
+}
+
+/// Empty input and anything not clearly negative means yes.
+fn parse_yes_default(line: &str) -> bool {
+    !matches!(
         line.trim().to_ascii_lowercase().as_str(),
-        "s" | "sim" | "y" | "yes"
+        "n" | "no" | "nao" | "não"
     )
 }
 
@@ -1861,6 +1866,16 @@ mod tests {
         fn drop(&mut self) {
             let _ = fs::remove_dir_all(&self.0);
         }
+    }
+
+    #[test]
+    fn mweb_prompt_defaults_to_yes() {
+        assert!(parse_yes_default(""));
+        assert!(parse_yes_default("\n"));
+        assert!(parse_yes_default("y"));
+        assert!(parse_yes_default("s"));
+        assert!(!parse_yes_default("n"));
+        assert!(!parse_yes_default(" No "));
     }
 
     #[cfg(unix)]
