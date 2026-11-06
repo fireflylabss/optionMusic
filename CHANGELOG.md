@@ -31,6 +31,22 @@ Historical **Desktop** and mixed entries remain below with their original tags a
 
 </details>
 
+## v0.3.0-beta.2 · 06/11/2026
+
+More control over downloads, lyrics and the spectrum, a queue export, and a pass over small-terminal layout, contrast and config recovery. This version was made for CLI with a beta release channel on 06/11/2026 (v0.3.0-beta.2).
+
+- Settings (`c`) gain a default download provider (`dl_provider`: ask, youtube, youtube-music, soundcloud), a lyrics animation toggle (`lyrics_anim`) and a download engine (`dl_mode`: `standard` or experimental `fast`, which hands transfers to aria2c and falls back to yt-dlp parallel fragments). `msc dl --mode standard|fast` overrides it per run.
+- The 403/mweb fallback prompt now defaults to yes (`[Y/n]`), so Enter retries.
+- Download previews take the file path from yt-dlp instead of scanning the cache, retry once with the mweb client on 403, use the saved volume, and park on a stopped frame when the track ends.
+- The cava spectrum reacts only to the audio of its own still instance on Linux (PipeWire `pw-record`, falling back to the system mix), shows again after a track change, and uses brighter bars.
+- `w` exports the playing queue as an M3U with absolute paths; `Enter` plays the highlighted track in the list.
+- The lyric line sits two rows below the shortcut bar, so opening it never moves the player.
+- Stacked toasts keep their own borders instead of overwriting each other, and `c` is refused while `l` and `?` already hold both side panels.
+- Narrow terminals drop whole items from the status, speed/pitch and shortcut lines instead of clipping them mid-word, keeping play, volume, settings and help reachable.
+- Dim labels, hints and section titles reach 4.5:1 contrast on black in the default monochrome theme.
+- A bad value in `config.toml` no longer resets the whole file: valid keys are kept and the original is copied to `config.toml.broken` before the next save.
+- The repository moved from `fireflylabss/optionMusic` to `horizzon3507/stillmusic`; GitHub redirects keep old clone and release URLs working.
+
 ## v0.3.0-beta.1 · 25/10/2026
 
 still music rebranding, a persistent library index, queue editing and local lyrics management. This version was made for CLI with a beta release channel on 25/10/2026 (v0.3.0-beta.1).

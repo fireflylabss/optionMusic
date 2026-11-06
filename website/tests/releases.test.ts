@@ -45,9 +45,9 @@ Daily use. This version was made for CLI with a stable release channel.
   })
 
   it('reads the actual current changelog as a beta revision', () => {
-    expect(LATEST_CLI.v).toBe('v0.3.0-beta.1')
+    expect(LATEST_CLI.v).toBe('v0.3.0-beta.2')
     expect(LATEST_CLI.channel).toBe('beta')
-    expect(LATEST_CLI.date).toBe('25/10/2026')
-    expect(LATEST_CLI.note).toContain('still music rebranding')
+    expect(LATEST_CLI.date).toBe('04/11/2026')
+    expect(LATEST_CLI.note).toContain('More control over downloads')
   })
 })
