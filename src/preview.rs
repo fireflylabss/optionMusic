@@ -33,7 +33,8 @@ pub fn run_local_preview(path: &Path) -> Result<()> {
         anyhow::bail!("preview file is not playable: {}", path.display());
     }
 
-    let mut player = Player::new(80, 1.0, 0.0)?;
+    let prefs = crate::config::AppConfig::load();
+    let mut player = Player::new(prefs.volume.min(prefs.volume_max()), 1.0, 0.0)?;
     let mut ui = SessionUi::enter_preview().context("failed to open preview player")?;
     player.set_volume_max(ui.volume_max());
     ui.toast("preview · q back");
@@ -47,6 +48,12 @@ pub fn run_local_preview(path: &Path) -> Result<()> {
     let mut quitting = false;
 
     loop {
+        // Track ended on its own: park on a stopped frame so space replays
+        // instead of leaving a frozen progress bar.
+        if !held && player.is_idle() {
+            held = true;
+            ui.toast("finished · space replays · q back");
+        }
         let track = playlist.get(index);
         let name = track
             .map(|t| t.display_name())

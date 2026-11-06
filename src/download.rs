@@ -704,6 +704,9 @@ fn preview_cache_dir() -> PathBuf {
 ///
 /// Quiet by design — callers show a spinner. Skips `-x` / format convert so mpv
 /// can play the native stream (webm/m4a/opus) as soon as yt-dlp finishes.
+/// The final path comes from yt-dlp itself (never a directory scan, which
+/// could pick a `.part` or sidecar file), and a 403/PO-token failure is
+/// retried once with the mweb client.
 pub fn fetch_preview_audio(url: &str) -> Result<PathBuf> {
     let yt = ensure_yt_dlp()?;
     let dir = preview_cache_dir();
@@ -717,7 +720,7 @@ pub fn fetch_preview_audio(url: &str) -> Result<PathBuf> {
     }
 
     let template = dir.join("%(id)s.%(ext)s");
-    let args = [
+    let args: Vec<String> = [
         "--quiet",
         "--no-warnings",
         "--no-progress",
@@ -727,35 +730,70 @@ pub fn fetch_preview_audio(url: &str) -> Result<PathBuf> {
         "bestaudio/best",
         "--no-playlist",
         "--no-mtime",
+        "--no-part",
+        "--print",
+        &format!("after_move:{OUTPUT_PATH_PREFIX}%(filepath)j"),
+        "--no-simulate",
         "-o",
         template.to_str().context("preview path utf-8")?,
         "--",
         url,
-    ];
+    ]
+    .iter()
+    .map(|a| a.to_string())
+    .collect();
 
-    let status = Command::new(&yt)
+    let paths = match run_preview(&yt, &args) {
+        Ok(p) => p,
+        Err(first) if is_retryable_download_error(&first) => {
+            run_preview(&yt, &with_mweb_fallback(&args))
+                .map_err(|e| anyhow::anyhow!("preview failed: {}", last_line(&e)))?
+        }
+        Err(e) => bail!("preview failed: {}", last_line(&e)),
+    };
+
+    paths
+        .into_iter()
+        .find(|p| p.is_file())
+        .or_else(|| {
+            fs::read_dir(&dir)
+                .ok()?
+                .flatten()
+                .map(|e| e.path())
+                .find(|p| p.is_file() && crate::playlist::is_audio_file(p))
+        })
+        .with_context(|| format!("no preview file written in {}", dir.display()))
+}
+
+fn last_line(text: &str) -> String {
+    text.lines()
+        .rev()
+        .map(str::trim)
+        .find(|l| !l.is_empty())
+        .unwrap_or("yt-dlp failed")
+        .to_string()
+}
+
+/// Run yt-dlp silently and collect the printed output paths.
+fn run_preview(yt: &str, args: &[String]) -> std::result::Result<Vec<PathBuf>, String> {
+    let output = Command::new(yt)
         .args(args)
         .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .with_context(|| format!("failed to spawn {yt}"))?;
-    if !status.success() {
-        bail!(
-            "preview download failed (yt-dlp {})",
-            status.code().unwrap_or(-1)
-        );
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .map_err(|e| format!("failed to spawn {yt}: {e}"))?;
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("{stderr}\n{stdout}"));
     }
-
-    let mut found: Option<PathBuf> = None;
-    for entry in fs::read_dir(&dir).with_context(|| format!("read {}", dir.display()))? {
-        let path = entry?.path();
-        if path.is_file() {
-            found = Some(path);
-            break;
-        }
-    }
-    found.with_context(|| format!("no preview file written in {}", dir.display()))
+    Ok(stdout
+        .lines()
+        .filter_map(|l| l.strip_prefix(OUTPUT_PATH_PREFIX))
+        .filter_map(|r| serde_json::from_str::<String>(r).ok())
+        .map(PathBuf::from)
+        .collect())
 }
 
 pub(crate) fn intersect_caps(items: &[MediaItem]) -> Caps {
