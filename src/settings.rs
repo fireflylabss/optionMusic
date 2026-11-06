@@ -9,7 +9,9 @@ use crossterm::{
     style::{Color, Print, ResetColor, SetBackgroundColor, SetForegroundColor},
 };
 
-use crate::config::{Accent, AppConfig, ArtistSource, DlFallbackMode, DlUiMode, ToastPos};
+use crate::config::{
+    Accent, AppConfig, ArtistSource, DlFallbackMode, DlMode, DlSource, DlUiMode, ToastPos,
+};
 use crate::rice::UiTheme;
 
 pub const SETTINGS_SIDEBAR_W: usize = 30;
@@ -159,7 +161,7 @@ impl SettingsUi {
 
     fn len(&self) -> usize {
         match self.screen {
-            SettingsScreen::Main => 12,
+            SettingsScreen::Main => 15,
             SettingsScreen::Cava => 3,
         }
     }
@@ -404,7 +406,7 @@ impl SettingsUi {
                         false,
                     )
                 }
-                7 => {
+                8 => {
                     cfg.artist_source = cfg.artist_source.next();
                     let _ = cfg.save();
                     applied(
@@ -413,12 +415,12 @@ impl SettingsUi {
                         false,
                     )
                 }
-                8 => {
+                9 => {
                     cfg.dl_ui = cfg.dl_ui.next();
                     let _ = cfg.save();
                     applied(format!("dl ui · {}", cfg.dl_ui.label()), false, false)
                 }
-                9 => {
+                10 => {
                     cfg.dl_fallback = cfg.dl_fallback.next();
                     let _ = cfg.save();
                     applied(
@@ -427,12 +429,25 @@ impl SettingsUi {
                         false,
                     )
                 }
-                11 => {
+                14 => {
                     cfg.reset_all();
                     let _ = cfg.save();
                     applied("settings · reset defaults", true, true)
                 }
-                10 => self.nudge_value(cfg, 1),
+                11..=13 => self.nudge_value(cfg, 1),
+                7 => {
+                    cfg.lyrics_anim = !cfg.lyrics_anim;
+                    let _ = cfg.save();
+                    applied(
+                        if cfg.lyrics_anim {
+                            "lyrics anim · on"
+                        } else {
+                            "lyrics anim · off"
+                        },
+                        false,
+                        false,
+                    )
+                }
                 _ => SettingsAction::None,
             },
             SettingsScreen::Cava => match self.cursor {
@@ -462,7 +477,30 @@ impl SettingsUi {
 
     fn nudge_value(&mut self, cfg: &mut AppConfig, dir: i8) -> SettingsAction {
         match self.screen {
-            SettingsScreen::Main if self.cursor == 10 => {
+            SettingsScreen::Main if self.cursor == 11 => {
+                cfg.dl_provider = if dir < 0 {
+                    cfg.dl_provider.prev()
+                } else {
+                    cfg.dl_provider.next()
+                };
+                let _ = cfg.save();
+                applied(
+                    format!("dl source · {}", cfg.dl_provider.label()),
+                    false,
+                    false,
+                )
+            }
+            SettingsScreen::Main if self.cursor == 12 => {
+                cfg.dl_mode = if dir < 0 {
+                    cfg.dl_mode.prev()
+                } else {
+                    cfg.dl_mode.next()
+                };
+                let _ = cfg.save();
+                applied(format!("dl mode · {}", cfg.dl_mode.label()), false, false)
+            }
+            SettingsScreen::Main if self.cursor == 7 => self.activate(cfg),
+            SettingsScreen::Main if self.cursor == 13 => {
                 cfg.eq = if dir < 0 {
                     cfg.eq.prev()
                 } else {
@@ -480,7 +518,7 @@ impl SettingsUi {
                 let _ = cfg.save();
                 applied(format!("accent · {}", cfg.accent.label()), false, false)
             }
-            SettingsScreen::Main if self.cursor == 8 => {
+            SettingsScreen::Main if self.cursor == 9 => {
                 cfg.dl_ui = if dir < 0 {
                     cfg.dl_ui.prev()
                 } else {
@@ -489,7 +527,7 @@ impl SettingsUi {
                 let _ = cfg.save();
                 applied(format!("dl ui · {}", cfg.dl_ui.label()), false, false)
             }
-            SettingsScreen::Main if self.cursor == 7 => {
+            SettingsScreen::Main if self.cursor == 8 => {
                 cfg.artist_source = if dir < 0 {
                     cfg.artist_source.prev()
                 } else {
@@ -502,7 +540,7 @@ impl SettingsUi {
                     false,
                 )
             }
-            SettingsScreen::Main if self.cursor == 9 => {
+            SettingsScreen::Main if self.cursor == 10 => {
                 cfg.dl_fallback = if dir < 0 {
                     cfg.dl_fallback.prev()
                 } else {
@@ -563,7 +601,7 @@ impl SettingsUi {
     fn reset_selected(&mut self, cfg: &mut AppConfig) -> SettingsAction {
         match self.screen {
             SettingsScreen::Main => match self.cursor {
-                10 => {
+                13 => {
                     cfg.eq = crate::eq::EqPreset::Off;
                     let _ = cfg.save();
                     SettingsAction::EqualizerChanged(cfg.eq)
@@ -603,25 +641,40 @@ impl SettingsUi {
                     let _ = cfg.save();
                     applied("toast stack · off (newest only)", false, false)
                 }
-                7 => {
+                8 => {
                     cfg.artist_source = ArtistSource::Metadata;
                     let _ = cfg.save();
                     applied("artists · metadata", false, false)
                 }
-                8 => {
+                9 => {
                     cfg.dl_ui = DlUiMode::Arrows;
                     let _ = cfg.save();
                     applied("dl ui · arrows", false, false)
                 }
-                9 => {
+                10 => {
                     cfg.dl_fallback = DlFallbackMode::Ask;
                     let _ = cfg.save();
                     applied("dl fallback · ask", false, false)
                 }
-                11 => {
+                14 => {
                     cfg.reset_all();
                     let _ = cfg.save();
                     applied("settings · reset defaults", true, true)
+                }
+                11 => {
+                    cfg.dl_provider = DlSource::Ask;
+                    let _ = cfg.save();
+                    applied("dl source · ask", false, false)
+                }
+                12 => {
+                    cfg.dl_mode = DlMode::Standard;
+                    let _ = cfg.save();
+                    applied("dl mode · standard", false, false)
+                }
+                7 => {
+                    cfg.lyrics_anim = true;
+                    let _ = cfg.save();
+                    applied("lyrics anim · on", false, false)
                 }
                 _ => SettingsAction::None,
             },
@@ -687,13 +740,16 @@ pub fn paint_settings_sidebar(
             Line::Opt(4, "Cava", "open ›".into()),
             Line::Opt(5, "Toast pos", cfg.toast_pos.label().into()),
             Line::Opt(6, "Toast stack", on_off(cfg.toast_stack).into()),
+            Line::Opt(7, "Lyric anim", on_off(cfg.lyrics_anim).into()),
             Line::Head("library & dl"),
-            Line::Opt(7, "Artists", cfg.artist_source.label().into()),
-            Line::Opt(8, "Dl UI", cfg.dl_ui.label().into()),
-            Line::Opt(9, "Dl fallbk", cfg.dl_fallback.label().into()),
+            Line::Opt(8, "Artists", cfg.artist_source.label().into()),
+            Line::Opt(9, "Dl UI", cfg.dl_ui.label().into()),
+            Line::Opt(10, "Dl fallbk", cfg.dl_fallback.label().into()),
+            Line::Opt(11, "Dl source", cfg.dl_provider.label().into()),
+            Line::Opt(12, "Dl mode", cfg.dl_mode.label().into()),
             Line::Rule,
-            Line::Opt(10, "Equalizer", cfg.eq.label().into()),
-            Line::Opt(11, "Reset all", "defaults".into()),
+            Line::Opt(13, "Equalizer", cfg.eq.label().into()),
+            Line::Opt(14, "Reset all", "defaults".into()),
         ],
         SettingsScreen::Cava => vec![
             Line::Opt(0, "Style", cfg.cava.style.label().into()),
@@ -838,7 +894,7 @@ pub fn paint_settings_sidebar(
                     text_x,
                     y,
                     inner_w,
-                    theme.muted,
+                    theme.title,
                     &format!("{name} {rule}"),
                     "",
                     false,
@@ -895,7 +951,7 @@ pub fn paint_settings_sidebar(
             text_x,
             y,
             inner_w,
-            theme.muted,
+            theme.title,
             &hint_text,
             "",
             false,
@@ -1042,7 +1098,7 @@ mod tests {
     fn scroll_window_keeps_cursor_visible() {
         let mut s = SettingsUi::default();
         s.toggle();
-        // 12 options, 4-row window: cursor past the edge pulls the window.
+        // 15 options, 4-row window: cursor past the edge pulls the window.
         s.cursor = 7;
         s.ensure_visible(4);
         assert_eq!(s.scroll, 4);
@@ -1055,7 +1111,7 @@ mod tests {
         s.scroll_by(3, 0);
         assert_eq!(s.scroll, 3);
         s.scroll_by(99, 0);
-        assert_eq!(s.scroll, 12 - 4);
+        assert_eq!(s.scroll, 15 - 4);
         s.scroll_by(-99, 0);
         assert_eq!(s.scroll, 0);
     }

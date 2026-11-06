@@ -933,6 +933,7 @@ impl SessionUi {
     /// Open: ~140ms ease-out. Close: ~120ms shrink. LDM: instant.
     /// Same timing as the `?` / `c` / `l` cards (<200ms).
     pub fn lyrics_progress(&self, ldm: bool) -> f64 {
+        let ldm = ldm || !self.config.lyrics_anim;
         if self.show_lyrics {
             match self.lyrics_opened_at {
                 Some(t) if !ldm => ease_out_cubic(t.elapsed().as_secs_f64() / 0.14),
