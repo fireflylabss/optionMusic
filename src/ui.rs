@@ -554,6 +554,22 @@ impl SessionUi {
         }
     }
 
+    /// True while the `c` settings card would collide: list and help
+    /// already hold both side slots. Same slot policy as `?` and `l`.
+    pub fn settings_would_collide(&self) -> bool {
+        self.show_list && self.show_help
+    }
+
+    /// Toggle settings; opening is refused (`false`) when no side is free.
+    /// Closing always succeeds.
+    pub fn try_toggle_settings(&mut self) -> bool {
+        if !self.settings.is_open() && !self.preview && self.settings_would_collide() {
+            return false;
+        }
+        self.toggle_settings();
+        true
+    }
+
     pub fn close_settings(&mut self) {
         self.settings.close();
     }
@@ -3008,11 +3024,11 @@ fn paint_toast_stack(
         pos,
         ToastPos::TopCenter | ToastPos::TopLeft | ToastPos::TopRight
     );
-    // Stacked toasts render compact: tighter padding inside the box and a
-    // minimal shared-border step (2 rows) between items instead of the
-    // full 3-row card gap. A lone toast keeps the roomier single padding.
-    let stacked = stack.len() > 1;
-    let step = if stacked { 2 } else { 3 };
+    // Every toast keeps the same padding whether alone or stacked, and each
+    // box owns its 3 rows — a stack never shares or overwrites borders, so
+    // a second toast can't reshape or corrupt the first.
+    let stacked = false;
+    let step = 3;
     // Oldest first so the newest lands on top.
     for (depth, (msg, kind, elapsed)) in stack.iter().enumerate().take(TOAST_MAX) {
         let newest_first = stack.len() - 1 - depth;
@@ -3495,6 +3511,18 @@ mod tests {
             a.chars().count() + b.chars().count() + c.chars().count(),
             20
         );
+    }
+
+    #[test]
+    fn settings_refused_when_list_and_help_hold_both_slots() {
+        let mut ui = blank_ui();
+        ui.toggle_list();
+        ui.toggle_help();
+        assert!(!ui.try_toggle_settings());
+        assert!(!ui.settings_open());
+        ui.toggle_help();
+        assert!(ui.try_toggle_settings());
+        assert!(ui.settings_open());
     }
 
     #[test]

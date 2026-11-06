@@ -1144,7 +1144,9 @@ fn run_session(
                                     }
                                 }
                                 Action::Settings => {
-                                    ui.toggle_settings();
+                                    if !ui.try_toggle_settings() {
+                                        ui.toast_info("no room — close a panel");
+                                    }
                                 }
                                 Action::Lyrics => ui.toggle_lyrics(),
                                 Action::TogglePath => {
@@ -1506,9 +1508,10 @@ fn run_session(
                                     let v = player.volume_step_down();
                                     ui.toast_config(format!("volume {v}%"));
                                 }
-                                HitTarget::Settings => {
-                                    ui.toggle_settings();
+                                HitTarget::Settings if !ui.try_toggle_settings() => {
+                                    ui.toast_info("no room — close a panel");
                                 }
+                                HitTarget::Settings => {}
                                 HitTarget::Help if !ui.try_toggle_help() => {
                                     ui.toast_info("no room — close a panel");
                                 }
@@ -1777,7 +1780,9 @@ fn run_session(
                                         HitTarget::Settings => {
                                             dragging_progress = false;
                                             list_drag = None;
-                                            ui.toggle_settings();
+                                            if !ui.try_toggle_settings() {
+                                                ui.toast_info("no room — close a panel");
+                                            }
                                         }
                                         HitTarget::Help => {
                                             dragging_progress = false;
