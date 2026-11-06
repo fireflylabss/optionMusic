@@ -492,6 +492,81 @@ impl DlFallbackMode {
     }
 }
 
+/// Default provider for `msc dl` (`dl_provider` in config.toml).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum DlSource {
+    /// Ask every time (default).
+    #[default]
+    Ask,
+    #[serde(alias = "yt", alias = "y")]
+    Youtube,
+    #[serde(alias = "ytm", alias = "music", alias = "youtubemusic")]
+    YoutubeMusic,
+    #[serde(alias = "sc", alias = "s")]
+    Soundcloud,
+}
+
+impl DlSource {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Ask => "ask",
+            Self::Youtube => "youtube",
+            Self::YoutubeMusic => "youtube-music",
+            Self::Soundcloud => "soundcloud",
+        }
+    }
+
+    pub fn next(self) -> Self {
+        match self {
+            Self::Ask => Self::Youtube,
+            Self::Youtube => Self::YoutubeMusic,
+            Self::YoutubeMusic => Self::Soundcloud,
+            Self::Soundcloud => Self::Ask,
+        }
+    }
+
+    pub fn prev(self) -> Self {
+        match self {
+            Self::Ask => Self::Soundcloud,
+            Self::Youtube => Self::Ask,
+            Self::YoutubeMusic => Self::Youtube,
+            Self::Soundcloud => Self::YoutubeMusic,
+        }
+    }
+}
+
+/// Download engine (`dl_mode` in config.toml). `fast` is experimental.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum DlMode {
+    /// Plain yt-dlp (default).
+    #[default]
+    Standard,
+    /// Experimental: hand the transfer to aria2c (multi-connection).
+    Fast,
+}
+
+impl DlMode {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Standard => "standard",
+            Self::Fast => "fast (exp)",
+        }
+    }
+
+    pub fn next(self) -> Self {
+        match self {
+            Self::Standard => Self::Fast,
+            Self::Fast => Self::Standard,
+        }
+    }
+
+    pub fn prev(self) -> Self {
+        self.next()
+    }
+}
+
 /// Whether the lyrics face is allowed (`lyrics_pos` in config.toml).
 ///
 /// `right` and `left` both mean on. Older files that say `above` / `below`
@@ -616,6 +691,15 @@ pub struct AppConfig {
     /// 403 fallback: `ask` (default) · `auto` · `off`.
     #[serde(default)]
     pub dl_fallback: DlFallbackMode,
+    /// Default `msc dl` provider: `ask` (default) · `youtube` · `youtube-music` · `soundcloud`.
+    #[serde(default)]
+    pub dl_provider: DlSource,
+    /// Download engine: `standard` (default) · `fast` (experimental, needs aria2c).
+    #[serde(default)]
+    pub dl_mode: DlMode,
+    /// Animate the lyrics card appearing / disappearing (on by default).
+    #[serde(default = "default_true")]
+    pub lyrics_anim: bool,
     /// Toast anchor: `bottom-center` (default) · `bottom-left` · `bottom-right` · `top-center` · `top-left` · `top-right`.
     #[serde(default)]
     pub toast_pos: ToastPos,
@@ -687,6 +771,9 @@ impl Default for AppConfig {
             cava: CavaConfig::default(),
             dl_ui: DlUiMode::Arrows,
             dl_fallback: DlFallbackMode::Ask,
+            dl_provider: DlSource::Ask,
+            dl_mode: DlMode::Standard,
+            lyrics_anim: true,
             toast_pos: ToastPos::BottomCenter,
             toast_stack: false,
             artist_source: ArtistSource::Metadata,
