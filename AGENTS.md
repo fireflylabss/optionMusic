@@ -9,7 +9,7 @@ Guidance for coding agents working on this repo.
 Binaries: `still` (canonical) · `msc` (short alias).
 
 The Cargo package and crate are `stillmusic`. Use **still** in the interface.
-The GitHub repository remains `fireflylabss/optionMusic`.
+The GitHub repository lives at `horizzon3507/stillmusic`.
 AUR packages: `stillmusic` (source) and `stillmusic-bin` (prebuilt).
 The legacy `optionmusic` package is kept separately for migration.
 

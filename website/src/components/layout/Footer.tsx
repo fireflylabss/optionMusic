@@ -21,11 +21,11 @@ const groups: { title: string; links: FooterLink[] }[] = [
     links: [
       {
         label: 'GitHub ↗',
-        href: 'https://github.com/fireflylabss/optionMusic',
+        href: 'https://github.com/horizzon3507/stillmusic',
       },
       {
         label: 'Changelog ↗',
-        href: 'https://github.com/fireflylabss/optionMusic/blob/main/CHANGELOG.md',
+        href: 'https://github.com/horizzon3507/stillmusic/blob/main/CHANGELOG.md',
       },
     ],
   },
@@ -50,7 +50,7 @@ function Footer() {
               </Button>
               <Button variant="outline" size="sm" asChild>
                 <a
-                  href="https://github.com/fireflylabss/optionMusic"
+                  href="https://github.com/horizzon3507/stillmusic"
                   target="_blank"
                   rel="noreferrer"
                 >
@@ -106,7 +106,7 @@ function Footer() {
           </div>
           <div className="flex items-center gap-6">
             <a
-              href="https://github.com/fireflylabss/optionMusic"
+              href="https://github.com/horizzon3507/stillmusic"
               target="_blank"
               rel="noreferrer"
               className="flex items-center gap-2 text-sm text-muted-foreground transition-colors hover:text-foreground"

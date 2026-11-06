@@ -20,7 +20,7 @@ command -v makepkg >/dev/null || {
   exit 1
 }
 
-release_url='https://github.com/fireflylabss/optionMusic'
+release_url='https://github.com/horizzon3507/stillmusic'
 work_dir="$(mktemp -d)"
 trap 'rm -rf "$work_dir"' EXIT
 
@@ -39,7 +39,7 @@ for package in stillmusic stillmusic-bin; do
     --output "$work_dir/$package.tar.gz" "$source_url"
   tar -tzf "$work_dir/$package.tar.gz" > "$work_dir/$package.files"
   if [[ "$package" == stillmusic ]]; then
-    grep -Fxq "optionMusic-$version/Cargo.toml" "$work_dir/$package.files"
+    grep -Fxq "stillmusic-$version/Cargo.toml" "$work_dir/$package.files"
   else
     for file in still msc LICENSE README.md; do
       grep -Eq "^(\\./)?$file$" "$work_dir/$package.files"

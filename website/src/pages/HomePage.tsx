@@ -248,7 +248,7 @@ function HomePage() {
           </Button>
           <Button variant="outline" asChild>
             <a
-              href="https://github.com/fireflylabss/optionMusic"
+              href="https://github.com/horizzon3507/stillmusic"
               target="_blank"
               rel="noreferrer"
             >
@@ -498,7 +498,7 @@ function HomePage() {
         </div>
         </Reveal>
         <a
-          href="https://github.com/fireflylabss/optionMusic/blob/main/CHANGELOG.md"
+          href="https://github.com/horizzon3507/stillmusic/blob/main/CHANGELOG.md"
           target="_blank"
           rel="noreferrer"
           className="mt-6 inline-flex items-center text-sm text-muted-foreground transition-colors duration-(--duration-fast) hover:text-foreground"
@@ -579,7 +579,7 @@ function HomePage() {
             </a>
           </Button>
           <Button variant="outline" asChild>
-            <a href="https://github.com/fireflylabss/optionMusic" target="_blank" rel="noreferrer">
+            <a href="https://github.com/horizzon3507/stillmusic" target="_blank" rel="noreferrer">
               Build from source
             </a>
           </Button>

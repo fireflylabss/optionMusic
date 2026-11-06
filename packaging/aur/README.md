@@ -5,7 +5,7 @@ Two packages install the same `still` and `msc` commands:
 - **stillmusic** builds the pinned GitHub release from source with Cargo.
 - **stillmusic-bin** installs the prebuilt x86_64 Linux release asset.
 
-The GitHub repository remains `fireflylabss/optionMusic`. Both AUR packages
+The GitHub repository lives at `horizzon3507/stillmusic`. Both AUR packages
 conflict with the previous `optionmusic` and `optmusic` packages so an AUR helper can remove
 an older package during installation. The old AUR package is preserved; these
 recipes do not request its deletion or merge.

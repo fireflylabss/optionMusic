@@ -55,7 +55,7 @@ function Nav() {
             />
           </Button>
           <a
-            href="https://github.com/fireflylabss/optionMusic"
+            href="https://github.com/horizzon3507/stillmusic"
             target="_blank"
             rel="noreferrer"
             className="hidden px-3 py-1.5 text-sm text-muted-foreground transition-colors duration-(--duration-fast) hover:text-foreground sm:block"

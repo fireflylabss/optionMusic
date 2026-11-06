@@ -23,8 +23,8 @@ paru -S stillmusic-bin
 
 Both packages install `still` and its short alias `msc`; choose one. The legacy
 `optionmusic` package conflicts with them and can be replaced during installation.
-The repository remains
-[`fireflylabss/optionMusic`](https://github.com/fireflylabss/optionMusic).
+The repository lives at
+[`horizzon3507/stillmusic`](https://github.com/horizzon3507/stillmusic).
 See [AUR packaging](packaging/aur/README.md) for package sources and validation.
 
 ### Platform support
@@ -91,7 +91,7 @@ Use a modern terminal (Windows Terminal) for proper colours and mouse support.
 export CARGO_TARGET_DIR="$(pwd)/target"
 cargo install --path . --force --locked
 # remote source:
-cargo install --git https://github.com/fireflylabss/optionMusic --locked
+cargo install --git https://github.com/horizzon3507/stillmusic --locked
 ```
 
 The Cargo package and crate are named `stillmusic`.

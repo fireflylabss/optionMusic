@@ -66,7 +66,7 @@ fi
 
     def fixtures_for(self, tag):
         return (
-            self.archive("source", [f"optionMusic-{tag.removeprefix('v')}/Cargo.toml"]),
+            self.archive("source", [f"stillmusic-{tag.removeprefix('v')}/Cargo.toml"]),
             self.archive("binary", ["still", "msc", "LICENSE", "README.md"]),
         )
 

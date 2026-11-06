@@ -12,7 +12,7 @@ The public changelog follows Hory style and is the source of truth for release h
 
 `Cargo.toml` owns the numeric artifact version; `Cargo.lock` must match it. Both binaries report that same version. The channel belongs to the release tag and changelog heading, so Cargo stays plain SemVer.
 
-The private marketing site in `website/` is not another installable player surface. Its package version is independent of the CLI. The AUR packages `stillmusic` (source) and `stillmusic-bin` (prebuilt) use the same numeric version, channel and revision as the release, encoded as `0.3.0beta1` for Arch version ordering. Both install the same CLI surface and conflict with each other and the legacy `optionmusic` package. The GitHub repository keeps its existing name.
+The private marketing site in `website/` is not another installable player surface. Its package version is independent of the CLI. The AUR packages `stillmusic` (source) and `stillmusic-bin` (prebuilt) use the same numeric version, channel and revision as the release, encoded as `0.3.0beta1` for Arch version ordering. Both install the same CLI surface and conflict with each other and the legacy `optionmusic` package. The GitHub repository lives at `horizzon3507/stillmusic`.
 
 ## Changelog entries
 
