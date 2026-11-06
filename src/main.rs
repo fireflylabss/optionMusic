@@ -1912,12 +1912,18 @@ fn cmd_download(
     let use_wizard = interactive || query.is_none_or(|q| q.trim().is_empty());
     let cfg = stillmusic::config::AppConfig::load();
     let fallback = download::resolve_fallback_policy(fallback_mweb, no_fallback, cfg.dl_fallback);
+    let cfg_provider = match cfg.dl_provider {
+        stillmusic::config::DlSource::Ask => None,
+        stillmusic::config::DlSource::Youtube => Some(download::Provider::Youtube),
+        stillmusic::config::DlSource::YoutubeMusic => Some(download::Provider::YoutubeMusic),
+        stillmusic::config::DlSource::Soundcloud => Some(download::Provider::Soundcloud),
+    };
     if use_wizard {
         let ui_mode = ui_override.unwrap_or(cfg.dl_ui);
         return download::run_interactive(
             music_dir_flag,
             query,
-            provider,
+            provider.or(cfg_provider),
             kind_flag,
             output,
             audio_format,
@@ -1929,6 +1935,7 @@ fn cmd_download(
     let query = query.unwrap().trim().to_string();
     let provider = provider
         .or_else(|| download::detect_provider(&query))
+        .or(cfg_provider)
         .unwrap_or(download::Provider::Youtube);
     let kind = kind_flag.unwrap_or_else(|| provider.default_kind());
     let output_dir = download::resolve_output_dir(output, music_dir_flag)?;
