@@ -22,7 +22,7 @@ path = "src/main.rs"
 
 [dependencies]
 clap = { version = "4", features = ["derive", "color", "env"] }
-libmpv2 = "6.0"
+libmpv2 = "7.0"
 anyhow = "1"
 walkdir = "2"
 crossterm = "0.29"
